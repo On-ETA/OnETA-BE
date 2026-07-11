@@ -24,29 +24,30 @@ public class AuthController {
 
     // POST /api/auth/signup (회원가입)
     @PostMapping("/signup")
-    public ResponseEntity<ApiResponse<Void>> signup(@Valid @RequestBody SignupRequestDto request) {
+    public ResponseEntity<ApiResponse<TokenResponseDto>> signup(@Valid @RequestBody SignupRequestDto request) {
 
-        authService.signup(request);
+        TokenResponseDto tokenResponse = authService.signup(request);
 
         return ResponseEntity
                 .status(HttpStatus.CREATED) // 201 Created
-                .body(ApiResponse.success());
+                .body(ApiResponse.success(tokenResponse));
 
     }
 
-    // ??
-    @ExceptionHandler(MethodArgumentNotValidException.class)
-    public ResponseEntity<String> handleValidationExceptions(MethodArgumentNotValidException ex) {
-        // 발생한 에러들 중에서 첫 번째 에러 메시지("올바른 이메일 형식이 아닙니다." 등)를 추출합니다.
-        String errorMessage = ex.getBindingResult()
-                                .getAllErrors()
-                                .get(0)
-                                .getDefaultMessage();
+    // POST /api/auth/signup/consent
+    @PostMapping("/signup/consent")
+    public ResponseEntity<ApiResponse<TokenResponseDto>> processConsent(@RequestBody ConsentRequestDto request, Principal principal) {
 
-        // 400 Bad Request 상태 코드와 함께 메시지 반환
-        return ResponseEntity
-                .badRequest()
-                .body(errorMessage);
+        // 토큰 없이 접근했거나, 잘못된 토큰인 경우
+        if (principal == null) {
+            throw new GlobalException(ErrorCode.HANDLE_ACCESS_DENIED, "인증되지 않은 사용자입니다.");
+        }
+
+        String email = principal.getName();
+        TokenResponseDto tokenResponse = authService.processConsent(email, request);
+
+        return ResponseEntity.ok(ApiResponse.success(tokenResponse));
+
     }
 
     // POST /api/auth/login (로그인)
@@ -65,22 +66,6 @@ public class AuthController {
         TokenResponseDto tokenResponse = authService.reissueToken(request.getRefreshToken());
 
         return ResponseEntity.ok(ApiResponse.success(tokenResponse));
-    }
-
-    // POST /api/auth/signup/consent
-    @PostMapping("/signup/consent")
-    public ResponseEntity<ApiResponse<TokenResponseDto>> processConsent(@RequestBody ConsentRequestDto request, Principal principal){
-
-        // 토큰 없이 접근했거나, 잘못된 토큰인 경우
-        if (principal == null) {
-            throw new GlobalException(ErrorCode.HANDLE_ACCESS_DENIED, "인증되지 않은 사용자입니다.");
-        }
-
-        String email = principal.getName();
-        TokenResponseDto tokenResponse = authService.processConsent(email, request);
-
-        return ResponseEntity.ok(ApiResponse.success(tokenResponse));
-
     }
 
     @PostMapping("/email/send")
