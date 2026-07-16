@@ -1,17 +1,28 @@
 package com.HomeRun.service;
 
+import com.HomeRun.common.error.ErrorCode;
+import com.HomeRun.common.exception.GlobalException;
 import com.HomeRun.dto.MyPageDto;
+import com.HomeRun.dto.mypage.*;
 import com.HomeRun.entity.User;
+import com.HomeRun.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.mail.SimpleMailMessage;
+import org.springframework.mail.javamail.JavaMailSender;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 @Service
 @RequiredArgsConstructor
 public class MyPageService {
 
     private final UserService userService;
+    private final UserRepository userRepository;
     private final com.HomeRun.repository.NoticeRepository noticeRepository;
+    private final PasswordEncoder passwordEncoder; // 비밀번호 암호화 도구
+    private final JavaMailSender javaMailSender;
 
     @Value("${app.version:1.0.0}")
     private String appVersion;
@@ -41,4 +52,66 @@ public class MyPageService {
         notice.incrementViewCount();
         return com.HomeRun.dto.mypage.NoticeDetailResponseDto.from(notice);
     }
+
+    @Transactional
+    public void updateNickname(String email, NicknameUpdateRequestDto request){
+
+        User user = userRepository.findByEmail(email)
+                .orElseThrow(() -> new GlobalException(ErrorCode.INVALID_INPUT_VALUE, "가입되지 않은 이메일입니다."));
+
+        user.updateNickname(request.getNewNickname());
+    }
+
+    @Transactional
+    public void updatePassword(String email, PasswordUpdateRequestDto request){
+
+        if(!request.getNewPassword().equals(request.getNewPasswordConfirm())){
+            throw new GlobalException(ErrorCode.INVALID_INPUT_VALUE, "새 비밀번호가 서로 일치하지 않습니다.");
+        }
+
+        User user = userRepository.findByEmail(email)
+                .orElseThrow(() -> new GlobalException(ErrorCode.INVALID_INPUT_VALUE, "가입되지 않은 이메일입니다."));
+
+        if (user.getPassword() == null || user.getPassword().isEmpty()) {
+            throw new GlobalException(ErrorCode.INVALID_INPUT_VALUE, "소셜 로그인으로 가입한 회원은 비밀번호를 변경할 수 없습니다.");
+        }
+
+        // passwordEncoder.matches(평문, 암호화된 문자열) 순서임
+        if(!passwordEncoder.matches(request.getCurrentPassword(), user.getPassword())){
+            throw new GlobalException(ErrorCode.INVALID_INPUT_VALUE, "현재 비밀번호가 일치하지 않습니다.");
+        }
+
+        if(passwordEncoder.matches(request.getNewPassword(), user.getPassword())){
+            throw new GlobalException(ErrorCode.INVALID_INPUT_VALUE, "새 비밀번호는 기존 비밀번호와 다르게 설정해야 합니다.");
+        }
+
+        // 검증 완료 후 암호화 한 String 으로 DB 업데이트
+        user.updatePassword(passwordEncoder.encode(request.getNewPassword()));
+    }
+
+
+    public void sendInquiry(String email, InquiryRequestDto request){
+
+        User user = userRepository.findByEmail(email)
+                .orElseThrow(() -> new GlobalException(ErrorCode.INVALID_INPUT_VALUE, "가입되지 않은 이메일입니다."));
+
+        SimpleMailMessage message = new SimpleMailMessage();
+
+        message.setTo("homerunoffice2026@gmail.com");
+        message.setSubject("[HomeRun 앱 1:1 문의] " + request.getTitle());
+
+        String mailText = String.format(
+                "■ 문의자 이메일: %s\n■ 문의자 닉네임: %s\n\n■ 문의 내용:\n%s",
+                user.getEmail(), user.getNickname(), request.getContent()
+        );
+        message.setText(mailText);
+
+        try {
+            javaMailSender.send(message);
+        } catch (Exception e) {
+            throw new GlobalException(ErrorCode.INTERNAL_SERVER_ERROR, "문의 메일 전송에 실패했습니다. 잠시 후 다시 시도해주세요.");
+        }
+    }
+
+
 }
