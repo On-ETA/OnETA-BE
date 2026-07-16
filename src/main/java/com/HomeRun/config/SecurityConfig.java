@@ -12,6 +12,11 @@ import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.web.cors.CorsConfiguration;
+import org.springframework.web.cors.CorsConfigurationSource;
+import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
+
+import java.util.List;
 
 @Configuration
 @EnableWebSecurity
@@ -32,6 +37,9 @@ public class SecurityConfig {
     @Bean
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
         http
+                // 시큐리티 세팅에 CORS 설정을 적용
+                .cors(cors -> cors.configurationSource(corsConfigurationSource()))
+
                 .csrf(csrf -> csrf.disable())
 
                 // 💡 중요: 세션을 사용하지 않겠다(STATELESS)고 선언합니다. (JWT 방식의 핵심)
@@ -43,6 +51,7 @@ public class SecurityConfig {
                                 "/login**",
                                 "/api/token-test",
                                 "/api/auth/**",
+                                "/api-docs/**",
                                 "/v3/api-docs/**",     // Swagger 데이터
                                 "/swagger-ui/**",      // Swagger UI 화면
                                 "/swagger-ui.html"     // Swagger UI 진입점
@@ -69,4 +78,28 @@ public class SecurityConfig {
 
         return http.build();
     }
+
+    // 구체적인 CORS 허용 규칙을 정의하는 메서드
+    @Bean
+    public CorsConfigurationSource corsConfigurationSource() {
+        CorsConfiguration configuration = new CorsConfiguration();
+
+        // 프론트엔드가 사용하는 주소를 정확히 명시하여 허용합니다. (스웨거 및 프론트 개발 서버 주소)
+        configuration.setAllowedOrigins(List.of("http://localhost:8081", "http://localhost:8080"));
+
+        // GET, POST, PUT, DELETE 등 모든 HTTP 메서드를 허용합니다.
+        configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS"));
+
+        // Authorization(JWT 토큰 헤더), Content-Type 등 모든 헤더를 허용합니다.
+        configuration.setAllowedHeaders(List.of("*"));
+
+        // 자격 증명(쿠키, 인증 헤더 등)을 허용합니다.
+        configuration.setAllowCredentials(true);
+
+        UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
+        source.registerCorsConfiguration("/**", configuration); // 모든 URL 패턴에 대해 위 규칙을 적용
+
+        return source;
+    }
+
 }

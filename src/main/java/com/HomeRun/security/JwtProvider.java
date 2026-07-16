@@ -1,7 +1,10 @@
 package com.HomeRun.security;
 
 import com.HomeRun.entity.Role;
-import io.jsonwebtoken.*;
+import io.jsonwebtoken.Claims;
+import io.jsonwebtoken.Jws;
+import io.jsonwebtoken.Jwts;
+import io.jsonwebtoken.SignatureAlgorithm;
 import io.jsonwebtoken.security.Keys;
 import jakarta.annotation.PostConstruct;
 import org.springframework.beans.factory.annotation.Value;
@@ -15,9 +18,6 @@ public class JwtProvider {
 
     @Value("${jwt.secret}")
     private String secretKeyString;
-
-    //@Value("${jwt.expiration}")
-    //private long tokenValidTime;
 
     @Value("${jwt.access-expiration}")
     private long accessTokenValidTime;
