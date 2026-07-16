@@ -28,7 +28,7 @@ public class OAuth2SuccessHandler extends SimpleUrlAuthenticationSuccessHandler 
         User user = userRepository.findByEmail(email).orElseThrow();
 
         // 2. 해당 사용자의 이메일로 access Token, refresh Token 생성
-        String accessToken = jwtProvider.createAccessToken(email, Role.GUEST.getKey());
+        String accessToken = jwtProvider.createAccessToken(email, user.getRole().getKey());
         String refreshToken = jwtProvider.createRefreshToken(email);
 
         // 3. 토큰을 가지고 우리가 원하는 엔드포인트(혹은 앱의 스킴)로 리다이렉트

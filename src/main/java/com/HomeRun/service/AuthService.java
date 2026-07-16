@@ -171,9 +171,9 @@ public class AuthService {
         User user = userRepository.findByEmail(request.getEmail())
                 .orElseThrow(() -> new GlobalException(ErrorCode.INVALID_INPUT_VALUE, "가입되지 않은 이메일입니다."));
 
-        // 구글 연동 회원가입 유저는 password Column 이 null 임
+        // 소셜 연동 회원가입 유저는 password Column 이 null 임
         if (user.getPassword() == null) {
-            throw new GlobalException(ErrorCode.INVALID_INPUT_VALUE, "구글 연동으로 가입된 계정입니다. 구글 로그인을 이용해주세요.");
+            throw new GlobalException(ErrorCode.INVALID_INPUT_VALUE, "소셜 연동으로 가입된 계정입니다. 소셜 로그인을 이용해주세요.");
         }
 
         // 이메일 인증 여부 검사

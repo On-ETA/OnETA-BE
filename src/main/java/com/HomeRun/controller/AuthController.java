@@ -52,11 +52,11 @@ public class AuthController {
 
     // POST /api/auth/login (로그인)
     @PostMapping("/login")
-    public ResponseEntity<ApiResponse<TokenResponseDto>> login(@RequestBody LoginRequestDto request) {
+    public ResponseEntity<ApiResponse<TokenResponseDto>> login(@Valid @RequestBody LoginRequestDto request) {
 
-        TokenResponseDto token = authService.login(request);
+        TokenResponseDto tokenResponse = authService.login(request);
 
-        return ResponseEntity.ok(ApiResponse.success(token));
+        return ResponseEntity.ok(ApiResponse.success(tokenResponse));
     }
 
     // 토큰 재발급 API (만료되었을 때 모바일 앱이 호출)
@@ -69,7 +69,7 @@ public class AuthController {
     }
 
     @PostMapping("/email/send")
-    public ResponseEntity<ApiResponse<Void>> sendVerificationEmail(@RequestBody EmailSendRequestDto request) {
+    public ResponseEntity<ApiResponse<Void>> sendVerificationEmail(@Valid @RequestBody EmailSendRequestDto request) {
 
         emailService.sendVerificationCode(request.getEmail());
 
@@ -77,7 +77,7 @@ public class AuthController {
     }
 
     @PostMapping("/email/verify")
-    public ResponseEntity<ApiResponse<Void>> verifyEmailCode(@RequestBody EmailVerifyRequestDto request) {
+    public ResponseEntity<ApiResponse<Void>> verifyEmailCode(@Valid @RequestBody EmailVerifyRequestDto request) {
 
         emailService.verifyCode(request.getEmail(), request.getCode());
 
