@@ -32,7 +32,8 @@ public class ArrivalNotification extends Notification {
     @Column(name = "target_boarding_time")
     private LocalTime targetBoardingTime;
 
-    public ArrivalNotification(User user, String name, Integer reminderOffsetMinutes, String repeatDays, LocalTime targetArrivalTime, String routeDetails) {
+    public ArrivalNotification(User user, String name, Integer reminderOffsetMinutes, Integer repeatDays,
+                               LocalTime targetArrivalTime, String routeDetails) {
         super(user, name, reminderOffsetMinutes, repeatDays);
         this.targetArrivalTime = targetArrivalTime;
         this.routeDetails = routeDetails;

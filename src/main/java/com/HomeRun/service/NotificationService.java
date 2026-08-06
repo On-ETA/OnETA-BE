@@ -22,9 +22,11 @@ public class NotificationService {
     private final ArrivalNotificationRepository arrivalNotificationRepository;
     private final NotificationRepository notificationRepository;
     private final UserRepository userRepository;
+    private final RepeatDaysService repeatDaysService;
 
     @Transactional
     public Long createArrivalNotification(String email, NotificationDto.CreateArrivalRequest request) {
+        validateCreateRequest(request);
         User user = userRepository.findByEmail(email)
                 .orElseThrow(() -> new com.HomeRun.common.exception.GlobalException(com.HomeRun.common.error.ErrorCode.USER_NOT_FOUND));
 
@@ -34,11 +36,12 @@ public class NotificationService {
             routeName = "경로" + (currentCount + 1);
         }
 
+        int repeatDays = repeatDaysService.toMask(request.getRepeatDays());
         ArrivalNotification notification = new ArrivalNotification(
                 user,
                 routeName,
                 request.getReminderOffsetMinutes(),
-                request.getRepeatDays(),
+                repeatDays,
                 request.getTargetArrivalTime(),
                 request.getRouteDetails()
         );
@@ -52,12 +55,16 @@ public class NotificationService {
 
         return arrivalNotificationRepository.findAllByUserId(user.getId())
                 .stream()
-                .map(NotificationDto.ArrivalResponse::fromEntity)
+                .map(notification -> NotificationDto.ArrivalResponse.fromEntity(notification, repeatDaysService))
                 .collect(Collectors.toList());
     }
 
     @Transactional
     public void updateArrivalNotification(String email, Long id, NotificationDto.UpdateArrivalRequest request) {
+        if (request == null) {
+            throw new com.HomeRun.common.exception.GlobalException(
+                    com.HomeRun.common.error.ErrorCode.INVALID_INPUT_VALUE, "수정할 값이 없습니다.");
+        }
         if (request.getRouteName() == null && request.getTargetArrivalTime() == null
                 && request.getReminderOffsetMinutes() == null && request.getRepeatDays() == null
                 && request.getRouteDetails() == null) {
@@ -67,7 +74,17 @@ public class NotificationService {
 
         ArrivalNotification notification = getArrivalNotificationByEmailAndId(email, id);
 
-        notification.updateCommonInfo(request.getRouteName(), request.getReminderOffsetMinutes(), request.getRepeatDays());
+        if (request.getReminderOffsetMinutes() != null && request.getReminderOffsetMinutes() < 0) {
+            throw new com.HomeRun.common.exception.GlobalException(
+                    com.HomeRun.common.error.ErrorCode.INVALID_INPUT_VALUE,
+                    "알림 offset은 0 이상이어야 합니다.");
+        }
+
+        Integer requestedRepeatDays = request.getRepeatDays() == null
+                ? null
+                : repeatDaysService.toMask(request.getRepeatDays());
+        notification.updateCommonInfo(request.getRouteName(), request.getReminderOffsetMinutes());
+        if (requestedRepeatDays != null) notification.updateRepeatDays(requestedRepeatDays);
         notification.updateArrivalInfo(request.getTargetArrivalTime(), request.getRouteDetails());
     }
 
@@ -87,8 +104,23 @@ public class NotificationService {
 
     @Transactional
     public void toggleStatus(String email, Long id, NotificationDto.ToggleStatusRequest request) {
+        if (request == null || request.getIsActive() == null) {
+            throw new com.HomeRun.common.exception.GlobalException(
+                    com.HomeRun.common.error.ErrorCode.INVALID_INPUT_VALUE, "isActive는 필수입니다.");
+        }
         ArrivalNotification notification = getArrivalNotificationByEmailAndId(email, id);
         notification.toggleActive(request.getIsActive());
+    }
+
+    private void validateCreateRequest(NotificationDto.CreateArrivalRequest request) {
+        if (request == null || request.getTargetArrivalTime() == null
+                || request.getReminderOffsetMinutes() == null
+                || request.getReminderOffsetMinutes() < 0
+                || request.getRouteDetails() == null || request.getRouteDetails().isBlank()) {
+            throw new com.HomeRun.common.exception.GlobalException(
+                    com.HomeRun.common.error.ErrorCode.INVALID_INPUT_VALUE,
+                    "목표 도착시간, 알림 offset, 경로 정보는 필수이며 offset은 0 이상이어야 합니다.");
+        }
     }
 
     private ArrivalNotification getArrivalNotificationByEmailAndId(String email, Long id) {
