@@ -74,4 +74,6 @@ server:
 # JWT Configuration
 jwt:
   secret: ${JWT_SECRET:local-development-secret-key-must-be-at-least-32-characters-long}
-  expiration: ${JWT_EXPIRATION:86400000}
+  access-expiration: ${JWT_ACCESS_EXPIRATION:3600000}
+  refresh-expiration: ${JWT_REFRESH_EXPIRATION:1209600000}
+  

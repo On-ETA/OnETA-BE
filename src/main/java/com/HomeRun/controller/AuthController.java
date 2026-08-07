@@ -24,52 +24,19 @@ public class AuthController {
 
     // POST /api/auth/signup (회원가입)
     @PostMapping("/signup")
-    public ResponseEntity<ApiResponse<Void>> signup(@Valid @RequestBody SignupRequestDto request) {
+    public ResponseEntity<ApiResponse<TokenResponseDto>> signup(@Valid @RequestBody SignupRequestDto request) {
 
-        authService.signup(request);
+        TokenResponseDto tokenResponse = authService.signup(request);
 
         return ResponseEntity
                 .status(HttpStatus.CREATED) // 201 Created
-                .body(ApiResponse.success());
+                .body(ApiResponse.success(tokenResponse));
 
-    }
-
-    // ??
-    @ExceptionHandler(MethodArgumentNotValidException.class)
-    public ResponseEntity<String> handleValidationExceptions(MethodArgumentNotValidException ex) {
-        // 발생한 에러들 중에서 첫 번째 에러 메시지("올바른 이메일 형식이 아닙니다." 등)를 추출합니다.
-        String errorMessage = ex.getBindingResult()
-                                .getAllErrors()
-                                .get(0)
-                                .getDefaultMessage();
-
-        // 400 Bad Request 상태 코드와 함께 메시지 반환
-        return ResponseEntity
-                .badRequest()
-                .body(errorMessage);
-    }
-
-    // POST /api/auth/login (로그인)
-    @PostMapping("/login")
-    public ResponseEntity<ApiResponse<TokenResponseDto>> login(@RequestBody LoginRequestDto request) {
-
-        TokenResponseDto token = authService.login(request);
-
-        return ResponseEntity.ok(ApiResponse.success(token));
-    }
-
-    // 토큰 재발급 API (만료되었을 때 모바일 앱이 호출)
-    @PostMapping("/reissue")
-    public ResponseEntity<ApiResponse<TokenResponseDto>> reissue(@RequestBody ReissueRequestDto request) {
-
-        TokenResponseDto tokenResponse = authService.reissueToken(request.getRefreshToken());
-
-        return ResponseEntity.ok(ApiResponse.success(tokenResponse));
     }
 
     // POST /api/auth/signup/consent
     @PostMapping("/signup/consent")
-    public ResponseEntity<ApiResponse<TokenResponseDto>> processConsent(@RequestBody ConsentRequestDto request, Principal principal){
+    public ResponseEntity<ApiResponse<TokenResponseDto>> processConsent(@RequestBody ConsentRequestDto request, Principal principal) {
 
         // 토큰 없이 접근했거나, 잘못된 토큰인 경우
         if (principal == null) {
@@ -83,8 +50,26 @@ public class AuthController {
 
     }
 
+    // POST /api/auth/login (로그인)
+    @PostMapping("/login")
+    public ResponseEntity<ApiResponse<TokenResponseDto>> login(@Valid @RequestBody LoginRequestDto request) {
+
+        TokenResponseDto tokenResponse = authService.login(request);
+
+        return ResponseEntity.ok(ApiResponse.success(tokenResponse));
+    }
+
+    // 토큰 재발급 API (만료되었을 때 모바일 앱이 호출)
+    @PostMapping("/reissue")
+    public ResponseEntity<ApiResponse<TokenResponseDto>> reissue(@RequestBody ReissueRequestDto request) {
+
+        TokenResponseDto tokenResponse = authService.reissueToken(request.getRefreshToken());
+
+        return ResponseEntity.ok(ApiResponse.success(tokenResponse));
+    }
+
     @PostMapping("/email/send")
-    public ResponseEntity<ApiResponse<Void>> sendVerificationEmail(@RequestBody EmailSendRequestDto request) {
+    public ResponseEntity<ApiResponse<Void>> sendVerificationEmail(@Valid @RequestBody EmailSendRequestDto request) {
 
         emailService.sendVerificationCode(request.getEmail());
 
@@ -92,7 +77,7 @@ public class AuthController {
     }
 
     @PostMapping("/email/verify")
-    public ResponseEntity<ApiResponse<Void>> verifyEmailCode(@RequestBody EmailVerifyRequestDto request) {
+    public ResponseEntity<ApiResponse<Void>> verifyEmailCode(@Valid @RequestBody EmailVerifyRequestDto request) {
 
         emailService.verifyCode(request.getEmail(), request.getCode());
 

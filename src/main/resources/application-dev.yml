@@ -1,35 +1,24 @@
 spring:
   config:
     activate:
-      on-profile: prod
-    import: optional:classpath:.env[.properties]
+      on-profile: dev
 
-  # JPA Configuration
   jpa:
-    database-platform: org.hibernate.dialect.MySQLDialect
     hibernate:
       ddl-auto: validate
+    open-in-view: false
 
-  # MySQL Database (Production Environment)
   datasource:
     url: ${DB_URL}
     driver-class-name: com.mysql.cj.jdbc.Driver
     username: ${DB_USERNAME}
     password: ${DB_PASSWORD}
-    hikari:
-      maximum-pool-size: 10
-      minimum-idle: 5
-      connection-timeout: 30000
-      idle-timeout: 600000
-      max-lifetime: 1800000
 
-  # Redis Configuration
   data:
     redis:
       host: ${REDIS_HOST:redis}
       port: ${REDIS_PORT:6379}
 
-  # OAuth2 Configuration
   security:
     oauth2:
       client:
@@ -38,7 +27,6 @@ spring:
             client-id: ${GOOGLE_CLIENT_ID}
             client-secret: ${GOOGLE_CLIENT_SECRET}
 
-  # Mail Configuration
   mail:
     host: ${MAIL_HOST}
     port: ${MAIL_PORT}
@@ -55,24 +43,17 @@ spring:
           timeout: 5000
           writetimeout: 5000
 
-  # H2 Console (Disabled in Production)
-  h2:
-    console:
-      enabled: false
-
-# Swagger Configuration (Disabled in Production)
 springdoc:
   api-docs:
-    enabled: false
+    enabled: true
   swagger-ui:
-    enabled: false
-  server-url: ${SERVER_URL:https://api.HomeRun.com} # 추후 도메인 변경 예정
-  server-description: Production Server
+    enabled: true
+  server-url: ${SERVER_URL:http://43.203.168.182:8080}
+  server-description: Development Server
 
 server:
   port: 8080
 
-# JWT Configuration
 jwt:
   secret: ${JWT_SECRET}
   access-expiration: ${JWT_ACCESS_EXPIRATION:3600000}
