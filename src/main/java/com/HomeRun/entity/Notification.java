@@ -31,7 +31,7 @@ public abstract class Notification {
     private Integer reminderOffsetMinutes;
 
     @Column(name = "repeat_days", nullable = false)
-    private String repeatDays;
+    private Integer repeatDays;
 
     @Column(name = "is_active", nullable = false)
     private Boolean isActive = true;
@@ -39,18 +39,21 @@ public abstract class Notification {
     @Column(name = "last_sent_date")
     private LocalDate lastSentDate;
 
-    public Notification(User user, String name, Integer reminderOffsetMinutes, String repeatDays) {
+    public Notification(User user, String name, Integer reminderOffsetMinutes, Integer repeatDays) {
         this.user = user;
         this.name = name;
         this.reminderOffsetMinutes = reminderOffsetMinutes;
-        this.repeatDays = repeatDays;
+        this.repeatDays = normalizeRepeatDays(repeatDays);
         this.isActive = true;
     }
 
-    public void updateCommonInfo(String name, Integer reminderOffsetMinutes, String repeatDays) {
+    public void updateCommonInfo(String name, Integer reminderOffsetMinutes) {
         if (name != null) this.name = name;
         if (reminderOffsetMinutes != null) this.reminderOffsetMinutes = reminderOffsetMinutes;
-        if (repeatDays != null) this.repeatDays = repeatDays;
+    }
+
+    public void updateRepeatDays(Integer repeatDays) {
+        this.repeatDays = normalizeRepeatDays(repeatDays);
     }
 
     public void toggleActive(Boolean isActive) {
@@ -59,5 +62,17 @@ public abstract class Notification {
 
     public void updateLastSentDate(LocalDate date) {
         this.lastSentDate = date;
+    }
+
+    public void completeOneTimeNotification() {
+        this.isActive = false;
+    }
+
+    private int normalizeRepeatDays(Integer repeatDays) {
+        if (repeatDays == null) return 0;
+        if (repeatDays < 0 || repeatDays > 0b1111111) {
+            throw new IllegalArgumentException("repeatDays는 0부터 127 사이여야 합니다.");
+        }
+        return repeatDays;
     }
 }
