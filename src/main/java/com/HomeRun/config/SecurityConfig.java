@@ -85,10 +85,16 @@ public class SecurityConfig {
         CorsConfiguration configuration = new CorsConfiguration();
 
         // 프론트엔드가 사용하는 주소를 정확히 명시하여 허용합니다. (스웨거 및 프론트 개발 서버 주소)
-        configuration.setAllowedOrigins(List.of("http://localhost:8081", "http://localhost:8080"));
+        configuration.setAllowedOrigins(List.of(
+        "http://localhost:8081",
+        "http://localhost:8080",
+        "https://on-eta.com",
+        "https://www.on-eta.com",
+        "https://13th-gongmozip-fe.vercel.app"
+        ));
 
         // GET, POST, PUT, DELETE 등 모든 HTTP 메서드를 허용합니다.
-        configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS"));
+        configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
 
         // Authorization(JWT 토큰 헤더), Content-Type 등 모든 헤더를 허용합니다.
         configuration.setAllowedHeaders(List.of("*"));
