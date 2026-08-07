@@ -48,7 +48,7 @@ springdoc:
     enabled: true
   swagger-ui:
     enabled: true
-  server-url: ${SERVER_URL:http://43.203.168.182:8080}
+  server-url: ${SERVER_URL:https://on-eta.com}
   server-description: Development Server
 
 server:
