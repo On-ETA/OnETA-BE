@@ -52,7 +52,8 @@ public class SecurityConfig {
                                 "/api/token-test",
                                 "/api/auth/**",
                                 "/api-docs/**",
-                                "/v3/api-docs/**",     // Swagger 데이터
+                                "/v3/api-docs/**",     // Swagger 기본 설정 (혹시 모를 대비)
+                                "/api-docs/**",        // Custom Swagger 데이터 경로
                                 "/swagger-ui/**",      // Swagger UI 화면
                                 "/swagger-ui.html"     // Swagger UI 진입점
                         ).permitAll() // 토큰 테스트 URL은 통과시켜 줍니다.
