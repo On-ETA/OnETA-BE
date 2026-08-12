@@ -31,3 +31,31 @@ jobs:
 
       - name: Build
         run: ./gradlew clean build -x test
+        
+      - name: Copy JAR to EC2
+        if: github.event_name == 'push'
+        uses: appleboy/scp-action@v1
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USERNAME }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          source: "build/libs/*.jar"
+          target: "/home/${{ secrets.EC2_USERNAME }}/app"
+          strip_components: 2
+
+      - name: Restart application
+        if: github.event_name == 'push'
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USERNAME }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            cd ~/app
+
+            pkill -f 'java -jar.*HomeRun' || true
+
+            nohup java -jar \
+              -Dspring.profiles.active=prod \
+              *.jar \
+              > app.log 2>&1 &
