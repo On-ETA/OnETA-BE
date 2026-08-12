@@ -2,8 +2,7 @@ package com.HomeRun.scheduler;
 
 import com.HomeRun.entity.ArrivalNotification;
 import com.HomeRun.repository.ArrivalNotificationRepository;
-import com.HomeRun.repository.UserDeviceTokenRepository;
-import com.HomeRun.service.FcmPushService;
+import com.HomeRun.service.NotificationDeliveryService;
 import com.HomeRun.service.RepeatDaysService;
 import com.HomeRun.service.TransitApiService;
 import lombok.RequiredArgsConstructor;
@@ -11,9 +10,9 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
-import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Clock;
+import java.time.Duration;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
@@ -25,11 +24,12 @@ import java.util.List;
 @RequiredArgsConstructor
 public class NotificationScheduler {
 
+    private static final Duration MAX_CANDIDATE_DELAY = Duration.ofMinutes(1);
+
     private final ArrivalNotificationRepository arrivalNotificationRepository;
-    private final UserDeviceTokenRepository userDeviceTokenRepository;
     private final TransitApiService transitApiService;
-    private final FcmPushService fcmPushService;
     private final RepeatDaysService repeatDaysService;
+    private final NotificationDeliveryService notificationDeliveryService;
 
     @Value("${app.time-zone:Asia/Seoul}")
     private String timeZone;
@@ -38,7 +38,6 @@ public class NotificationScheduler {
     private Clock clock = Clock.systemUTC();
 
     @Scheduled(cron = "0 * * * * *")
-    @Transactional
     public void scheduleArrivalNotifications() {
         log.info("Executing arrival notification scheduler...");
 
@@ -62,8 +61,8 @@ public class NotificationScheduler {
 
                 // Realtime duration can move today's candidate to tomorrow. Do not send it today.
                 if (candidate.notificationTime().toLocalDate().equals(today)
-                        && !now.isBefore(candidate.notificationTime())) {
-                    sendPushAndUpdateStatus(notification, estimatedDuration, oneTime, today);
+                        && isDueCandidate(candidate.notificationTime(), now)) {
+                    notificationDeliveryService.prepare(notification, estimatedDuration, oneTime, today);
                 }
             } catch (Exception e) {
                 // 오래된 레코드 하나가 다른 사용자의 알림 처리까지 중단시키면 안 된다.
@@ -74,6 +73,7 @@ public class NotificationScheduler {
                         e.getMessage());
             }
         }
+        notificationDeliveryService.processPending();
     }
 
     /**
@@ -89,7 +89,7 @@ public class NotificationScheduler {
         LocalDateTime baseNotificationTime = now.toLocalDate()
                 .atTime(notification.getTargetArrivalTime())
                 .minusMinutes(notification.getReminderOffsetMinutes());
-        return !baseNotificationTime.isBefore(now);
+        return isCandidateInWindow(baseNotificationTime, now);
     }
 
     private Candidate findNextCandidate(ArrivalNotification notification, int estimatedDuration,
@@ -107,28 +107,23 @@ public class NotificationScheduler {
             LocalDateTime notificationTime = arrivalDate
                     .atTime(notification.getTargetArrivalTime())
                     .minusMinutes((long) estimatedDuration + notification.getReminderOffsetMinutes());
-            if (!notificationTime.isBefore(now)) {
+            if (isCandidateInWindow(notificationTime, now)) {
                 return new Candidate(notificationTime);
             }
         }
         return null;
     }
 
-    private void sendPushAndUpdateStatus(
-            ArrivalNotification notification, int estimatedDuration, boolean oneTime, LocalDate today) {
-        userDeviceTokenRepository.findByUserId(notification.getUser().getId())
-                .ifPresent(token -> {
-                    String title = "출발 알림: " + notification.getName();
-                    String body = String.format(
-                            "지금 출발하시면 목표 시간(%s)에 도착할 수 있습니다. (예상 소요 시간: %d분)",
-                            notification.getTargetArrivalTime(),
-                            estimatedDuration);
+    /**
+     * A candidate may be found when it is due now, up to one minute late, or in the future.
+     * The caller decides whether a found candidate is already due before sending it.
+     */
+    private boolean isCandidateInWindow(LocalDateTime candidateTime, LocalDateTime now) {
+        return !candidateTime.isBefore(now.minus(MAX_CANDIDATE_DELAY));
+    }
 
-                    fcmPushService.sendPushMessage(token.getDeviceToken(), title, body);
-                    notification.updateLastSentDate(today);
-                    if (oneTime) notification.completeOneTimeNotification();
-                    arrivalNotificationRepository.save(notification);
-                });
+    private boolean isDueCandidate(LocalDateTime candidateTime, LocalDateTime now) {
+        return !candidateTime.isAfter(now) && isCandidateInWindow(candidateTime, now);
     }
 
     private record Candidate(LocalDateTime notificationTime) {
