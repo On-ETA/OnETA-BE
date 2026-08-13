@@ -45,6 +45,9 @@ spring:
           connectiontimeout: 5000
           timeout: 5000
           writetimeout: 5000
+server:
+  port: 8080
+  forward-headers-strategy: framework
 
 springdoc:
   api-docs:
@@ -53,9 +56,6 @@ springdoc:
     enabled: true
   server-url: ${SERVER_URL:https://api.on-eta.com}
   server-description: Development Server
-
-server:
-  port: 8080
 
 jwt:
   secret: ${JWT_SECRET}
