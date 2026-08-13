@@ -91,6 +91,7 @@ public class SecurityConfig {
         "http://localhost:8080",
         "https://on-eta.com",
         "https://www.on-eta.com",
+        "https://api.on-eta.com",
         "https://13th-gongmozip-fe.vercel.app"
         ));
 
