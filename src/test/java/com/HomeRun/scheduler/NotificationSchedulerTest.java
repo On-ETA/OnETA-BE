@@ -2,10 +2,8 @@ package com.HomeRun.scheduler;
 
 import com.HomeRun.entity.ArrivalNotification;
 import com.HomeRun.entity.User;
-import com.HomeRun.entity.UserDeviceToken;
 import com.HomeRun.repository.ArrivalNotificationRepository;
-import com.HomeRun.repository.UserDeviceTokenRepository;
-import com.HomeRun.service.FcmPushService;
+import com.HomeRun.service.NotificationDeliveryService;
 import com.HomeRun.service.RepeatDaysService;
 import com.HomeRun.service.TransitApiService;
 import org.junit.jupiter.api.Test;
@@ -19,7 +17,6 @@ import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.time.ZonedDateTime;
 import java.util.List;
-import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -35,16 +32,60 @@ class NotificationSchedulerTest {
         SchedulerDependencies dependencies = dependencies(notification, at("2026-08-10T17:59"));
 
         dependencies.scheduler.scheduleArrivalNotifications();
-        verifyNoInteractions(dependencies.fcm);
-
         ReflectionTestUtils.setField(dependencies.scheduler, "clock", fixedClock("2026-08-10T18:00"));
 
         dependencies.scheduler.scheduleArrivalNotifications();
 
-        verify(dependencies.fcm).sendPushMessage(eq("token"), any(), any());
+        verify(dependencies.delivery).prepare(notification, 30, true, LocalDate.of(2026, 8, 10));
         verify(notification).updateLastSentDate(LocalDate.of(2026, 8, 10));
         verify(notification).completeOneTimeNotification();
-        verify(dependencies.notifications).save(notification);
+        verify(dependencies.delivery).prepare(notification, 30, true, LocalDate.of(2026, 8, 10));
+    }
+
+    @Test
+    void oneTimeNotificationSendsOneSecondAfterCalculatedTime() {
+        ArrivalNotification notification = notification(0);
+        SchedulerDependencies dependencies = dependencies(notification, at("2026-08-10T18:00:01"));
+
+        dependencies.scheduler.scheduleArrivalNotifications();
+
+        verify(dependencies.delivery).prepare(notification, 30, true, LocalDate.of(2026, 8, 10));
+        verify(notification).completeOneTimeNotification();
+    }
+
+    @Test
+    void oneTimeNotificationSendsOneMinuteAfterCalculatedTime() {
+        ArrivalNotification notification = notification(0);
+        SchedulerDependencies dependencies = dependencies(notification, at("2026-08-10T18:01:00"));
+
+        dependencies.scheduler.scheduleArrivalNotifications();
+
+        verify(dependencies.delivery).prepare(notification, 30, true, LocalDate.of(2026, 8, 10));
+        verify(notification).completeOneTimeNotification();
+    }
+
+    @Test
+    void oneTimeNotificationDoesNotSendAfterMaximumCandidateDelay() {
+        ArrivalNotification notification = notification(0);
+        SchedulerDependencies dependencies = dependencies(notification, at("2026-08-10T18:01:01"));
+
+        dependencies.scheduler.scheduleArrivalNotifications();
+
+        verify(dependencies.notifications, never()).save(any());
+    }
+
+    @Test
+    void oneTimeNotificationIsNotSentTwiceWithinTheSameDay() {
+        ArrivalNotification notification = notification(0);
+        when(notification.getLastSentDate())
+                .thenReturn(null, LocalDate.of(2026, 8, 10));
+        SchedulerDependencies dependencies = dependencies(notification, at("2026-08-10T18:00:01"));
+
+        dependencies.scheduler.scheduleArrivalNotifications();
+        ReflectionTestUtils.setField(dependencies.scheduler, "clock", fixedClock("2026-08-10T18:01:00"));
+        dependencies.scheduler.scheduleArrivalNotifications();
+
+        verify(dependencies.delivery, times(1)).prepare(notification, 30, true, LocalDate.of(2026, 8, 10));
     }
 
     @Test
@@ -53,13 +94,12 @@ class NotificationSchedulerTest {
         SchedulerDependencies dependencies = dependencies(notification, at("2026-08-10T18:20"));
 
         dependencies.scheduler.scheduleArrivalNotifications();
-        verifyNoInteractions(dependencies.fcm);
         verify(dependencies.notifications, never()).save(any());
 
         ReflectionTestUtils.setField(dependencies.scheduler, "clock", fixedClock("2026-08-11T18:00"));
         dependencies.scheduler.scheduleArrivalNotifications();
 
-        verify(dependencies.fcm).sendPushMessage(eq("token"), any(), any());
+        verify(dependencies.delivery).prepare(notification, 30, true, LocalDate.of(2026, 8, 11));
         verify(notification).completeOneTimeNotification();
     }
 
@@ -70,16 +110,40 @@ class NotificationSchedulerTest {
         SchedulerDependencies dependencies = dependencies(notification, at("2026-08-10T17:59"));
 
         dependencies.scheduler.scheduleArrivalNotifications();
-        verifyNoInteractions(dependencies.fcm);
-
         ReflectionTestUtils.setField(dependencies.scheduler, "clock", fixedClock("2026-08-10T18:00"));
 
         dependencies.scheduler.scheduleArrivalNotifications();
 
-        verify(dependencies.fcm).sendPushMessage(eq("token"), any(), any());
+        verify(dependencies.delivery).prepare(notification, 30, false, LocalDate.of(2026, 8, 10));
         verify(notification).updateLastSentDate(LocalDate.of(2026, 8, 10));
         verify(notification, never()).completeOneTimeNotification();
         assertThat(notification.getIsActive()).isTrue();
+    }
+
+    @Test
+    void repeatingNotificationSendsWhenSchedulerStartsOneMinuteLate() {
+        ArrivalNotification notification = notification(21);
+        SchedulerDependencies dependencies = dependencies(notification, at("2026-08-10T18:01:00"));
+
+        dependencies.scheduler.scheduleArrivalNotifications();
+
+        verify(dependencies.delivery).prepare(notification, 30, false, LocalDate.of(2026, 8, 10));
+        verify(notification).updateLastSentDate(LocalDate.of(2026, 8, 10));
+        verify(notification, never()).completeOneTimeNotification();
+    }
+
+    @Test
+    void repeatingNotificationIsNotSentTwiceWithinTheSameDay() {
+        ArrivalNotification notification = notification(21);
+        when(notification.getLastSentDate())
+                .thenReturn(null, LocalDate.of(2026, 8, 10));
+        SchedulerDependencies dependencies = dependencies(notification, at("2026-08-10T18:00:01"));
+
+        dependencies.scheduler.scheduleArrivalNotifications();
+        ReflectionTestUtils.setField(dependencies.scheduler, "clock", fixedClock("2026-08-10T18:01:00"));
+        dependencies.scheduler.scheduleArrivalNotifications();
+
+        verify(dependencies.delivery, times(1)).prepare(notification, 30, false, LocalDate.of(2026, 8, 10));
     }
 
     @Test
@@ -88,13 +152,11 @@ class NotificationSchedulerTest {
         SchedulerDependencies dependencies = dependencies(notification, at("2026-08-10T18:20"));
 
         dependencies.scheduler.scheduleArrivalNotifications();
-        verifyNoInteractions(dependencies.fcm);
-
         // The next selected day is Wednesday.
         ReflectionTestUtils.setField(dependencies.scheduler, "clock", fixedClock("2026-08-12T18:00"));
         dependencies.scheduler.scheduleArrivalNotifications();
 
-        verify(dependencies.fcm).sendPushMessage(eq("token"), any(), any());
+        verify(dependencies.delivery).prepare(notification, 30, false, LocalDate.of(2026, 8, 12));
         verify(notification, never()).completeOneTimeNotification();
         assertThat(notification.getIsActive()).isTrue();
     }
@@ -107,15 +169,14 @@ class NotificationSchedulerTest {
         dependencies.scheduler.scheduleArrivalNotifications();
 
         verifyNoInteractions(dependencies.transit);
-        verifyNoInteractions(dependencies.fcm);
     }
 
     @Test
-    void fcmFailureDoesNotUpdateNotificationState() {
+    void deliveryPreparationFailureDoesNotUpdateNotificationState() {
         ArrivalNotification notification = notification(0);
         SchedulerDependencies dependencies = dependencies(notification, at("2026-08-10T18:00"));
         doThrow(new IllegalStateException("FCM failure"))
-                .when(dependencies.fcm).sendPushMessage(any(), any(), any());
+                .when(dependencies.delivery).prepare(any(), anyInt(), anyBoolean(), any());
 
         dependencies.scheduler.scheduleArrivalNotifications();
 
@@ -141,20 +202,21 @@ class NotificationSchedulerTest {
 
     private SchedulerDependencies dependencies(ArrivalNotification notification, Instant instant) {
         ArrivalNotificationRepository notifications = mock(ArrivalNotificationRepository.class);
-        UserDeviceTokenRepository tokens = mock(UserDeviceTokenRepository.class);
         TransitApiService transit = mock(TransitApiService.class);
-        FcmPushService fcm = mock(FcmPushService.class);
-        UserDeviceToken token = mock(UserDeviceToken.class);
+        NotificationDeliveryService delivery = mock(NotificationDeliveryService.class);
         when(notifications.findAllByIsActiveTrue()).thenReturn(List.of(notification));
-        when(tokens.findByUserId(1L)).thenReturn(Optional.of(token));
-        when(token.getDeviceToken()).thenReturn("token");
         when(transit.getRealTimeDuration("route")).thenReturn(30);
+        doAnswer(invocation -> {
+            notification.updateLastSentDate(invocation.getArgument(3));
+            if (invocation.getArgument(2)) notification.completeOneTimeNotification();
+            return null;
+        }).when(delivery).prepare(any(), anyInt(), anyBoolean(), any());
 
         NotificationScheduler scheduler = new NotificationScheduler(
-                notifications, tokens, transit, fcm, new RepeatDaysService());
+                notifications, transit, new RepeatDaysService(), delivery);
         ReflectionTestUtils.setField(scheduler, "timeZone", "Asia/Seoul");
         ReflectionTestUtils.setField(scheduler, "clock", Clock.fixed(instant, ZoneOffset.UTC));
-        return new SchedulerDependencies(scheduler, notifications, transit, fcm);
+        return new SchedulerDependencies(scheduler, notifications, transit, delivery);
     }
 
     private Instant at(String localDateTime) {
@@ -169,6 +231,6 @@ class NotificationSchedulerTest {
             NotificationScheduler scheduler,
             ArrivalNotificationRepository notifications,
             TransitApiService transit,
-            FcmPushService fcm) {
+            NotificationDeliveryService delivery) {
     }
 }
