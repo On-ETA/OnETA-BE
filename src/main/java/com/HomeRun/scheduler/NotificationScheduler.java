@@ -37,7 +37,7 @@ public class NotificationScheduler {
     // A replaceable clock keeps candidate-date behavior deterministic in tests.
     private Clock clock = Clock.systemUTC();
 
-    @Scheduled(cron = "0 * * * * *")
+    @Scheduled(cron = "0 * * * * *", zone = "${app.time-zone:Asia/Seoul}")
     public void scheduleArrivalNotifications() {
         log.info("Executing arrival notification scheduler...");
 
@@ -62,7 +62,12 @@ public class NotificationScheduler {
                 // Realtime duration can move today's candidate to tomorrow. Do not send it today.
                 if (candidate.notificationTime().toLocalDate().equals(today)
                         && isDueCandidate(candidate.notificationTime(), now)) {
-                    notificationDeliveryService.prepare(notification, estimatedDuration, oneTime, today);
+                    LocalDateTime scheduledAt = candidate.notificationTime()
+                            .atZone(zoneId)
+                            .withZoneSameInstant(java.time.ZoneOffset.UTC)
+                            .toLocalDateTime();
+                    notificationDeliveryService.prepare(
+                            notification, estimatedDuration, today, scheduledAt);
                 }
             } catch (Exception e) {
                 // 오래된 레코드 하나가 다른 사용자의 알림 처리까지 중단시키면 안 된다.

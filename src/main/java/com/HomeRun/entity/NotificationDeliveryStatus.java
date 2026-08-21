@@ -3,5 +3,7 @@ package com.HomeRun.entity;
 public enum NotificationDeliveryStatus {
     PENDING,
     SENDING,
-    SENT
+    SENT,
+    FAILED,
+    EXPIRED
 }
