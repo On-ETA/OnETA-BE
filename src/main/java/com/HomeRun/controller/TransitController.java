@@ -10,6 +10,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
+import java.security.Principal;
 
 @RestController
 @RequestMapping("/api/transit")
@@ -20,17 +21,21 @@ public class TransitController {
 
     @GetMapping("/routes/search")
     public ApiResponse<List<TransitDto.RouteOptionResponse>> searchRoutes(
+            Principal principal,
             @RequestParam Double originX,
             @RequestParam Double originY,
-            @RequestParam Double destX,
-            @RequestParam Double destY) {
+            @RequestParam(required = false) String originAddress,
+            @RequestParam(required = false) Double destX,
+            @RequestParam(required = false) Double destY,
+            @RequestParam(required = false) String destAddress) {
 
-        if (originX == null || originY == null || destX == null || destY == null) {
+        if (principal == null) {
             throw new com.HomeRun.common.exception.GlobalException(
-                    com.HomeRun.common.error.ErrorCode.INVALID_INPUT_VALUE, "출발지와 목적지의 좌표를 모두 입력해주세요.");
+                    com.HomeRun.common.error.ErrorCode.UNAUTHENTICATED);
         }
 
-        List<TransitDto.RouteOptionResponse> responses = transitApiService.searchRoutes(originX, originY, destX, destY);
+        List<TransitDto.RouteOptionResponse> responses = transitApiService.searchRoutes(
+                principal.getName(), originX, originY, originAddress, destX, destY, destAddress);
         return ApiResponse.success(responses);
     }
 }

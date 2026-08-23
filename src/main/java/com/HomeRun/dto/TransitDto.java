@@ -28,6 +28,8 @@ public class TransitDto {
     @AllArgsConstructor
     public static class RouteOptionResponse {
         private String routeId;
+        private String originAddress;
+        private String destinationAddress;
         private Integer totalDurationMinutes;
         private Integer realTimeDurationMinutes;
         private Integer totalCost;
