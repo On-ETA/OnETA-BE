@@ -30,6 +30,7 @@ public class TransitApiService {
     private final PublicDataTransitService publicDataTransitService;
     private final ObjectMapper objectMapper;
     private final RestTemplate restTemplate;
+    private final UserAddressService userAddressService;
 
     @Value("${odsay.api.key:}")
     private String odsayApiKey;
@@ -41,16 +42,25 @@ public class TransitApiService {
     private String odsayReferer;
 
     @Autowired
-    public TransitApiService(PublicDataTransitService publicDataTransitService, ObjectMapper objectMapper) {
-        this(publicDataTransitService, objectMapper, new RestTemplate());
+    public TransitApiService(PublicDataTransitService publicDataTransitService, ObjectMapper objectMapper,
+                             UserAddressService userAddressService) {
+        this(publicDataTransitService, objectMapper, new RestTemplate(), userAddressService);
     }
 
     TransitApiService(PublicDataTransitService publicDataTransitService,
                       ObjectMapper objectMapper,
                       RestTemplate restTemplate) {
+        this(publicDataTransitService, objectMapper, restTemplate, null);
+    }
+
+    private TransitApiService(PublicDataTransitService publicDataTransitService,
+                              ObjectMapper objectMapper,
+                              RestTemplate restTemplate,
+                              UserAddressService userAddressService) {
         this.publicDataTransitService = publicDataTransitService;
         this.objectMapper = objectMapper;
         this.restTemplate = restTemplate;
+        this.userAddressService = userAddressService;
     }
 
     /**
@@ -109,6 +119,38 @@ public class TransitApiService {
             throw new GlobalException(
                     ErrorCode.INTERNAL_SERVER_ERROR, "경로 검색에 실패했습니다: " + e.getMessage());
         }
+    }
+
+    public List<TransitDto.RouteOptionResponse> searchRoutes(
+            String email, Double originX, Double originY, String originAddress,
+            Double destX, Double destY, String destAddress) {
+        if ((destX == null) != (destY == null)) {
+            throw new GlobalException(ErrorCode.INVALID_INPUT_VALUE, "목적지 x, y 좌표는 함께 입력해주세요.");
+        }
+        if (destX == null) {
+            // 직접 입력한 목적지가 없을 때만 사용자의 현재 주소를 기본 목적지로 사용한다.
+            com.HomeRun.entity.UserAddress currentAddress = userAddressService.getCurrentEntity(email);
+            destX = currentAddress.getX();
+            destY = currentAddress.getY();
+            destAddress = currentAddress.getAddress();
+        }
+        final String resolvedOriginAddress = normalizeAddressText(originAddress);
+        final String resolvedDestinationAddress = normalizeAddressText(destAddress);
+        return searchRoutes(originX, originY, destX, destY).stream()
+                .map(route -> route.toBuilder()
+                        .originAddress(resolvedOriginAddress)
+                        .destinationAddress(resolvedDestinationAddress)
+                        .build())
+                .toList();
+    }
+
+    private static String normalizeAddressText(String address) {
+        if (address == null || address.isBlank()) return null;
+        String normalized = address.trim();
+        if (normalized.length() > 255) {
+            throw new GlobalException(ErrorCode.INVALID_INPUT_VALUE, "주소는 255자 이하여야 합니다.");
+        }
+        return normalized;
     }
 
     TransitDto.RouteOptionResponse enrichWithRealTimeArrivals(TransitDto.RouteOptionResponse route) {
