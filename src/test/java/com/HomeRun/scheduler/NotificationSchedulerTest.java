@@ -12,6 +12,7 @@ import org.springframework.test.util.ReflectionTestUtils;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
@@ -36,10 +37,10 @@ class NotificationSchedulerTest {
 
         dependencies.scheduler.scheduleArrivalNotifications();
 
-        verify(dependencies.delivery).prepare(notification, 30, true, LocalDate.of(2026, 8, 10));
+verify(dependencies.delivery).prepare(eq(notification), eq(30), eq(LocalDate.of(2026, 8, 10)), any(LocalDateTime.class));
         verify(notification).updateLastSentDate(LocalDate.of(2026, 8, 10));
         verify(notification).completeOneTimeNotification();
-        verify(dependencies.delivery).prepare(notification, 30, true, LocalDate.of(2026, 8, 10));
+verify(dependencies.delivery).prepare(eq(notification), eq(30), eq(LocalDate.of(2026, 8, 10)), any(LocalDateTime.class));
     }
 
     @Test
@@ -49,7 +50,7 @@ class NotificationSchedulerTest {
 
         dependencies.scheduler.scheduleArrivalNotifications();
 
-        verify(dependencies.delivery).prepare(notification, 30, true, LocalDate.of(2026, 8, 10));
+verify(dependencies.delivery).prepare(eq(notification), eq(30), eq(LocalDate.of(2026, 8, 10)), any(LocalDateTime.class));
         verify(notification).completeOneTimeNotification();
     }
 
@@ -60,7 +61,7 @@ class NotificationSchedulerTest {
 
         dependencies.scheduler.scheduleArrivalNotifications();
 
-        verify(dependencies.delivery).prepare(notification, 30, true, LocalDate.of(2026, 8, 10));
+verify(dependencies.delivery).prepare(eq(notification), eq(30), eq(LocalDate.of(2026, 8, 10)), any(LocalDateTime.class));
         verify(notification).completeOneTimeNotification();
     }
 
@@ -85,7 +86,7 @@ class NotificationSchedulerTest {
         ReflectionTestUtils.setField(dependencies.scheduler, "clock", fixedClock("2026-08-10T18:01:00"));
         dependencies.scheduler.scheduleArrivalNotifications();
 
-        verify(dependencies.delivery, times(1)).prepare(notification, 30, true, LocalDate.of(2026, 8, 10));
+verify(dependencies.delivery, times(1)).prepare(eq(notification), eq(30), eq(LocalDate.of(2026, 8, 10)), any(LocalDateTime.class));
     }
 
     @Test
@@ -99,7 +100,7 @@ class NotificationSchedulerTest {
         ReflectionTestUtils.setField(dependencies.scheduler, "clock", fixedClock("2026-08-11T18:00"));
         dependencies.scheduler.scheduleArrivalNotifications();
 
-        verify(dependencies.delivery).prepare(notification, 30, true, LocalDate.of(2026, 8, 11));
+verify(dependencies.delivery).prepare(eq(notification), eq(30), eq(LocalDate.of(2026, 8, 11)), any(LocalDateTime.class));
         verify(notification).completeOneTimeNotification();
     }
 
@@ -114,7 +115,7 @@ class NotificationSchedulerTest {
 
         dependencies.scheduler.scheduleArrivalNotifications();
 
-        verify(dependencies.delivery).prepare(notification, 30, false, LocalDate.of(2026, 8, 10));
+verify(dependencies.delivery).prepare(eq(notification), eq(30), eq(LocalDate.of(2026, 8, 10)), any(LocalDateTime.class));
         verify(notification).updateLastSentDate(LocalDate.of(2026, 8, 10));
         verify(notification, never()).completeOneTimeNotification();
         assertThat(notification.getIsActive()).isTrue();
@@ -127,7 +128,7 @@ class NotificationSchedulerTest {
 
         dependencies.scheduler.scheduleArrivalNotifications();
 
-        verify(dependencies.delivery).prepare(notification, 30, false, LocalDate.of(2026, 8, 10));
+verify(dependencies.delivery).prepare(eq(notification), eq(30), eq(LocalDate.of(2026, 8, 10)), any(LocalDateTime.class));
         verify(notification).updateLastSentDate(LocalDate.of(2026, 8, 10));
         verify(notification, never()).completeOneTimeNotification();
     }
@@ -143,7 +144,7 @@ class NotificationSchedulerTest {
         ReflectionTestUtils.setField(dependencies.scheduler, "clock", fixedClock("2026-08-10T18:01:00"));
         dependencies.scheduler.scheduleArrivalNotifications();
 
-        verify(dependencies.delivery, times(1)).prepare(notification, 30, false, LocalDate.of(2026, 8, 10));
+verify(dependencies.delivery, times(1)).prepare(eq(notification), eq(30), eq(LocalDate.of(2026, 8, 10)), any(LocalDateTime.class));
     }
 
     @Test
@@ -156,7 +157,7 @@ class NotificationSchedulerTest {
         ReflectionTestUtils.setField(dependencies.scheduler, "clock", fixedClock("2026-08-12T18:00"));
         dependencies.scheduler.scheduleArrivalNotifications();
 
-        verify(dependencies.delivery).prepare(notification, 30, false, LocalDate.of(2026, 8, 12));
+verify(dependencies.delivery).prepare(eq(notification), eq(30), eq(LocalDate.of(2026, 8, 12)), any(LocalDateTime.class));
         verify(notification, never()).completeOneTimeNotification();
         assertThat(notification.getIsActive()).isTrue();
     }
@@ -176,7 +177,7 @@ class NotificationSchedulerTest {
         ArrivalNotification notification = notification(0);
         SchedulerDependencies dependencies = dependencies(notification, at("2026-08-10T18:00"));
         doThrow(new IllegalStateException("FCM failure"))
-                .when(dependencies.delivery).prepare(any(), anyInt(), anyBoolean(), any());
+                .when(dependencies.delivery).prepare(any(), anyInt(), any(), any());
 
         dependencies.scheduler.scheduleArrivalNotifications();
 
@@ -210,7 +211,7 @@ class NotificationSchedulerTest {
             notification.updateLastSentDate(invocation.getArgument(3));
             if (invocation.getArgument(2)) notification.completeOneTimeNotification();
             return null;
-        }).when(delivery).prepare(any(), anyInt(), anyBoolean(), any());
+        }).when(delivery).prepare(any(), anyInt(), any(), any());
 
         NotificationScheduler scheduler = new NotificationScheduler(
                 notifications, transit, new RepeatDaysService(), delivery);

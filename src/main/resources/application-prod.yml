@@ -10,6 +10,9 @@ spring:
     hibernate:
       ddl-auto: validate
 
+  flyway:
+    enabled: true
+
   # MySQL Database (Production Environment)
   datasource:
     url: ${DB_URL}

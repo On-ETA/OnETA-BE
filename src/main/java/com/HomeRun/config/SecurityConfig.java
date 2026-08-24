@@ -55,7 +55,8 @@ public class SecurityConfig {
                                 "/v3/api-docs/**",     // Swagger 기본 설정 (혹시 모를 대비)
                                 "/api-docs/**",        // Custom Swagger 데이터 경로
                                 "/swagger-ui/**",      // Swagger UI 화면
-                                "/swagger-ui.html"     // Swagger UI 진입점
+                                "/swagger-ui.html",    // Swagger UI 진입점
+                                "/h2-console/**"       // H2 Console (enabled only in local profile)
                         ).permitAll() // 토큰 테스트 URL은 통과시켜 줍니다.
                         .anyRequest().authenticated()
                 )
@@ -73,6 +74,10 @@ public class SecurityConfig {
                         .authenticationEntryPoint(customAuthenticationEntryPoint)
                         .accessDeniedHandler(customAccessDeniedHandler)
                 )
+
+                // H2 Console renders its UI in a same-origin frame.
+                .headers(headers -> headers
+                        .frameOptions(frame -> frame.sameOrigin()))
 
                 // 💡 중요: 스프링 기본 인증 필터가 작동하기 전에, 우리가 만든 JwtFilter를 먼저 거치도록 설정합니다.
                 .addFilterBefore(new JwtFilter(jwtProvider), UsernamePasswordAuthenticationFilter.class);

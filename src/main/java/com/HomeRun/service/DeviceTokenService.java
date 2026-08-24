@@ -26,6 +26,11 @@ public class DeviceTokenService {
         Optional<UserDeviceToken> existingToken = userDeviceTokenRepository.findByUserId(user.getId());
 
         if (existingToken.isPresent()) {
+            userDeviceTokenRepository.findByDeviceToken(token)
+                    .filter(other -> !other.getId().equals(existingToken.get().getId()))
+                    .ifPresent(other -> {
+                        throw new IllegalArgumentException("이미 다른 사용자에게 등록된 디바이스 토큰입니다.");
+                    });
             existingToken.get().updateToken(token);
         } else {
             // Also ensure no other user has this token (if it was reassigned to a new device)

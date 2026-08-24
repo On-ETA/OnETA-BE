@@ -74,11 +74,7 @@ public class NotificationService {
 
         ArrivalNotification notification = getArrivalNotificationByEmailAndId(email, id);
 
-        if (request.getReminderOffsetMinutes() != null && request.getReminderOffsetMinutes() < 0) {
-            throw new com.HomeRun.common.exception.GlobalException(
-                    com.HomeRun.common.error.ErrorCode.INVALID_INPUT_VALUE,
-                    "알림 offset은 0 이상이어야 합니다.");
-        }
+        validateReminderOffsets(request.getReminderOffsetMinutes(), false);
 
         Integer requestedRepeatDays = request.getRepeatDays() == null
                 ? null
@@ -115,11 +111,22 @@ public class NotificationService {
     private void validateCreateRequest(NotificationDto.CreateArrivalRequest request) {
         if (request == null || request.getTargetArrivalTime() == null
                 || request.getReminderOffsetMinutes() == null
-                || request.getReminderOffsetMinutes() < 0
                 || request.getRouteDetails() == null || request.getRouteDetails().isBlank()) {
             throw new com.HomeRun.common.exception.GlobalException(
                     com.HomeRun.common.error.ErrorCode.INVALID_INPUT_VALUE,
-                    "목표 도착시간, 알림 offset, 경로 정보는 필수이며 offset은 0 이상이어야 합니다.");
+                    "목표 도착시간, 미리 알림 시간, 경로 정보는 필수입니다.");
+        }
+        validateReminderOffsets(request.getReminderOffsetMinutes(), true);
+    }
+
+    private void validateReminderOffsets(List<Integer> offsets, boolean required) {
+        if (offsets == null && !required) return;
+        if (offsets == null || offsets.isEmpty()
+                || offsets.stream().anyMatch(offset -> offset == null
+                || !List.of(1, 3, 5, 10, 15, 30, 60).contains(offset))) {
+            throw new com.HomeRun.common.exception.GlobalException(
+                    com.HomeRun.common.error.ErrorCode.INVALID_INPUT_VALUE,
+                    "미리 알림 시간은 1, 3, 5, 10, 15, 30, 60분 중 하나 이상 선택해야 합니다.");
         }
     }
 

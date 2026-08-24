@@ -9,6 +9,7 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 
 import java.time.LocalTime;
+import java.util.List;
 
 @Entity
 @DiscriminatorValue("ARRIVAL")
@@ -33,6 +34,13 @@ public class ArrivalNotification extends Notification {
     private LocalTime targetBoardingTime;
 
     public ArrivalNotification(User user, String name, Integer reminderOffsetMinutes, Integer repeatDays,
+                               LocalTime targetArrivalTime, String routeDetails) {
+        super(user, name, reminderOffsetMinutes, repeatDays);
+        this.targetArrivalTime = targetArrivalTime;
+        this.routeDetails = routeDetails;
+    }
+
+    public ArrivalNotification(User user, String name, List<Integer> reminderOffsetMinutes, Integer repeatDays,
                                LocalTime targetArrivalTime, String routeDetails) {
         super(user, name, reminderOffsetMinutes, repeatDays);
         this.targetArrivalTime = targetArrivalTime;

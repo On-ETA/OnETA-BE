@@ -16,7 +16,7 @@ public class NotificationDto {
     public static class CreateArrivalRequest {
         private String routeName;
         private LocalTime targetArrivalTime;
-        private Integer reminderOffsetMinutes;
+        private List<Integer> reminderOffsetMinutes;
         private List<String> repeatDays;
         private String routeDetails;
     }
@@ -26,7 +26,7 @@ public class NotificationDto {
     public static class UpdateArrivalRequest {
         private String routeName;
         private LocalTime targetArrivalTime;
-        private Integer reminderOffsetMinutes;
+        private List<Integer> reminderOffsetMinutes;
         private List<String> repeatDays;
         private String routeDetails;
     }
@@ -43,7 +43,7 @@ public class NotificationDto {
         private Long notificationId;
         private String routeName;
         private LocalTime targetArrivalTime;
-        private Integer reminderOffsetMinutes;
+        private List<Integer> reminderOffsetMinutes;
         private List<String> repeatDays;
         private String routeDetails;
         private Boolean isActive;
@@ -53,7 +53,7 @@ public class NotificationDto {
                     .notificationId(entity.getId())
                     .routeName(entity.getName())
                     .targetArrivalTime(entity.getTargetArrivalTime())
-                    .reminderOffsetMinutes(entity.getReminderOffsetMinutes())
+                    .reminderOffsetMinutes(entity.getReminderOffsetMinutesList())
                     .repeatDays(repeatDaysService.toDays(entity.getRepeatDays()))
                     .routeDetails(entity.getRouteDetails())
                     .isActive(entity.getIsActive())
