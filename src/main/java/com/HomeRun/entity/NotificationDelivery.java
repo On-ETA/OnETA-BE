@@ -11,7 +11,7 @@ import java.time.Duration;
 
 @Entity
 @Table(name = "notification_deliveries", uniqueConstraints = @UniqueConstraint(
-        name = "uk_notification_delivery_date", columnNames = {"notification_id", "delivery_date"}))
+        name = "uk_notification_delivery_offset", columnNames = {"notification_id", "delivery_date", "reminder_offset_minutes"}))
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class NotificationDelivery {
@@ -26,6 +26,9 @@ public class NotificationDelivery {
 
     @Column(name = "delivery_date", nullable = false)
     private LocalDate deliveryDate;
+
+    @Column(name = "reminder_offset_minutes", nullable = false)
+    private int reminderOffsetMinutes;
 
     @Column(name = "device_token", nullable = false)
     private String deviceToken;
@@ -73,12 +76,20 @@ public class NotificationDelivery {
         }
         this.notification = notification;
         this.deliveryDate = deliveryDate;
+        this.reminderOffsetMinutes = notification.getReminderOffsetMinutes();
         this.deviceToken = deviceToken;
         this.title = title;
         this.body = body;
         this.status = NotificationDeliveryStatus.PENDING;
         this.scheduledAt = scheduledAt;
         this.hardDeadlineAt = hardDeadlineAt;
+    }
+
+    public NotificationDelivery(Notification notification, LocalDate deliveryDate,
+                                int reminderOffsetMinutes, String deviceToken, String title, String body,
+                                LocalDateTime scheduledAt, LocalDateTime hardDeadlineAt) {
+        this(notification, deliveryDate, deviceToken, title, body, scheduledAt, hardDeadlineAt);
+        this.reminderOffsetMinutes = reminderOffsetMinutes;
     }
 
     public void markSending(LocalDateTime attemptedAt) {

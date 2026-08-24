@@ -18,6 +18,7 @@ import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.util.List;
+import java.util.Collections;
 
 @Slf4j
 @Component
@@ -56,8 +57,10 @@ public class NotificationScheduler {
             try {
                 int estimatedDuration =
                         transitApiService.getRealTimeDuration(notification.getRouteDetails());
-                Candidate candidate = findNextCandidate(notification, estimatedDuration, now, oneTime);
-                if (candidate == null) continue;
+                List<Integer> reminderOffsets = reminderOffsetsOf(notification);
+                for (Integer reminderOffset : reminderOffsets) {
+                    Candidate candidate = findNextCandidate(notification, estimatedDuration, reminderOffset, now, oneTime);
+                    if (candidate == null) continue;
 
                 // Realtime duration can move today's candidate to tomorrow. Do not send it today.
                 if (candidate.notificationTime().toLocalDate().equals(today)
@@ -66,8 +69,14 @@ public class NotificationScheduler {
                             .atZone(zoneId)
                             .withZoneSameInstant(java.time.ZoneOffset.UTC)
                             .toLocalDateTime();
-                    notificationDeliveryService.prepare(
-                            notification, estimatedDuration, today, scheduledAt);
+                    if (reminderOffsets.size() == 1) {
+                        notificationDeliveryService.prepare(
+                                notification, estimatedDuration, today, scheduledAt);
+                    } else {
+                        notificationDeliveryService.prepare(
+                                notification, estimatedDuration, today, scheduledAt, reminderOffset);
+                    }
+                    }
                 }
             } catch (Exception e) {
                 // 오래된 레코드 하나가 다른 사용자의 알림 처리까지 중단시키면 안 된다.
@@ -91,13 +100,20 @@ public class NotificationScheduler {
             return false;
         }
 
-        LocalDateTime baseNotificationTime = now.toLocalDate()
-                .atTime(notification.getTargetArrivalTime())
-                .minusMinutes(notification.getReminderOffsetMinutes());
-        return isCandidateInWindow(baseNotificationTime, now);
+        return reminderOffsetsOf(notification).stream().anyMatch(offset ->
+                isCandidateInWindow(now.toLocalDate().atTime(notification.getTargetArrivalTime())
+                        .minusMinutes(offset), now));
     }
 
-    private Candidate findNextCandidate(ArrivalNotification notification, int estimatedDuration,
+    private List<Integer> reminderOffsetsOf(ArrivalNotification notification) {
+        List<Integer> offsets = notification.getReminderOffsetMinutesList();
+        if (offsets == null || offsets.isEmpty()) {
+            return Collections.singletonList(notification.getReminderOffsetMinutes());
+        }
+        return offsets;
+    }
+
+    private Candidate findNextCandidate(ArrivalNotification notification, int estimatedDuration, int reminderOffset,
                                          LocalDateTime now, boolean oneTime) {
         // A one-time alert can use today or tomorrow. A repeating alert can use
         // today or the next occurrence of its selected weekday within one week.
@@ -111,7 +127,7 @@ public class NotificationScheduler {
 
             LocalDateTime notificationTime = arrivalDate
                     .atTime(notification.getTargetArrivalTime())
-                    .minusMinutes((long) estimatedDuration + notification.getReminderOffsetMinutes());
+                    .minusMinutes((long) estimatedDuration + reminderOffset);
             if (isCandidateInWindow(notificationTime, now)) {
                 return new Candidate(notificationTime);
             }

@@ -53,21 +53,38 @@ public class NotificationDeliveryService {
     @Transactional
     public void prepare(ArrivalNotification notification, int estimatedDuration,
                         LocalDate deliveryDate, LocalDateTime scheduledAt) {
+        int reminderOffsetMinutes = notification.getReminderOffsetMinutes();
+        if (deliveryRepository.findByNotificationIdAndDeliveryDate(
+                notification.getId(), deliveryDate).isPresent()) return;
+        prepareWithoutDuplicateCheck(notification, estimatedDuration, deliveryDate,
+                scheduledAt, reminderOffsetMinutes);
+    }
+
+    @Transactional
+    public void prepare(ArrivalNotification notification, int estimatedDuration,
+                        LocalDate deliveryDate, LocalDateTime scheduledAt, int reminderOffsetMinutes) {
         if (scheduledAt == null) {
             throw new IllegalArgumentException("scheduledAt은 필수입니다.");
         }
-        if (deliveryRepository.findByNotificationIdAndDeliveryDate(
-                notification.getId(), deliveryDate).isPresent()) return;
+        if (deliveryRepository.findByNotificationIdAndDeliveryDateAndReminderOffsetMinutes(
+                notification.getId(), deliveryDate, reminderOffsetMinutes).isPresent()) return;
 
+        prepareWithoutDuplicateCheck(notification, estimatedDuration, deliveryDate,
+                scheduledAt, reminderOffsetMinutes);
+    }
+
+    private void prepareWithoutDuplicateCheck(ArrivalNotification notification, int estimatedDuration,
+                                               LocalDate deliveryDate, LocalDateTime scheduledAt,
+                                               int reminderOffsetMinutes) {
         userDeviceTokenRepository.findByUserId(notification.getUser().getId()).ifPresent(token -> {
             String title = "출발 알림: " + notification.getName();
             String body = String.format(
                     "지금 출발하시면 목표 시간(%s)에 도착할 수 있습니다. (예상 소요 시간: %d분)",
                     notification.getTargetArrivalTime(), estimatedDuration);
             LocalDateTime hardDeadlineAt = scheduledAt.plusMinutes(
-                    notification.getReminderOffsetMinutes());
-            deliveryRepository.save(new NotificationDelivery(
-                    notification, deliveryDate, token.getDeviceToken(), title, body,
+                    reminderOffsetMinutes);
+        deliveryRepository.save(new NotificationDelivery(
+                notification, deliveryDate, reminderOffsetMinutes, token.getDeviceToken(), title, body,
                     scheduledAt, hardDeadlineAt));
         });
     }
@@ -151,9 +168,11 @@ public class NotificationDeliveryService {
                     return;
                 }
                 delivery.markSentAt(sentAt);
-                delivery.getNotification().updateLastSentDate(delivery.getDeliveryDate());
-                if (delivery.getNotification().getRepeatDays() == 0) {
-                    delivery.getNotification().completeOneTimeNotification();
+                if (isFinalReminder(delivery)) {
+                    delivery.getNotification().updateLastSentDate(delivery.getDeliveryDate());
+                    if (delivery.getNotification().getRepeatDays() == 0) {
+                        delivery.getNotification().completeOneTimeNotification();
+                    }
                 }
                 arrivalNotificationRepository.save((ArrivalNotification) delivery.getNotification());
                 deliveryRepository.save(delivery);
@@ -288,10 +307,14 @@ public class NotificationDeliveryService {
     }
 
     private void completeOneTimeIfNecessary(NotificationDelivery delivery) {
-        if (delivery.getNotification().getRepeatDays() == 0) {
+        if (delivery.getNotification().getRepeatDays() == 0 && isFinalReminder(delivery)) {
             delivery.getNotification().completeOneTimeNotification();
             arrivalNotificationRepository.save((ArrivalNotification) delivery.getNotification());
         }
+    }
+
+    private boolean isFinalReminder(NotificationDelivery delivery) {
+        return delivery.getReminderOffsetMinutes() == delivery.getNotification().getReminderOffsetMinutes();
     }
 
     private LocalDateTime nowUtc() {

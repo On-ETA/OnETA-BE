@@ -16,6 +16,8 @@ import java.util.Optional;
 
 public interface NotificationDeliveryRepository extends JpaRepository<NotificationDelivery, Long> {
     Optional<NotificationDelivery> findByNotificationIdAndDeliveryDate(Long notificationId, LocalDate deliveryDate);
+    Optional<NotificationDelivery> findByNotificationIdAndDeliveryDateAndReminderOffsetMinutes(
+            Long notificationId, LocalDate deliveryDate, int reminderOffsetMinutes);
 
     List<NotificationDelivery> findAllByStatusIn(List<NotificationDeliveryStatus> statuses);
 
