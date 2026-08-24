@@ -20,6 +20,12 @@ public enum ErrorCode {
     // User
     USER_NOT_FOUND(HttpStatus.NOT_FOUND, "U001", "사용자를 찾을 수 없습니다."),
 
+    // Address
+    ADDRESS_NOT_FOUND(HttpStatus.NOT_FOUND, "A001", "주소를 찾을 수 없습니다."),
+    ADDRESS_LIMIT_EXCEEDED(HttpStatus.BAD_REQUEST, "A002", "주소는 최대 5개까지 등록할 수 있습니다."),
+    CURRENT_ADDRESS_NOT_SET(HttpStatus.NOT_FOUND, "A003", "현재 설정된 주소가 없습니다."),
+    ADDRESS_ALREADY_EXISTS(HttpStatus.CONFLICT, "A004", "동일한 위치의 주소가 이미 등록되어 있습니다."),
+
     // Notification
     NOTICE_NOT_FOUND(HttpStatus.NOT_FOUND, "N001", "공지사항을 찾을 수 없습니다."),
     NOTIFICATION_NOT_FOUND(HttpStatus.NOT_FOUND, "N002", "알림을 찾을 수 없습니다.");
