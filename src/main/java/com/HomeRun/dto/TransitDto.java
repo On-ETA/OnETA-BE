@@ -46,6 +46,7 @@ public class TransitDto {
         private String endStation;
         private Integer durationMinutes;
         private String transitName;
+        private List<RouteStation> stations;
 
         // ODsay identifiers and WGS84 coordinates
         private String odsayStartStationId;
@@ -58,8 +59,30 @@ public class TransitDto {
         private String localStationId;
         private String localRouteId;
         private String arsId;
+        private String odsayEndStationId;
+        private String busProviderCode;
+        private String subwayCode;
+        private String subwayCityCode;
+        private String way;
+        private String wayCode;
+        private Double endX;
+        private Double endY;
         private Integer scheduledWaitMinutes;
         private Integer realTimeArrivalSeconds;
         private String realTimeSource;
+    }
+
+    @Getter
+    @Setter
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class RouteStation {
+        private String name;
+        private Integer sequence;
+        private String stationId;
+        private Double x;
+        private Double y;
+        private String arsId;
     }
 }

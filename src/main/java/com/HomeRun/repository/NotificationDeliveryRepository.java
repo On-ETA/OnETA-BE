@@ -2,6 +2,7 @@ package com.HomeRun.repository;
 
 import com.HomeRun.entity.NotificationDelivery;
 import com.HomeRun.entity.NotificationDeliveryStatus;
+import com.HomeRun.entity.DeliveryPhase;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.Lock;
@@ -18,6 +19,10 @@ public interface NotificationDeliveryRepository extends JpaRepository<Notificati
     Optional<NotificationDelivery> findByNotificationIdAndDeliveryDate(Long notificationId, LocalDate deliveryDate);
     Optional<NotificationDelivery> findByNotificationIdAndDeliveryDateAndReminderOffsetMinutes(
             Long notificationId, LocalDate deliveryDate, int reminderOffsetMinutes);
+    Optional<NotificationDelivery> findByNotificationIdAndDeliveryDateAndReminderOffsetMinutesAndDeliveryPhase(
+            Long notificationId, LocalDate deliveryDate, int reminderOffsetMinutes, DeliveryPhase deliveryPhase);
+    boolean existsByNotificationIdAndDeliveryDateAndDeliveryPhase(
+            Long notificationId, LocalDate deliveryDate, DeliveryPhase deliveryPhase);
 
     List<NotificationDelivery> findAllByStatusIn(List<NotificationDeliveryStatus> statuses);
 

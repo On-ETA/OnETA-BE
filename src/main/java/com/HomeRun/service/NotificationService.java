@@ -4,6 +4,7 @@ import com.HomeRun.dto.NotificationDto;
 import com.HomeRun.entity.ArrivalNotification;
 import com.HomeRun.entity.Notification;
 import com.HomeRun.entity.User;
+import com.HomeRun.entity.NotificationScheduleType;
 import com.HomeRun.repository.ArrivalNotificationRepository;
 import com.HomeRun.repository.NotificationRepository;
 import com.HomeRun.repository.UserRepository;
@@ -23,6 +24,7 @@ public class NotificationService {
     private final NotificationRepository notificationRepository;
     private final UserRepository userRepository;
     private final RepeatDaysService repeatDaysService;
+    private final TransitApiService transitApiService;
 
     @Transactional
     public Long createArrivalNotification(String email, NotificationDto.CreateArrivalRequest request) {
@@ -43,7 +45,8 @@ public class NotificationService {
                 request.getReminderOffsetMinutes(),
                 repeatDays,
                 request.getTargetArrivalTime(),
-                request.getRouteDetails()
+                request.getRouteDetails(),
+                request.getScheduleType() == null ? NotificationScheduleType.NORMAL : request.getScheduleType()
         );
 
         return arrivalNotificationRepository.save(notification).getId();
@@ -59,6 +62,20 @@ public class NotificationService {
                 .collect(Collectors.toList());
     }
 
+    public NotificationDto.ArrivalDetailResponse getArrivalNotificationDetail(String email, Long id) {
+        ArrivalNotification notification = getArrivalNotificationByEmailAndId(email, id);
+        return NotificationDto.ArrivalDetailResponse.builder()
+                .notificationId(notification.getId())
+                .routeName(notification.getName())
+                .targetArrivalTime(notification.getTargetArrivalTime())
+                .reminderOffsetMinutes(notification.getReminderOffsetMinutesList())
+                .repeatDays(repeatDaysService.toDays(notification.getRepeatDays()))
+                .isActive(notification.getIsActive())
+                .scheduleType(notification.getScheduleType())
+                .route(transitApiService.readSavedRoute(notification.getRouteDetails()))
+                .build();
+    }
+
     @Transactional
     public void updateArrivalNotification(String email, Long id, NotificationDto.UpdateArrivalRequest request) {
         if (request == null) {
@@ -67,7 +84,7 @@ public class NotificationService {
         }
         if (request.getRouteName() == null && request.getTargetArrivalTime() == null
                 && request.getReminderOffsetMinutes() == null && request.getRepeatDays() == null
-                && request.getRouteDetails() == null) {
+                && request.getRouteDetails() == null && request.getScheduleType() == null) {
             throw new com.HomeRun.common.exception.GlobalException(
                     com.HomeRun.common.error.ErrorCode.INVALID_INPUT_VALUE, "수정할 값이 하나도 없습니다.");
         }
@@ -82,6 +99,7 @@ public class NotificationService {
         notification.updateCommonInfo(request.getRouteName(), request.getReminderOffsetMinutes());
         if (requestedRepeatDays != null) notification.updateRepeatDays(requestedRepeatDays);
         notification.updateArrivalInfo(request.getTargetArrivalTime(), request.getRouteDetails());
+        notification.updateScheduleType(request.getScheduleType());
     }
 
     @Transactional

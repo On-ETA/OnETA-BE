@@ -208,8 +208,8 @@ verify(dependencies.delivery).prepare(eq(notification), eq(30), eq(LocalDate.of(
         when(notifications.findAllByIsActiveTrue()).thenReturn(List.of(notification));
         when(transit.getRealTimeDuration("route")).thenReturn(30);
         doAnswer(invocation -> {
-            notification.updateLastSentDate(invocation.getArgument(3));
-            if (invocation.getArgument(2)) notification.completeOneTimeNotification();
+            notification.updateLastSentDate(invocation.getArgument(2));
+            if (notification.getRepeatDays() == 0) notification.completeOneTimeNotification();
             return null;
         }).when(delivery).prepare(any(), anyInt(), any(), any());
 
