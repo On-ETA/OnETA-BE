@@ -5,6 +5,7 @@ import com.HomeRun.entity.NotificationDelivery;
 import com.HomeRun.entity.NotificationDeliveryStatus;
 import com.HomeRun.entity.User;
 import com.HomeRun.entity.UserDeviceToken;
+import com.HomeRun.entity.DeliveryPhase;
 import com.HomeRun.config.NotificationRetryProperties;
 import com.HomeRun.repository.ArrivalNotificationRepository;
 import com.HomeRun.repository.NotificationDeliveryRepository;
@@ -250,6 +251,26 @@ class NotificationDeliveryServiceTest {
         assertThat(fixture.delivery.getSentAt())
                 .isEqualTo(java.time.LocalDateTime.of(2026, 8, 10, 9, 0));
         assertThat(fixture.delivery.getDeliveryLatency()).isEqualTo(java.time.Duration.ofSeconds(2));
+    }
+
+    @Test
+    void recoveryDeliveryUsesExistingRetryPipelineAndIsSentOnlyOnce() {
+        TestFixture fixture = fixture();
+        ReflectionTestUtils.setField(fixture.delivery, "deliveryPhase", DeliveryPhase.RECOVERY);
+        doThrow(new FcmPushException("UNAVAILABLE", "temporary", false, null))
+                .doNothing().when(fixture.fcm).sendPushMessage(any(), any(), any(), any());
+
+        fixture.service.processPending();
+        assertThat(fixture.delivery.getStatus()).isEqualTo(NotificationDeliveryStatus.PENDING);
+        ReflectionTestUtils.setField(fixture.service, "clock",
+                Clock.fixed(Instant.parse("2026-08-10T09:00:11Z"), ZoneOffset.UTC));
+        ReflectionTestUtils.setField(fixture.delivery, "nextAttemptAt",
+                LocalDateTime.of(2026, 8, 10, 9, 0, 10));
+        fixture.service.processPending();
+
+        assertThat(fixture.delivery.getStatus()).isEqualTo(NotificationDeliveryStatus.SENT);
+        verify(fixture.fcm, times(2)).sendPushMessage("token", "title", "body",
+                LocalDateTime.of(2026, 8, 10, 9, 10));
     }
 
     private TestFixture fixture() {

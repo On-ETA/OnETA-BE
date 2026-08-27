@@ -3,6 +3,7 @@ package com.HomeRun.service;
 import com.HomeRun.entity.ArrivalNotification;
 import com.HomeRun.entity.NotificationDelivery;
 import com.HomeRun.entity.NotificationDeliveryStatus;
+import com.HomeRun.entity.DeliveryPhase;
 import com.HomeRun.config.NotificationRetryProperties;
 import com.HomeRun.repository.ArrivalNotificationRepository;
 import com.HomeRun.repository.NotificationDeliveryRepository;
@@ -58,6 +59,26 @@ public class NotificationDeliveryService {
                 notification.getId(), deliveryDate).isPresent()) return;
         prepareWithoutDuplicateCheck(notification, estimatedDuration, deliveryDate,
                 scheduledAt, reminderOffsetMinutes);
+    }
+
+    @Transactional
+    public boolean prepare(ArrivalNotification notification, int estimatedDuration,
+                        LocalDate deliveryDate, LocalDateTime scheduledAt,
+                        int reminderOffsetMinutes, LocalDateTime hardDeadlineAt,
+                        DeliveryPhase phase) {
+        if (scheduledAt == null || hardDeadlineAt == null) throw new IllegalArgumentException("scheduledAt/deadline 필수");
+        if (deliveryRepository.findByNotificationIdAndDeliveryDateAndReminderOffsetMinutesAndDeliveryPhase(
+                notification.getId(), deliveryDate, reminderOffsetMinutes, phase).isPresent()) return false;
+        boolean[] created = {false};
+        userDeviceTokenRepository.findByUserId(notification.getUser().getId()).ifPresent(token -> {
+            String title = "출발 알림: " + notification.getName();
+            String body = String.format("지금 출발하시면 목표 시간(%s)에 도착할 수 있습니다. (예상 소요 시간: %d분)",
+                    notification.getTargetArrivalTime(), estimatedDuration);
+            deliveryRepository.save(new NotificationDelivery(notification, deliveryDate, reminderOffsetMinutes,
+                    phase, token.getDeviceToken(), title, body, scheduledAt, hardDeadlineAt));
+            created[0] = true;
+        });
+        return created[0];
     }
 
     @Transactional
@@ -314,7 +335,8 @@ public class NotificationDeliveryService {
     }
 
     private boolean isFinalReminder(NotificationDelivery delivery) {
-        return delivery.getReminderOffsetMinutes() == delivery.getNotification().getReminderOffsetMinutes();
+        return delivery.getDeliveryPhase() == DeliveryPhase.RECOVERY
+                || delivery.getReminderOffsetMinutes() == delivery.getNotification().getReminderOffsetMinutes();
     }
 
     private LocalDateTime nowUtc() {

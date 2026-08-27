@@ -1,10 +1,12 @@
 package com.HomeRun.scheduler;
 
 import com.HomeRun.entity.ArrivalNotification;
+import com.HomeRun.entity.NotificationScheduleType;
 import com.HomeRun.repository.ArrivalNotificationRepository;
 import com.HomeRun.service.NotificationDeliveryService;
 import com.HomeRun.service.RepeatDaysService;
 import com.HomeRun.service.TransitApiService;
+import com.HomeRun.service.TransitScheduleService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -22,7 +24,6 @@ import java.util.Collections;
 
 @Slf4j
 @Component
-@RequiredArgsConstructor
 public class NotificationScheduler {
 
     private static final Duration MAX_CANDIDATE_DELAY = Duration.ofMinutes(1);
@@ -31,12 +32,33 @@ public class NotificationScheduler {
     private final TransitApiService transitApiService;
     private final RepeatDaysService repeatDaysService;
     private final NotificationDeliveryService notificationDeliveryService;
+    private final TransitScheduleService transitScheduleService;
 
     @Value("${app.time-zone:Asia/Seoul}")
     private String timeZone;
 
     // A replaceable clock keeps candidate-date behavior deterministic in tests.
     private Clock clock = Clock.systemUTC();
+
+    public NotificationScheduler(ArrivalNotificationRepository notifications,
+                                 TransitApiService transitApiService,
+                                 RepeatDaysService repeatDaysService,
+                                 NotificationDeliveryService delivery) {
+        this(notifications, transitApiService, repeatDaysService, delivery, null);
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public NotificationScheduler(ArrivalNotificationRepository notifications,
+                                 TransitApiService transitApiService,
+                                 RepeatDaysService repeatDaysService,
+                                 NotificationDeliveryService delivery,
+                                 TransitScheduleService transitScheduleService) {
+        this.arrivalNotificationRepository = notifications;
+        this.transitApiService = transitApiService;
+        this.repeatDaysService = repeatDaysService;
+        this.notificationDeliveryService = delivery;
+        this.transitScheduleService = transitScheduleService;
+    }
 
     @Scheduled(cron = "0 * * * * *", zone = "${app.time-zone:Asia/Seoul}")
     public void scheduleArrivalNotifications() {
@@ -55,6 +77,12 @@ public class NotificationScheduler {
             if (!isTodayCandidate(notification, now, oneTime)) continue;
 
             try {
+                if (notification.getScheduleType() != null
+                        && notification.getScheduleType() != NotificationScheduleType.NORMAL
+                        && transitScheduleService != null) {
+                    processScheduledTransit(notification, today, now, zoneId);
+                    continue;
+                }
                 int estimatedDuration =
                         transitApiService.getRealTimeDuration(notification.getRouteDetails());
                 List<Integer> reminderOffsets = reminderOffsetsOf(notification);
@@ -90,6 +118,29 @@ public class NotificationScheduler {
         notificationDeliveryService.processPending();
     }
 
+    private void processScheduledTransit(ArrivalNotification notification, LocalDate today,
+                                         LocalDateTime now, ZoneId zoneId) {
+        if (!repeatDaysService.includes(notification.getRepeatDays(), today.getDayOfWeek())
+                && notification.getRepeatDays() != 0) return;
+        TransitScheduleService.Decision decision = transitScheduleService.evaluate(notification, today, now, zoneId);
+        if (decision == null || !decision.hardDeadlineAt().isAfter(now)
+                || decision.scheduledAt().isAfter(now)) return;
+        LocalDateTime scheduledUtc = toUtc(decision.scheduledAt(), zoneId);
+        LocalDateTime deadlineUtc = toUtc(decision.hardDeadlineAt(), zoneId);
+        int offset = decision.recovery()
+                ? notification.getReminderOffsetMinutesList().stream().max(Integer::compareTo).orElse(0)
+                : notification.getReminderOffsetMinutes();
+        boolean created = notificationDeliveryService.prepare(notification, decision.estimatedDuration(), today, scheduledUtc,
+                offset, deadlineUtc, decision.phase());
+        if (created && decision.recovery()) {
+            transitScheduleService.markRecoveryDeliveryCreated(notification, today);
+        }
+    }
+
+    private LocalDateTime toUtc(LocalDateTime value, ZoneId zoneId) {
+        return value.atZone(zoneId).withZoneSameInstant(java.time.ZoneOffset.UTC).toLocalDateTime();
+    }
+
     /**
      * Cheap pre-filter before the realtime API call. The final candidate is
      * recalculated after the realtime duration is known.
@@ -98,6 +149,10 @@ public class NotificationScheduler {
         if (!oneTime && !repeatDaysService.includes(
                 notification.getRepeatDays(), now.toLocalDate().getDayOfWeek())) {
             return false;
+        }
+
+        if (notification.getScheduleType() != null && notification.getScheduleType() != NotificationScheduleType.NORMAL) {
+            return true;
         }
 
         return reminderOffsetsOf(notification).stream().anyMatch(offset ->

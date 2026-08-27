@@ -44,6 +44,11 @@ class TransitApiServiceTest {
                            "endName":"대전역","startID":1,"startX":127.1,"startY":36.4,
                            "startStationCityCode":1000,"startLocalStationID":"111000931",
                            "startArsID":"12022","intervalTime":8,
+                           "passStopList":{"stations":[
+                             {"stationName":"북대전농협","stationID":"1","x":127.1,"y":36.4,"stationArsID":"12022"},
+                             {"stationName":"중간 정거장","stationID":"2","x":127.15,"y":36.45},
+                             {"stationName":"대전역","stationID":"3","x":127.2,"y":36.5}
+                           ]},
                            "lane":[{"busNo":"741","busID":55,"busCityCode":1000,
                                     "busLocalBlID":"123000010"}]}
                         ]}]}}
@@ -55,6 +60,8 @@ class TransitApiServiceTest {
         assertThat(route.getRouteId()).startsWith("ROUTE_");
         assertThat(route.getRealTimeDurationMinutes()).isEqualTo(19);
         assertThat(route.getSegments().get(1).getLocalStationId()).isEqualTo("111000931");
+        assertThat(route.getSegments().get(1).getStations()).extracting(TransitDto.RouteStation::getName)
+                .containsExactly("북대전농협", "중간 정거장", "대전역");
         server.verify();
     }
 

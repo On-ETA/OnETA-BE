@@ -74,8 +74,7 @@ public class TransitApiService {
         }
 
         try {
-            TransitDto.RouteOptionResponse route =
-                    objectMapper.readValue(routeDetails, TransitDto.RouteOptionResponse.class);
+            TransitDto.RouteOptionResponse route = readSavedRoute(routeDetails);
             return enrichWithRealTimeArrivals(route).getRealTimeDurationMinutes();
         } catch (GlobalException e) {
             throw e;
@@ -83,6 +82,38 @@ public class TransitApiService {
             throw new GlobalException(
                     ErrorCode.INVALID_INPUT_VALUE, "저장된 경로 정보를 읽을 수 없습니다.");
         }
+    }
+
+    public TransitDto.RouteOptionResponse readSavedRoute(String routeDetails) {
+        if (routeDetails == null || routeDetails.isBlank()) {
+            throw new GlobalException(ErrorCode.INVALID_INPUT_VALUE, "저장된 경로 정보가 없습니다.");
+        }
+        try {
+            TransitDto.RouteOptionResponse route =
+                    objectMapper.readValue(routeDetails, TransitDto.RouteOptionResponse.class);
+            List<TransitDto.RouteSegment> segments = route.getSegments() == null
+                    ? List.of()
+                    : route.getSegments().stream().map(this::withFallbackStations).toList();
+            return route.toBuilder().segments(segments).build();
+        } catch (Exception e) {
+            throw new GlobalException(ErrorCode.INVALID_INPUT_VALUE, "저장된 경로 정보를 읽을 수 없습니다.");
+        }
+    }
+
+    private TransitDto.RouteSegment withFallbackStations(TransitDto.RouteSegment segment) {
+        if (segment.getStations() != null && !segment.getStations().isEmpty()) return segment;
+        List<TransitDto.RouteStation> stations = new ArrayList<>();
+        if (segment.getStartStation() != null && !segment.getStartStation().isBlank()) {
+            stations.add(TransitDto.RouteStation.builder().name(segment.getStartStation()).sequence(1)
+                    .stationId(segment.getOdsayStartStationId()).x(segment.getStartX()).y(segment.getStartY())
+                    .arsId(segment.getArsId()).build());
+        }
+        if (segment.getEndStation() != null && !segment.getEndStation().isBlank()
+                && !segment.getEndStation().equals(segment.getStartStation())) {
+            stations.add(TransitDto.RouteStation.builder().name(segment.getEndStation())
+                    .sequence(stations.size() + 1).build());
+        }
+        return segment.toBuilder().stations(stations).build();
     }
 
     public List<TransitDto.RouteOptionResponse> searchRoutes(
@@ -108,6 +139,8 @@ public class TransitApiService {
         headers.set(HttpHeaders.ORIGIN, originFromReferer(odsayReferer));
 
         try {
+            log.debug("ODsay search request: host={}, endpoint={}, odsayApiKeyConfigured={}",
+                    uri.getHost(), uri.getPath(), odsayApiKey != null && !odsayApiKey.isBlank());
             ResponseEntity<String> response = restTemplate.exchange(
                     uri, HttpMethod.GET, new HttpEntity<>(headers), String.class);
             return parseOdsayResponse(response.getBody()).stream()
@@ -205,6 +238,12 @@ public class TransitApiService {
                 .build();
     }
 
+    boolean hasSameOdsayApiKey(String candidate) {
+        String normalizedCandidate = candidate == null ? "" : candidate.trim();
+        String normalizedKey = odsayApiKey == null ? "" : odsayApiKey.trim();
+        return normalizedKey.equals(normalizedCandidate);
+    }
+
     private List<TransitDto.RouteOptionResponse> parseOdsayResponse(String jsonString) {
         try {
             JsonNode root = objectMapper.readTree(jsonString);
@@ -245,7 +284,13 @@ public class TransitApiService {
                             .durationMinutes(subPath.path("sectionTime").asInt())
                             .transitName(transitName)
                             .odsayStartStationId(textOrNull(subPath, "startID"))
+                            .odsayEndStationId(textOrNull(subPath, "endID"))
                             .odsayRouteId(textOrNull(lane, "busID"))
+                            .busProviderCode(textOrNull(lane, "busProviderCode"))
+                            .subwayCode(textOrNull(lane, "subwayCode"))
+                            .subwayCityCode(textOrNull(lane, "subwayCityCode"))
+                            .way(textOrNull(subPath, "way"))
+                            .wayCode(textOrNull(subPath, "wayCode"))
                             .localCityCode(textOrNull(lane, "busCityCode"))
                             .localRouteId(textOrNull(lane, "busLocalBlID"))
                             .localStationId(textOrNull(subPath, "startLocalStationID"))
@@ -255,6 +300,9 @@ public class TransitApiService {
                                     : null)
                             .startX(doubleOrNull(subPath, "startX"))
                             .startY(doubleOrNull(subPath, "startY"))
+                            .endX(doubleOrNull(subPath, "endX"))
+                            .endY(doubleOrNull(subPath, "endY"))
+                            .stations(parseStations(subPath))
                             .build());
                 }
 
@@ -276,6 +324,24 @@ public class TransitApiService {
         } catch (Exception e) {
             throw new GlobalException(ErrorCode.INTERNAL_SERVER_ERROR, "ODsay 응답 파싱에 실패했습니다.");
         }
+    }
+
+    private List<TransitDto.RouteStation> parseStations(JsonNode subPath) {
+        JsonNode stationNodes = subPath.path("passStopList").path("stations");
+        if (!stationNodes.isArray()) return List.of();
+        List<TransitDto.RouteStation> stations = new ArrayList<>();
+        int sequence = 1;
+        for (JsonNode station : stationNodes) {
+            stations.add(TransitDto.RouteStation.builder()
+                    .name(station.path("stationName").asText(""))
+                    .sequence(sequence++)
+                    .stationId(textOrNull(station, "stationID"))
+                    .x(doubleOrNull(station, "x"))
+                    .y(doubleOrNull(station, "y"))
+                    .arsId(textOrNull(station, "stationArsID"))
+                    .build());
+        }
+        return stations;
     }
 
     private String stableRouteId(JsonNode path) throws Exception {

@@ -11,7 +11,7 @@ import java.time.Duration;
 
 @Entity
 @Table(name = "notification_deliveries", uniqueConstraints = @UniqueConstraint(
-        name = "uk_notification_delivery_offset", columnNames = {"notification_id", "delivery_date", "reminder_offset_minutes"}))
+        name = "uk_notification_delivery_phase", columnNames = {"notification_id", "delivery_date", "reminder_offset_minutes", "delivery_phase"}))
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class NotificationDelivery {
@@ -29,6 +29,10 @@ public class NotificationDelivery {
 
     @Column(name = "reminder_offset_minutes", nullable = false)
     private int reminderOffsetMinutes;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "delivery_phase", nullable = false, length = 16)
+    private DeliveryPhase deliveryPhase = DeliveryPhase.BASE;
 
     @Column(name = "device_token", nullable = false)
     private String deviceToken;
@@ -90,6 +94,15 @@ public class NotificationDelivery {
                                 LocalDateTime scheduledAt, LocalDateTime hardDeadlineAt) {
         this(notification, deliveryDate, deviceToken, title, body, scheduledAt, hardDeadlineAt);
         this.reminderOffsetMinutes = reminderOffsetMinutes;
+    }
+
+    public NotificationDelivery(Notification notification, LocalDate deliveryDate,
+                                int reminderOffsetMinutes, DeliveryPhase phase,
+                                String deviceToken, String title, String body,
+                                LocalDateTime scheduledAt, LocalDateTime hardDeadlineAt) {
+        this(notification, deliveryDate, reminderOffsetMinutes, deviceToken, title, body,
+                scheduledAt, hardDeadlineAt);
+        this.deliveryPhase = phase == null ? DeliveryPhase.BASE : phase;
     }
 
     public void markSending(LocalDateTime attemptedAt) {

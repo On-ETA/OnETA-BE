@@ -33,6 +33,13 @@ public class NotificationController {
         return ApiResponse.success(responses);
     }
 
+    @GetMapping("/{id}")
+    public ApiResponse<NotificationDto.ArrivalDetailResponse> getArrivalNotificationDetail(
+            Principal principal, @PathVariable Long id) {
+        checkPrincipal(principal);
+        return ApiResponse.success(notificationService.getArrivalNotificationDetail(principal.getName(), id));
+    }
+
     @PatchMapping("/{id}")
     public ApiResponse<Void> updateArrivalNotification(
             Principal principal,
