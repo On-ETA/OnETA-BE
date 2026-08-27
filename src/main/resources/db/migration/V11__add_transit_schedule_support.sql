@@ -23,7 +23,8 @@ CREATE TABLE notification_schedule_snapshots (
     estimated_duration_minutes INT NOT NULL,
     PRIMARY KEY (id),
     CONSTRAINT uk_schedule_snapshot UNIQUE (notification_id, service_date, schedule_type, route_hash),
-    CONSTRAINT fk_schedule_snapshot_notification FOREIGN KEY (notification_id) REFERENCES notifications(notification_id)
+    CONSTRAINT fk_schedule_snapshot_notification
+        FOREIGN KEY (notification_id) REFERENCES arrival_notifications(notification_id)
 );
 
 ALTER TABLE notification_deliveries ADD COLUMN delivery_phase VARCHAR(16) NOT NULL DEFAULT 'BASE';
