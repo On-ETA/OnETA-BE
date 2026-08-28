@@ -6,7 +6,6 @@ spring:
 
   # JPA Configuration
   jpa:
-    database-platform: org.hibernate.dialect.H2Dialect
     hibernate:
       ddl-auto: update
     properties:
@@ -14,17 +13,12 @@ spring:
         format_sql: true
         show_sql: true
 
-  # H2 Database (Local Development)
+  # MySQL Database (Local Development)
   datasource:
-    url: jdbc:h2:mem:homerun;MODE=MySQL;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE
-    driver-class-name: org.h2.Driver
-    username: sa
-    password:
-
-  h2:
-    console:
-      enabled: true
-      path: /h2-console
+    url: ${DB_URL}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
 
   # Redis Configuration
   data:
@@ -71,16 +65,11 @@ springdoc:
     disable-swagger-default-url: true
     display-request-duration: true
   show-actuator: false
-  server-url: http://localhost:8081
+  server-url: http://localhost:8080
   server-description: Local Server
 
-app:
-  scheduler:
-    notification:
-      enabled: true
-
 server:
-  port: 8081
+  port: 8080
 
 odsay:
   api:
