@@ -41,7 +41,6 @@ dependencies {
 	testImplementation 'org.springframework.boot:spring-boot-starter-security-test'
 	//testImplementation 'org.springframework.boot:spring-boot-starter-session-data-redis-test'
 	//testImplementation 'org.springframework.boot:spring-boot-starter-webflux-test'
-	implementation 'org.springdoc:springdoc-openapi-starter-webmvc-ui:3.0.0'
 	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 
 	implementation 'io.jsonwebtoken:jjwt-api:0.11.5' // JWT 생성 라이브러리

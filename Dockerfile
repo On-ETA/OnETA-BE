@@ -18,7 +18,7 @@ FROM eclipse-temurin:17-jre-alpine
 WORKDIR /app
 
 # 빌드 단계에서 생성된 jar 파일 복사
-COPY --from=build /app/build/libs/*.jar app.jar
+COPY --from=build /app/build/libs/app.jar app.jar
 
 # 서버 포트 개방 (Spring Boot 기본 포트)
 EXPOSE 8080

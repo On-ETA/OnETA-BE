@@ -66,14 +66,19 @@ spring:
     console:
       enabled: false
 
-# Swagger Configuration (Disabled in Production)
+# Swagger Configuration
 springdoc:
   api-docs:
-    enabled: false
+    enabled: true
   swagger-ui:
-    enabled: false
+    enabled: true
   server-url: ${SERVER_URL:https://api.HomeRun.com} # 추후 도메인 변경 예정
   server-description: Production Server
+
+app:
+  scheduler:
+    notification:
+      enabled: false
 
 server:
   port: 8080
