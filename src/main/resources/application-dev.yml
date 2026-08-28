@@ -51,6 +51,11 @@ springdoc:
   server-url: ${SERVER_URL:https://on-eta.com}
   server-description: Development Server
 
+app:
+  scheduler:
+    notification:
+      enabled: true
+
 server:
   port: 8080
 

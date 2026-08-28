@@ -1,11 +1,13 @@
 spring:
   application:
     name: HomeRun
-  #profiles:
-    #active: local
+  profiles:
+    active: local
   flyway:
     enabled: false
-
+logging:
+  level:
+    com.HomeRun.service.TransitScheduleService: DEBUG
 app:
   version: "1.0.0"
 
