@@ -1,4 +1,4 @@
-name: Java CI
+name: Java CI with Gradle
 
 on:
   push:
@@ -30,4 +30,42 @@ jobs:
         run: chmod +x gradlew
 
       - name: Build
-        run: ./gradlew clean build --stacktrace
+        run: ./gradlew clean build -x test
+
+      - name: Copy JAR to EC2
+        if: github.event_name == 'push'
+        uses: appleboy/scp-action@v1
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          source: "build/libs/*.jar"
+          target: "/home/${{ secrets.EC2_USER }}/app"
+          strip_components: 2
+
+      - name: Restart application
+        if: github.event_name == 'push'
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            cd ~/app
+
+            PID=$(pgrep -f '[j]ava.*HomeRun' || true)
+
+            if [ -n "$PID" ]; then
+              echo "Stopping existing application: $PID"
+              kill "$PID"
+              sleep 5
+            fi
+
+            echo "Starting application"
+
+            nohup java \
+              -Dspring.profiles.active=prod \
+              -jar *.jar \
+              > app.log 2>&1 < /dev/null &
+
+            echo "Application start command completed"

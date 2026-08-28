@@ -3,8 +3,6 @@ spring:
     name: HomeRun
   flyway:
     enabled: false
-app:
-  version: "1.0.0"
 
 notification:
   delivery:
@@ -15,3 +13,8 @@ notification:
       jitter-ratio: 0.2
       max-concurrent-fcm: 4
       concurrency-retry-delay: 1s
+  profiles:
+    active: prod
+
+app:
+  version: "1.0.0"

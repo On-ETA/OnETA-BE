@@ -7,7 +7,12 @@ spring:
     hibernate:
       ddl-auto: validate
     open-in-view: false
-
+    
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: false
+    
   datasource:
     url: ${DB_URL}
     driver-class-name: com.mysql.cj.jdbc.Driver
@@ -42,22 +47,17 @@ spring:
           connectiontimeout: 5000
           timeout: 5000
           writetimeout: 5000
+server:
+  port: 8080
+  forward-headers-strategy: framework
 
 springdoc:
   api-docs:
     enabled: true
   swagger-ui:
     enabled: true
-  server-url: ${SERVER_URL:https://on-eta.com}
+  server-url: ${SERVER_URL:https://api.on-eta.com}
   server-description: Development Server
-
-app:
-  scheduler:
-    notification:
-      enabled: true
-
-server:
-  port: 8080
 
 jwt:
   secret: ${JWT_SECRET}
