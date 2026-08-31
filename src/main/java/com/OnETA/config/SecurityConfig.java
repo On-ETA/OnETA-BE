@@ -52,10 +52,13 @@ public class SecurityConfig {
                                 "/api/token-test",
                                 "/api/auth/**",
                                 "/api-docs/**",
-                                "/v3/api-docs/**",     // Swagger 데이터
+                                "/v3/api-docs/**",     // Swagger 기본 설정 (혹시 모를 대비)
+                                "/api-docs/**",        // Custom Swagger 데이터 경로
                                 "/swagger-ui/**",      // Swagger UI 화면
                                 "/swagger-ui.html",    // Swagger UI 진입점
                                 "/test/sync-bus/**"    // 테스트용 임시
+                                "/swagger-ui.html",    // Swagger UI 진입점
+                                "/h2-console/**"       // H2 Console (enabled only in local profile)
                         ).permitAll() // 토큰 테스트 URL은 통과시켜 줍니다.
                         .anyRequest().authenticated()
                 )
@@ -74,6 +77,10 @@ public class SecurityConfig {
                         .accessDeniedHandler(customAccessDeniedHandler)
                 )
 
+                // H2 Console renders its UI in a same-origin frame.
+                .headers(headers -> headers
+                        .frameOptions(frame -> frame.sameOrigin()))
+
                 // 💡 중요: 스프링 기본 인증 필터가 작동하기 전에, 우리가 만든 JwtFilter를 먼저 거치도록 설정합니다.
                 .addFilterBefore(new JwtFilter(jwtProvider), UsernamePasswordAuthenticationFilter.class);
 
@@ -86,10 +93,17 @@ public class SecurityConfig {
         CorsConfiguration configuration = new CorsConfiguration();
 
         // 프론트엔드가 사용하는 주소를 정확히 명시하여 허용합니다. (스웨거 및 프론트 개발 서버 주소)
-        configuration.setAllowedOrigins(List.of("http://localhost:8081", "http://localhost:8080"));
+        configuration.setAllowedOrigins(List.of(
+        "http://localhost:8081",
+        "http://localhost:8080",
+        "https://on-eta.com",
+        "https://www.on-eta.com",
+        "https://api.on-eta.com",
+        "https://13th-gongmozip-fe.vercel.app"
+        ));
 
         // GET, POST, PUT, DELETE 등 모든 HTTP 메서드를 허용합니다.
-        configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS"));
+        configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
 
         // Authorization(JWT 토큰 헤더), Content-Type 등 모든 헤더를 허용합니다.
         configuration.setAllowedHeaders(List.of("*"));

@@ -71,7 +71,15 @@ springdoc:
 server:
   port: 8080
 
+odsay:
+  api:
+    key: ${ODSAY_API_KEY:}
+    url: ${ODSAY_API_URL:https://api.odsay.com/v1/api/searchPubTransPathR}
+    referer: ${ODSAY_API_REFERER:http://localhost:8080/}
+
 # JWT Configuration
 jwt:
   secret: ${JWT_SECRET:local-development-secret-key-must-be-at-least-32-characters-long}
-  expiration: ${JWT_EXPIRATION:86400000}
+  access-expiration: ${JWT_ACCESS_EXPIRATION:3600000}
+  refresh-expiration: ${JWT_REFRESH_EXPIRATION:1209600000}
+  

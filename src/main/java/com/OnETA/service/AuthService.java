@@ -46,11 +46,17 @@ public class AuthService {
         // 비밀번호 암호화
         String encodedPassword = passwordEncoder.encode(request.getPassword());
 
+        // 닉네임이 전달되지 않았다면 랜덤 닉네임 부여
+        String nickname = request.getNickname();
+        if (nickname == null || nickname.trim().isEmpty()) {
+            nickname = com.HomeRun.util.NicknameGenerator.generate();
+        }
+
         // 새로운 유저 객체 생성 및 DB 저장
         User newUser = User.builder()
                 .email(request.getEmail())
                 .password(encodedPassword)
-                .nickname(request.getNickname())
+                .nickname(nickname)
                 .role(Role.GUEST)
                 .build();
 

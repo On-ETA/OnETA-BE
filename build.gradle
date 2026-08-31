@@ -41,13 +41,16 @@ dependencies {
 	testImplementation 'org.springframework.boot:spring-boot-starter-security-test'
 	//testImplementation 'org.springframework.boot:spring-boot-starter-session-data-redis-test'
 	//testImplementation 'org.springframework.boot:spring-boot-starter-webflux-test'
-	implementation 'org.springdoc:springdoc-openapi-starter-webmvc-ui:3.0.0'
 	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 
 	implementation 'io.jsonwebtoken:jjwt-api:0.11.5' // JWT 생성 라이브러리
 	implementation 'org.springframework.boot:spring-boot-starter-mail' // 이메일 전송 메일 라이브러리
 	implementation 'org.springframework.boot:spring-boot-starter-validation' // 데이터 유효성 검사 Validation 라이브러리
-	implementation 'net.bytebuddy:byte-buddy'
+	implementation 'org.springframework.boot:spring-boot-starter-flyway'
+	implementation 'org.flywaydb:flyway-mysql'
+	implementation 'com.google.firebase:firebase-admin:9.4.3'
+	implementation 'org.flywaydb:flyway-core'
+	implementation 'org.flywaydb:flyway-mysql'
 
 	runtimeOnly 'io.jsonwebtoken:jjwt-impl:0.11.5'
 	runtimeOnly 'io.jsonwebtoken:jjwt-jackson:0.11.5'
@@ -60,6 +63,9 @@ dependencies {
 
 	// Firebase Admin SDK
 	implementation 'com.google.firebase:firebase-admin:9.2.0'
+	implementation 'org.springdoc:springdoc-openapi-starter-webmvc-api:2.7.0'
+	implementation 'io.swagger.core.v3:swagger-models-jakarta:2.2.25'
+	implementation 'io.swagger.core.v3:swagger-annotations-jakarta:2.2.25'
 }
 
 tasks.named('test') {
