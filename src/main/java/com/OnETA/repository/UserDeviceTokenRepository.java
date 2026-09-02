@@ -1,6 +1,6 @@
-package com.HomeRun.repository;
+package com.OnETA.repository;
 
-import com.HomeRun.entity.UserDeviceToken;
+import com.OnETA.entity.UserDeviceToken;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.stereotype.Repository;
 

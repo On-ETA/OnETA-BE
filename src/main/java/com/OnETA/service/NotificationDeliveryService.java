@@ -1,13 +1,13 @@
-package com.HomeRun.service;
+package com.OnETA.service;
 
-import com.HomeRun.entity.ArrivalNotification;
-import com.HomeRun.entity.NotificationDelivery;
-import com.HomeRun.entity.NotificationDeliveryStatus;
-import com.HomeRun.entity.DeliveryPhase;
-import com.HomeRun.config.NotificationRetryProperties;
-import com.HomeRun.repository.ArrivalNotificationRepository;
-import com.HomeRun.repository.NotificationDeliveryRepository;
-import com.HomeRun.repository.UserDeviceTokenRepository;
+import com.OnETA.entity.ArrivalNotification;
+import com.OnETA.entity.NotificationDelivery;
+import com.OnETA.entity.NotificationDeliveryStatus;
+import com.OnETA.entity.DeliveryPhase;
+import com.OnETA.config.NotificationRetryProperties;
+import com.OnETA.repository.ArrivalNotificationRepository;
+import com.OnETA.repository.NotificationDeliveryRepository;
+import com.OnETA.repository.UserDeviceTokenRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;

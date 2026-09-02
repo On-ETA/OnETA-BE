@@ -1,6 +1,6 @@
-package com.HomeRun.repository;
+package com.OnETA.repository;
 
-import com.HomeRun.entity.UserAddress;
+import com.OnETA.entity.UserAddress;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 import java.util.List;

@@ -1,8 +1,8 @@
-package com.HomeRun.dto;
+package com.OnETA.dto;
 
-import com.HomeRun.entity.ArrivalNotification;
-import com.HomeRun.entity.NotificationScheduleType;
-import com.HomeRun.service.RepeatDaysService;
+import com.OnETA.entity.ArrivalNotification;
+import com.OnETA.entity.NotificationScheduleType;
+import com.OnETA.service.RepeatDaysService;
 import lombok.Builder;
 import lombok.Getter;
 import lombok.Setter;

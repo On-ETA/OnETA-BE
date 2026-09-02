@@ -1,6 +1,6 @@
-package com.HomeRun.dto;
+package com.OnETA.dto;
 
-import com.HomeRun.entity.UserAddress;
+import com.OnETA.entity.UserAddress;
 import lombok.Builder;
 import lombok.Getter;
 import lombok.Setter;

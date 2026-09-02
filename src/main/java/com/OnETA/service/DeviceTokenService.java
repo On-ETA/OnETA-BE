@@ -1,9 +1,9 @@
-package com.HomeRun.service;
+package com.OnETA.service;
 
-import com.HomeRun.entity.User;
-import com.HomeRun.entity.UserDeviceToken;
-import com.HomeRun.repository.UserDeviceTokenRepository;
-import com.HomeRun.repository.UserRepository;
+import com.OnETA.entity.User;
+import com.OnETA.entity.UserDeviceToken;
+import com.OnETA.repository.UserDeviceTokenRepository;
+import com.OnETA.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -21,7 +21,7 @@ public class DeviceTokenService {
     @Transactional
     public void registerOrUpdateToken(String email, String token) {
         User user = userRepository.findByEmail(email)
-                .orElseThrow(() -> new com.HomeRun.common.exception.GlobalException(com.HomeRun.common.error.ErrorCode.USER_NOT_FOUND));
+                .orElseThrow(() -> new com.OnETA.common.exception.GlobalException(com.OnETA.common.error.ErrorCode.USER_NOT_FOUND));
 
         Optional<UserDeviceToken> existingToken = userDeviceTokenRepository.findByUserId(user.getId());
 

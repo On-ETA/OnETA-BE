@@ -1,6 +1,6 @@
-package com.HomeRun.service;
+package com.OnETA.service;
 
-import com.HomeRun.dto.TransitDto;
+import com.OnETA.dto.TransitDto;
 import tools.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;

@@ -1,9 +1,9 @@
-package com.HomeRun.repository;
+package com.OnETA.repository;
 
-import com.HomeRun.entity.ArrivalNotification;
-import com.HomeRun.entity.NotificationScheduleType;
-import com.HomeRun.entity.Role;
-import com.HomeRun.entity.User;
+import com.OnETA.entity.ArrivalNotification;
+import com.OnETA.entity.NotificationScheduleType;
+import com.OnETA.entity.Role;
+import com.OnETA.entity.User;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;

@@ -1,11 +1,12 @@
-package com.HomeRun.scheduler;
+package com.OnETA.scheduler;
 
-import com.HomeRun.entity.ArrivalNotification;
-import com.HomeRun.entity.User;
-import com.HomeRun.repository.ArrivalNotificationRepository;
-import com.HomeRun.service.NotificationDeliveryService;
-import com.HomeRun.service.RepeatDaysService;
-import com.HomeRun.service.TransitApiService;
+import com.HomeRun.scheduler.NotificationScheduler;
+import com.OnETA.entity.ArrivalNotification;
+import com.OnETA.entity.User;
+import com.OnETA.repository.ArrivalNotificationRepository;
+import com.OnETA.service.NotificationDeliveryService;
+import com.OnETA.service.RepeatDaysService;
+import com.OnETA.service.TransitApiService;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.util.ReflectionTestUtils;
 

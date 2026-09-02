@@ -1,4 +1,4 @@
-package com.HomeRun.config;
+package com.OnETA.config;
 
 import lombok.Getter;
 import lombok.Setter;

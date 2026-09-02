@@ -1,6 +1,6 @@
-package com.HomeRun.repository;
+package com.OnETA.repository;
 
-import com.HomeRun.entity.ArrivalNotification;
+import com.OnETA.entity.ArrivalNotification;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.stereotype.Repository;

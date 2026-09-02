@@ -1,13 +1,13 @@
-package com.HomeRun.service;
+package com.OnETA.service;
 
-import com.HomeRun.entity.ArrivalNotification;
-import com.HomeRun.entity.NotificationDelivery;
-import com.HomeRun.entity.NotificationDeliveryStatus;
-import com.HomeRun.entity.Role;
-import com.HomeRun.entity.User;
-import com.HomeRun.repository.ArrivalNotificationRepository;
-import com.HomeRun.repository.NotificationDeliveryRepository;
-import com.HomeRun.repository.UserRepository;
+import com.OnETA.entity.ArrivalNotification;
+import com.OnETA.entity.NotificationDelivery;
+import com.OnETA.entity.NotificationDeliveryStatus;
+import com.OnETA.entity.Role;
+import com.OnETA.entity.User;
+import com.OnETA.repository.ArrivalNotificationRepository;
+import com.OnETA.repository.NotificationDeliveryRepository;
+import com.OnETA.repository.UserRepository;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;

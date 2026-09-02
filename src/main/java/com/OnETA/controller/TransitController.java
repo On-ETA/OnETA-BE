@@ -1,8 +1,8 @@
-package com.HomeRun.controller;
+package com.OnETA.controller;
 
-import com.HomeRun.common.response.ApiResponse;
-import com.HomeRun.dto.TransitDto;
-import com.HomeRun.service.TransitApiService;
+import com.OnETA.common.response.ApiResponse;
+import com.OnETA.dto.TransitDto;
+import com.OnETA.service.TransitApiService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -30,8 +30,8 @@ public class TransitController {
             @RequestParam(required = false) String destAddress) {
 
         if (principal == null) {
-            throw new com.HomeRun.common.exception.GlobalException(
-                    com.HomeRun.common.error.ErrorCode.UNAUTHENTICATED);
+            throw new com.OnETA.common.exception.GlobalException(
+                    com.OnETA.common.error.ErrorCode.UNAUTHENTICATED);
         }
 
         List<TransitDto.RouteOptionResponse> responses = transitApiService.searchRoutes(

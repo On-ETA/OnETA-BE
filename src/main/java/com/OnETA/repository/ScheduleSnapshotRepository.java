@@ -1,6 +1,6 @@
-package com.HomeRun.repository;
+package com.OnETA.repository;
 
-import com.HomeRun.entity.*;
+import com.OnETA.entity.*;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;

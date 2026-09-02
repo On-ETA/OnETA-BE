@@ -1,12 +1,12 @@
-package com.HomeRun.service;
+package com.OnETA.service;
 
-import com.HomeRun.common.error.ErrorCode;
-import com.HomeRun.common.exception.GlobalException;
-import com.HomeRun.dto.UserAddressDto;
-import com.HomeRun.entity.User;
-import com.HomeRun.entity.UserAddress;
-import com.HomeRun.repository.UserAddressRepository;
-import com.HomeRun.repository.UserRepository;
+import com.OnETA.common.error.ErrorCode;
+import com.OnETA.common.exception.GlobalException;
+import com.OnETA.dto.UserAddressDto;
+import com.OnETA.entity.User;
+import com.OnETA.entity.UserAddress;
+import com.OnETA.repository.UserAddressRepository;
+import com.OnETA.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;

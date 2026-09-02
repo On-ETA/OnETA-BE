@@ -1,4 +1,4 @@
-package com.HomeRun.entity;
+package com.OnETA.entity;
 
 public enum DeliveryPhase {
     BASE, RECOVERY

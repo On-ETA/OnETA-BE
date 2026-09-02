@@ -1,4 +1,4 @@
-package com.HomeRun.entity;
+package com.OnETA.entity;
 
 import jakarta.persistence.*;
 import lombok.AccessLevel;

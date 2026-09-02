@@ -1,4 +1,4 @@
-package com.HomeRun.entity;
+package com.OnETA.entity;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.DiscriminatorValue;
@@ -16,7 +16,7 @@ import java.util.List;
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 @Table(name = "arrival_notifications")
-public class ArrivalNotification extends Notification {
+public class ArrivalNotification extends com.OnETA.entity.Notification {
 
     @Column(name = "target_arrival_time", nullable = false)
     private LocalTime targetArrivalTime;

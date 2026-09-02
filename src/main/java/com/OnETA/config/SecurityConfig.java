@@ -56,7 +56,7 @@ public class SecurityConfig {
                                 "/api-docs/**",        // Custom Swagger 데이터 경로
                                 "/swagger-ui/**",      // Swagger UI 화면
                                 "/swagger-ui.html",    // Swagger UI 진입점
-                                "/test/sync-bus/**"    // 테스트용 임시
+                                "/test/sync-bus/**",    // 테스트용 임시
                                 "/swagger-ui.html",    // Swagger UI 진입점
                                 "/h2-console/**"       // H2 Console (enabled only in local profile)
                         ).permitAll() // 토큰 테스트 URL은 통과시켜 줍니다.

@@ -1,8 +1,9 @@
-package com.HomeRun.scheduler;
+package com.OnETA.scheduler;
 
-import com.HomeRun.entity.*;
-import com.HomeRun.repository.ArrivalNotificationRepository;
-import com.HomeRun.service.*;
+import com.HomeRun.scheduler.NotificationScheduler;
+import com.OnETA.entity.*;
+import com.OnETA.repository.ArrivalNotificationRepository;
+import com.OnETA.service.*;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.util.ReflectionTestUtils;
 

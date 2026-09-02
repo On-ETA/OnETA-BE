@@ -1,8 +1,8 @@
-package com.HomeRun.controller;
+package com.OnETA.controller;
 
-import com.HomeRun.common.response.ApiResponse;
-import com.HomeRun.dto.DeviceTokenDto;
-import com.HomeRun.service.DeviceTokenService;
+import com.OnETA.common.response.ApiResponse;
+import com.OnETA.dto.DeviceTokenDto;
+import com.OnETA.service.DeviceTokenService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -24,7 +24,7 @@ public class DeviceTokenController {
             @RequestBody DeviceTokenDto.RegisterRequest request) {
         
         if (principal == null) {
-            throw new com.HomeRun.common.exception.GlobalException(com.HomeRun.common.error.ErrorCode.UNAUTHENTICATED);
+            throw new com.OnETA.common.exception.GlobalException(com.OnETA.common.error.ErrorCode.UNAUTHENTICATED);
         }
         
         deviceTokenService.registerOrUpdateToken(principal.getName(), request.getDeviceToken());

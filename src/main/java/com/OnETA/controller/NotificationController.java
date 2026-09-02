@@ -1,8 +1,8 @@
-package com.HomeRun.controller;
+package com.OnETA.controller;
 
-import com.HomeRun.common.response.ApiResponse;
-import com.HomeRun.dto.NotificationDto;
-import com.HomeRun.service.NotificationService;
+import com.OnETA.common.response.ApiResponse;
+import com.OnETA.dto.NotificationDto;
+import com.OnETA.service.NotificationService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
@@ -74,7 +74,7 @@ public class NotificationController {
 
     private void checkPrincipal(Principal principal) {
         if (principal == null) {
-            throw new com.HomeRun.common.exception.GlobalException(com.HomeRun.common.error.ErrorCode.UNAUTHENTICATED);
+            throw new com.OnETA.common.exception.GlobalException(com.OnETA.common.error.ErrorCode.UNAUTHENTICATED);
         }
     }
 }

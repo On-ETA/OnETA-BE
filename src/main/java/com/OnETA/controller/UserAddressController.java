@@ -1,10 +1,10 @@
-package com.HomeRun.controller;
+package com.OnETA.controller;
 
-import com.HomeRun.common.error.ErrorCode;
-import com.HomeRun.common.exception.GlobalException;
-import com.HomeRun.common.response.ApiResponse;
-import com.HomeRun.dto.UserAddressDto;
-import com.HomeRun.service.UserAddressService;
+import com.OnETA.common.error.ErrorCode;
+import com.OnETA.common.exception.GlobalException;
+import com.OnETA.common.response.ApiResponse;
+import com.OnETA.dto.UserAddressDto;
+import com.OnETA.service.UserAddressService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 

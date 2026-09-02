@@ -1,8 +1,8 @@
-package com.HomeRun.config;
+package com.OnETA.config;
 
-import com.HomeRun.entity.Role;
-import com.HomeRun.entity.User;
-import com.HomeRun.repository.UserRepository;
+import com.OnETA.entity.Role;
+import com.OnETA.entity.User;
+import com.OnETA.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;

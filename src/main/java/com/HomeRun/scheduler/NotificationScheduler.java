@@ -1,12 +1,12 @@
 package com.HomeRun.scheduler;
 
-import com.HomeRun.entity.ArrivalNotification;
-import com.HomeRun.entity.NotificationScheduleType;
-import com.HomeRun.repository.ArrivalNotificationRepository;
-import com.HomeRun.service.NotificationDeliveryService;
-import com.HomeRun.service.RepeatDaysService;
-import com.HomeRun.service.TransitApiService;
-import com.HomeRun.service.TransitScheduleService;
+import com.OnETA.entity.ArrivalNotification;
+import com.OnETA.entity.NotificationScheduleType;
+import com.OnETA.repository.ArrivalNotificationRepository;
+import com.OnETA.service.NotificationDeliveryService;
+import com.OnETA.service.RepeatDaysService;
+import com.OnETA.service.TransitApiService;
+import com.OnETA.service.TransitScheduleService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;

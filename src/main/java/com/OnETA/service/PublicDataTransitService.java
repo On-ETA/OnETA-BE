@@ -1,7 +1,7 @@
-package com.HomeRun.service;
+package com.OnETA.service;
 
-import com.HomeRun.common.error.ErrorCode;
-import com.HomeRun.common.exception.GlobalException;
+import com.OnETA.common.error.ErrorCode;
+import com.OnETA.common.exception.GlobalException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;

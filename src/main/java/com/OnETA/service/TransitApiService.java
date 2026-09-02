@@ -1,8 +1,8 @@
-package com.HomeRun.service;
+package com.OnETA.service;
 
-import com.HomeRun.common.error.ErrorCode;
-import com.HomeRun.common.exception.GlobalException;
-import com.HomeRun.dto.TransitDto;
+import com.OnETA.common.error.ErrorCode;
+import com.OnETA.common.exception.GlobalException;
+import com.OnETA.dto.TransitDto;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import org.springframework.beans.factory.annotation.Value;
@@ -162,7 +162,7 @@ public class TransitApiService {
         }
         if (destX == null) {
             // 직접 입력한 목적지가 없을 때만 사용자의 현재 주소를 기본 목적지로 사용한다.
-            com.HomeRun.entity.UserAddress currentAddress = userAddressService.getCurrentEntity(email);
+            com.OnETA.entity.UserAddress currentAddress = userAddressService.getCurrentEntity(email);
             destX = currentAddress.getX();
             destY = currentAddress.getY();
             destAddress = currentAddress.getAddress();

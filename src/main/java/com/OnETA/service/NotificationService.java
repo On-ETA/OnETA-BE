@@ -1,13 +1,13 @@
-package com.HomeRun.service;
+package com.OnETA.service;
 
-import com.HomeRun.dto.NotificationDto;
-import com.HomeRun.entity.ArrivalNotification;
-import com.HomeRun.entity.Notification;
-import com.HomeRun.entity.User;
-import com.HomeRun.entity.NotificationScheduleType;
-import com.HomeRun.repository.ArrivalNotificationRepository;
-import com.HomeRun.repository.NotificationRepository;
-import com.HomeRun.repository.UserRepository;
+import com.OnETA.dto.NotificationDto;
+import com.OnETA.entity.ArrivalNotification;
+import com.OnETA.entity.Notification;
+import com.OnETA.entity.User;
+import com.OnETA.entity.NotificationScheduleType;
+import com.OnETA.repository.ArrivalNotificationRepository;
+import com.OnETA.repository.NotificationRepository;
+import com.OnETA.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -30,7 +30,7 @@ public class NotificationService {
     public Long createArrivalNotification(String email, NotificationDto.CreateArrivalRequest request) {
         validateCreateRequest(request);
         User user = userRepository.findByEmail(email)
-                .orElseThrow(() -> new com.HomeRun.common.exception.GlobalException(com.HomeRun.common.error.ErrorCode.USER_NOT_FOUND));
+                .orElseThrow(() -> new com.OnETA.common.exception.GlobalException(com.OnETA.common.error.ErrorCode.USER_NOT_FOUND));
 
         String routeName = request.getRouteName();
         if (routeName == null || routeName.trim().isEmpty()) {
@@ -54,7 +54,7 @@ public class NotificationService {
 
     public List<NotificationDto.ArrivalResponse> getArrivalNotifications(String email) {
         User user = userRepository.findByEmail(email)
-                .orElseThrow(() -> new com.HomeRun.common.exception.GlobalException(com.HomeRun.common.error.ErrorCode.USER_NOT_FOUND));
+                .orElseThrow(() -> new com.OnETA.common.exception.GlobalException(com.OnETA.common.error.ErrorCode.USER_NOT_FOUND));
 
         return arrivalNotificationRepository.findAllByUserId(user.getId())
                 .stream()
@@ -79,14 +79,14 @@ public class NotificationService {
     @Transactional
     public void updateArrivalNotification(String email, Long id, NotificationDto.UpdateArrivalRequest request) {
         if (request == null) {
-            throw new com.HomeRun.common.exception.GlobalException(
-                    com.HomeRun.common.error.ErrorCode.INVALID_INPUT_VALUE, "수정할 값이 없습니다.");
+            throw new com.OnETA.common.exception.GlobalException(
+                    com.OnETA.common.error.ErrorCode.INVALID_INPUT_VALUE, "수정할 값이 없습니다.");
         }
         if (request.getRouteName() == null && request.getTargetArrivalTime() == null
                 && request.getReminderOffsetMinutes() == null && request.getRepeatDays() == null
                 && request.getRouteDetails() == null && request.getScheduleType() == null) {
-            throw new com.HomeRun.common.exception.GlobalException(
-                    com.HomeRun.common.error.ErrorCode.INVALID_INPUT_VALUE, "수정할 값이 하나도 없습니다.");
+            throw new com.OnETA.common.exception.GlobalException(
+                    com.OnETA.common.error.ErrorCode.INVALID_INPUT_VALUE, "수정할 값이 하나도 없습니다.");
         }
 
         ArrivalNotification notification = getArrivalNotificationByEmailAndId(email, id);
@@ -105,12 +105,12 @@ public class NotificationService {
     @Transactional
     public void deleteArrivalNotifications(String email, List<Long> ids) {
         User user = userRepository.findByEmail(email)
-                .orElseThrow(() -> new com.HomeRun.common.exception.GlobalException(com.HomeRun.common.error.ErrorCode.USER_NOT_FOUND));
+                .orElseThrow(() -> new com.OnETA.common.exception.GlobalException(com.OnETA.common.error.ErrorCode.USER_NOT_FOUND));
 
         List<Notification> notifications = notificationRepository.findAllById(ids);
         for (Notification noti : notifications) {
             if (!noti.getUser().getId().equals(user.getId())) {
-                throw new com.HomeRun.common.exception.GlobalException(com.HomeRun.common.error.ErrorCode.HANDLE_ACCESS_DENIED);
+                throw new com.OnETA.common.exception.GlobalException(com.OnETA.common.error.ErrorCode.HANDLE_ACCESS_DENIED);
             }
         }
         notificationRepository.deleteAll(notifications);
@@ -119,8 +119,8 @@ public class NotificationService {
     @Transactional
     public void toggleStatus(String email, Long id, NotificationDto.ToggleStatusRequest request) {
         if (request == null || request.getIsActive() == null) {
-            throw new com.HomeRun.common.exception.GlobalException(
-                    com.HomeRun.common.error.ErrorCode.INVALID_INPUT_VALUE, "isActive는 필수입니다.");
+            throw new com.OnETA.common.exception.GlobalException(
+                    com.OnETA.common.error.ErrorCode.INVALID_INPUT_VALUE, "isActive는 필수입니다.");
         }
         ArrivalNotification notification = getArrivalNotificationByEmailAndId(email, id);
         notification.toggleActive(request.getIsActive());
@@ -130,8 +130,8 @@ public class NotificationService {
         if (request == null || request.getTargetArrivalTime() == null
                 || request.getReminderOffsetMinutes() == null
                 || request.getRouteDetails() == null || request.getRouteDetails().isBlank()) {
-            throw new com.HomeRun.common.exception.GlobalException(
-                    com.HomeRun.common.error.ErrorCode.INVALID_INPUT_VALUE,
+            throw new com.OnETA.common.exception.GlobalException(
+                    com.OnETA.common.error.ErrorCode.INVALID_INPUT_VALUE,
                     "목표 도착시간, 미리 알림 시간, 경로 정보는 필수입니다.");
         }
         validateReminderOffsets(request.getReminderOffsetMinutes(), true);
@@ -142,21 +142,21 @@ public class NotificationService {
         if (offsets == null || offsets.isEmpty()
                 || offsets.stream().anyMatch(offset -> offset == null
                 || !List.of(1, 3, 5, 10, 15, 30, 60).contains(offset))) {
-            throw new com.HomeRun.common.exception.GlobalException(
-                    com.HomeRun.common.error.ErrorCode.INVALID_INPUT_VALUE,
+            throw new com.OnETA.common.exception.GlobalException(
+                    com.OnETA.common.error.ErrorCode.INVALID_INPUT_VALUE,
                     "미리 알림 시간은 1, 3, 5, 10, 15, 30, 60분 중 하나 이상 선택해야 합니다.");
         }
     }
 
     private ArrivalNotification getArrivalNotificationByEmailAndId(String email, Long id) {
         User user = userRepository.findByEmail(email)
-                .orElseThrow(() -> new com.HomeRun.common.exception.GlobalException(com.HomeRun.common.error.ErrorCode.USER_NOT_FOUND));
+                .orElseThrow(() -> new com.OnETA.common.exception.GlobalException(com.OnETA.common.error.ErrorCode.USER_NOT_FOUND));
 
         ArrivalNotification notification = arrivalNotificationRepository.findById(id)
-                .orElseThrow(() -> new com.HomeRun.common.exception.GlobalException(com.HomeRun.common.error.ErrorCode.NOTIFICATION_NOT_FOUND));
+                .orElseThrow(() -> new com.OnETA.common.exception.GlobalException(com.OnETA.common.error.ErrorCode.NOTIFICATION_NOT_FOUND));
 
         if (!notification.getUser().getId().equals(user.getId())) {
-            throw new com.HomeRun.common.exception.GlobalException(com.HomeRun.common.error.ErrorCode.HANDLE_ACCESS_DENIED);
+            throw new com.OnETA.common.exception.GlobalException(com.OnETA.common.error.ErrorCode.HANDLE_ACCESS_DENIED);
         }
         return notification;
     }

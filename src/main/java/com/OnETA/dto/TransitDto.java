@@ -1,4 +1,4 @@
-package com.HomeRun.dto;
+package com.OnETA.dto;
 
 import lombok.Builder;
 import lombok.AllArgsConstructor;

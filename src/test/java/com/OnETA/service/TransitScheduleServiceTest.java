@@ -1,8 +1,8 @@
-package com.HomeRun.service;
+package com.OnETA.service;
 
-import com.HomeRun.dto.TransitDto;
-import com.HomeRun.entity.*;
-import com.HomeRun.repository.ScheduleSnapshotRepository;
+import com.OnETA.dto.TransitDto;
+import com.OnETA.entity.*;
+import com.OnETA.repository.ScheduleSnapshotRepository;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
 import org.springframework.test.util.ReflectionTestUtils;

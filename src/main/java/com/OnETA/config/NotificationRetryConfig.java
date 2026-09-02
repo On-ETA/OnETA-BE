@@ -1,4 +1,4 @@
-package com.HomeRun.config;
+package com.OnETA.config;
 
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;

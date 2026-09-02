@@ -1,8 +1,8 @@
-package com.HomeRun.repository;
+package com.OnETA.repository;
 
-import com.HomeRun.entity.NotificationDelivery;
-import com.HomeRun.entity.NotificationDeliveryStatus;
-import com.HomeRun.entity.DeliveryPhase;
+import com.OnETA.entity.NotificationDelivery;
+import com.OnETA.entity.NotificationDeliveryStatus;
+import com.OnETA.entity.DeliveryPhase;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.Lock;
@@ -28,10 +28,10 @@ public interface NotificationDeliveryRepository extends JpaRepository<Notificati
 
     @Query("""
             select d from NotificationDelivery d
-            where (d.status = com.HomeRun.entity.NotificationDeliveryStatus.PENDING
+            where (d.status = com.OnETA.entity.NotificationDeliveryStatus.PENDING
                    and (d.nextAttemptAt is null or d.nextAttemptAt <= :now)
                    and :now < d.hardDeadlineAt)
-               or (d.status = com.HomeRun.entity.NotificationDeliveryStatus.SENDING
+               or (d.status = com.OnETA.entity.NotificationDeliveryStatus.SENDING
                    and (d.lastAttemptAt is null or d.lastAttemptAt <= :sendingTimeoutThreshold)
                    and :now < d.hardDeadlineAt)
             order by d.id
@@ -48,8 +48,8 @@ public interface NotificationDeliveryRepository extends JpaRepository<Notificati
     @Query("""
             select d from NotificationDelivery d
             where d.status in (
-                    com.HomeRun.entity.NotificationDeliveryStatus.PENDING,
-                    com.HomeRun.entity.NotificationDeliveryStatus.SENDING)
+                    com.OnETA.entity.NotificationDeliveryStatus.PENDING,
+                    com.OnETA.entity.NotificationDeliveryStatus.SENDING)
               and d.hardDeadlineAt <= :now
             order by d.id
             """)
