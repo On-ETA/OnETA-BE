@@ -42,6 +42,12 @@ out/
 .env.local
 .env.*.local
 
-# application 설정 파일 무시
+# 민감한 DB 설정 및 API 키가 포함된 프로필 파일 무시
 application.yml
 application-secret.yml
+
+# application-prod.yml, application-dev.yml 등 뒤에 뭐가 붙든 무시하고 싶다면 아래 패턴 사용
+application-*.yml
+
+# Firebase 프라이빗 키 파일 무시
+firebase-service-account.json

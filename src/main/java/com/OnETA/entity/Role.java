@@ -1,0 +1,15 @@
+package com.OnETA.entity;
+
+import lombok.Getter;
+import lombok.RequiredArgsConstructor;
+
+@Getter
+@RequiredArgsConstructor
+public enum Role {
+
+    GUEST("ROLE_GUEST", "약관 동의 대기자"),
+    USER("ROLE_USER", "일반 사용자");
+
+    private final String key;
+    private final String title;
+}
