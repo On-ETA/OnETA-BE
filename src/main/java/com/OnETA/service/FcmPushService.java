@@ -39,6 +39,9 @@ public class FcmPushService {
     @Value("${firebase.service-account:}")
     private String serviceAccount;
 
+    @Value("${app.firebase.enabled:false}")
+    private boolean firebaseEnabled = true;
+
     private Clock clock = Clock.systemUTC();
 
     public FcmPushService(ResourceLoader resourceLoader) {
@@ -47,6 +50,7 @@ public class FcmPushService {
 
     @PostConstruct
     void initialize() {
+        if (!firebaseEnabled) return;
         if (serviceAccount == null || serviceAccount.isBlank() || !FirebaseApp.getApps().isEmpty()) return;
         try {
             Resource resource = resourceLoader.getResource(serviceAccount);
@@ -67,6 +71,11 @@ public class FcmPushService {
 
     public void sendPushMessage(String deviceToken, String title, String body,
                                 java.time.LocalDateTime hardDeadlineAt) {
+        if (!firebaseEnabled) {
+            log.debug("Firebase is disabled; skipping FCM push.");
+            return;
+        }
+
         try {
             if (FirebaseApp.getApps().isEmpty()) {
                 throw new FcmPushException(
