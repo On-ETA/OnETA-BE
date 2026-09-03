@@ -128,21 +128,36 @@ jobs:
             echo "Started application PID: $NEW_PID"
             echo "Waiting for Spring Boot startup..."
 
-            sleep 15
+            STARTED=false
 
-            if ! kill -0 "$NEW_PID" 2>/dev/null; then
-              echo "Application process terminated during startup"
+            # 최대 60초 동안 2초 간격으로 애플리케이션 기동 확인
+            for i in {1..30}; do
+
+              # 기동 중 프로세스가 종료되면 즉시 실패
+              if ! kill -0 "$NEW_PID" 2>/dev/null; then
+                echo "Application process terminated during startup"
+                echo "=== Application log ==="
+                tail -n 150 app.log
+                exit 1
+              fi
+
+              # 8080 포트가 열렸으면 기동 성공
+              if ss -lnt | grep -q ':8080 '; then
+                echo "Application is listening on port 8080"
+                STARTED=true
+                break
+              fi
+
+              echo "Application is still starting... ($((i * 2))/60s)"
+              sleep 2
+            done
+
+            # 60초가 지나도 8080이 열리지 않은 경우
+            if [ "$STARTED" != "true" ]; then
+              echo "Application process is running but port 8080 is not listening after 60 seconds"
               echo "=== Application log ==="
               tail -n 150 app.log
               exit 1
             fi
 
-            if ss -lnt | grep -q ':8080 '; then
-              echo "Application is listening on port 8080"
-              echo "Deployment completed successfully"
-            else
-              echo "Application process is running but port 8080 is not listening"
-              echo "=== Application log ==="
-              tail -n 150 app.log
-              exit 1
-            fi
+            echo "=== Deployment completed successfully ==="
