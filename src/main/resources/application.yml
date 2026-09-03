@@ -1,0 +1,20 @@
+spring:
+  application:
+    name: HomeRun
+  flyway:
+    enabled: true
+
+notification:
+  delivery:
+    retry:
+      exponential-base-delay: 10s
+      max-backoff: 1m
+      quota-fallback-delay: 1m
+      jitter-ratio: 0.2
+      max-concurrent-fcm: 4
+      concurrency-retry-delay: 1s
+  profiles:
+    active: prod
+
+app:
+  version: "1.0.0"
