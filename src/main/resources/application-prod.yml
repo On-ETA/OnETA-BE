@@ -93,4 +93,4 @@ jwt:
 
 api:
   seoul-bus:
-    service-key: ${BUS_SERVICE_KEY}
+    service-key: ${PUBLICDATA_API_KEY}
