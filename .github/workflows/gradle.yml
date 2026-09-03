@@ -46,14 +46,33 @@ jobs:
       - name: Restart application
         if: github.event_name == 'push'
         uses: appleboy/ssh-action@v1
+        env:
+          DB_URL: ${{ secrets.DB_URL }}
+          DB_USERNAME: ${{ secrets.DB_USERNAME }}
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          REDIS_HOST: ${{ secrets.REDIS_HOST }}
+          REDIS_PORT: ${{ secrets.REDIS_PORT }}
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          MAIL_HOST: ${{ secrets.MAIL_HOST }}
+          MAIL_PORT: ${{ secrets.MAIL_PORT }}
+          MAIL_USERNAME: ${{ secrets.MAIL_USERNAME }}
+          MAIL_PASSWORD: ${{ secrets.MAIL_PASSWORD }}
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          JWT_ACCESS_EXPIRATION: ${{ secrets.JWT_ACCESS_EXPIRATION }}
+          JWT_REFRESH_EXPIRATION: ${{ secrets.JWT_REFRESH_EXPIRATION }}
+          SERVER_URL: ${{ secrets.SERVER_URL }}
+          ODSAY_API_KEY: ${{ secrets.ODSAY_API_KEY }}
+          PUBLICDATA_API_KEY: ${{ secrets.PUBLICDATA_API_KEY }}
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
+          envs: DB_URL,DB_USERNAME,DB_PASSWORD,REDIS_HOST,REDIS_PORT,GOOGLE_CLIENT_ID,GOOGLE_CLIENT_SECRET,MAIL_HOST,MAIL_PORT,MAIL_USERNAME,MAIL_PASSWORD,JWT_SECRET,JWT_ACCESS_EXPIRATION,JWT_REFRESH_EXPIRATION,SERVER_URL,ODSAY_API_KEY,PUBLICDATA_API_KEY
           script: |
             cd ~/app
 
-            PID=$(pgrep -f '[j]ava.*HomeRun' || true)
+            PID=$(pgrep -f '[j]ava.*HomeRun-0.0.1-SNAPSHOT.jar' || true)
 
             if [ -n "$PID" ]; then
               echo "Stopping existing application: $PID"
@@ -65,7 +84,7 @@ jobs:
 
             nohup java \
               -Dspring.profiles.active=prod \
-              -jar *.jar \
+              -jar HomeRun-0.0.1-SNAPSHOT.jar \
               > app.log 2>&1 < /dev/null &
 
             echo "Application start command completed"
