@@ -73,9 +73,12 @@ jobs:
           envs: DB_URL,DB_USERNAME,DB_PASSWORD,REDIS_HOST,REDIS_PORT,GOOGLE_CLIENT_ID,GOOGLE_CLIENT_SECRET,MAIL_HOST,MAIL_PORT,MAIL_USERNAME,MAIL_PASSWORD,JWT_SECRET,JWT_ACCESS_EXPIRATION,JWT_REFRESH_EXPIRATION,SERVER_URL,ODSAY_API_KEY,PUBLICDATA_API_KEY
 
           script: |
+            set -e
+
             cd ~/app
 
             echo "=== Environment check ==="
+
             echo "DB_URL exists: $([ -n "$DB_URL" ] && echo YES || echo NO)"
             echo "DB_USERNAME exists: $([ -n "$DB_USERNAME" ] && echo YES || echo NO)"
             echo "DB_PASSWORD exists: $([ -n "$DB_PASSWORD" ] && echo YES || echo NO)"
@@ -84,19 +87,33 @@ jobs:
               echo "DB_URL target: EXPECTED_RDS"
             else
               echo "DB_URL target: UNEXPECTED"
+              exit 1
             fi
 
             echo "=== Stopping existing application ==="
 
-            PIDS=$(pgrep -f '[j]ava.*HomeRun-0.0.1-SNAPSHOT.jar' || true)
+            PID=$(sudo lsof -t -iTCP:8080 -sTCP:LISTEN 2>/dev/null | head -n 1 || true)
 
-            if [ -n "$PIDS" ]; then
-              echo "Stopping existing application:"
-              echo "$PIDS"
-              kill $PIDS
-              sleep 5
+            if [ -n "$PID" ]; then
+              echo "Stopping application on port 8080: $PID"
+              kill "$PID"
+
+              for i in {1..10}; do
+                if ! kill -0 "$PID" 2>/dev/null; then
+                  echo "Existing application stopped"
+                  break
+                fi
+
+                sleep 1
+              done
+
+              if kill -0 "$PID" 2>/dev/null; then
+                echo "Existing application did not stop gracefully"
+                kill -9 "$PID"
+                sleep 1
+              fi
             else
-              echo "No existing application found"
+              echo "No application listening on port 8080"
             fi
 
             echo "=== Starting application ==="
@@ -106,4 +123,26 @@ jobs:
               -jar HomeRun-0.0.1-SNAPSHOT.jar \
               > app.log 2>&1 < /dev/null &
 
-            echo "Application start command completed"
+            NEW_PID=$!
+
+            echo "Started application PID: $NEW_PID"
+            echo "Waiting for Spring Boot startup..."
+
+            sleep 15
+
+            if ! kill -0 "$NEW_PID" 2>/dev/null; then
+              echo "Application process terminated during startup"
+              echo "=== Application log ==="
+              tail -n 150 app.log
+              exit 1
+            fi
+
+            if ss -lnt | grep -q ':8080 '; then
+              echo "Application is listening on port 8080"
+              echo "Deployment completed successfully"
+            else
+              echo "Application process is running but port 8080 is not listening"
+              echo "=== Application log ==="
+              tail -n 150 app.log
+              exit 1
+            fi
