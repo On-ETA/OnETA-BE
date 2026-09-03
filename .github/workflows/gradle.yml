@@ -64,23 +64,42 @@ jobs:
           SERVER_URL: ${{ secrets.SERVER_URL }}
           ODSAY_API_KEY: ${{ secrets.ODSAY_API_KEY }}
           PUBLICDATA_API_KEY: ${{ secrets.PUBLICDATA_API_KEY }}
+
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
+
           envs: DB_URL,DB_USERNAME,DB_PASSWORD,REDIS_HOST,REDIS_PORT,GOOGLE_CLIENT_ID,GOOGLE_CLIENT_SECRET,MAIL_HOST,MAIL_PORT,MAIL_USERNAME,MAIL_PASSWORD,JWT_SECRET,JWT_ACCESS_EXPIRATION,JWT_REFRESH_EXPIRATION,SERVER_URL,ODSAY_API_KEY,PUBLICDATA_API_KEY
+
           script: |
             cd ~/app
 
-            PID=$(pgrep -f '[j]ava.*HomeRun-0.0.1-SNAPSHOT.jar' || true)
+            echo "=== Environment check ==="
+            echo "DB_URL exists: $([ -n "$DB_URL" ] && echo YES || echo NO)"
+            echo "DB_USERNAME exists: $([ -n "$DB_USERNAME" ] && echo YES || echo NO)"
+            echo "DB_PASSWORD exists: $([ -n "$DB_PASSWORD" ] && echo YES || echo NO)"
 
-            if [ -n "$PID" ]; then
-              echo "Stopping existing application: $PID"
-              kill "$PID"
-              sleep 5
+            if [[ "$DB_URL" == *"oneta-db.cdoywqeoebv0.ap-northeast-2.rds.amazonaws.com"* ]]; then
+              echo "DB_URL target: EXPECTED_RDS"
+            else
+              echo "DB_URL target: UNEXPECTED"
             fi
 
-            echo "Starting application"
+            echo "=== Stopping existing application ==="
+
+            PIDS=$(pgrep -f '[j]ava.*HomeRun-0.0.1-SNAPSHOT.jar' || true)
+
+            if [ -n "$PIDS" ]; then
+              echo "Stopping existing application:"
+              echo "$PIDS"
+              kill $PIDS
+              sleep 5
+            else
+              echo "No existing application found"
+            fi
+
+            echo "=== Starting application ==="
 
             nohup java \
               -Dspring.profiles.active=prod \
