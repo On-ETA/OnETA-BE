@@ -7,6 +7,7 @@ import com.google.firebase.messaging.Message;
 import com.google.firebase.messaging.Notification;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 @Slf4j
@@ -16,8 +17,16 @@ public class FcmService {
 
     private final UserRepository userRepository;
 
+    @Value("${app.firebase.enabled:false}")
+    private boolean firebaseEnabled;
+
     // 사용자 이메일을 기반으로 FCM 토큰을 찾아 푸시 알림을 발송
     public void sendPush(String targetEmail, String title, String body) {
+        if (!firebaseEnabled) {
+            log.debug("Firebase is disabled; skipping FCM push. Email: {}", targetEmail);
+            return;
+        }
+
         // 유저 조회 및 토큰 검증
         User user = userRepository.findByEmail(targetEmail).orElse(null);
 
