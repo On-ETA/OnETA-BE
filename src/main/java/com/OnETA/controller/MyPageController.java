@@ -6,12 +6,14 @@ import com.OnETA.common.response.ApiResponse;
 import com.OnETA.dto.MyPageDto;
 import com.OnETA.dto.mypage.*;
 import com.OnETA.service.MyPageService;
+import com.OnETA.service.FaqService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.security.Principal;
+import java.util.List;
 
 @RestController
 @RequestMapping("/api/mypage")
@@ -19,6 +21,12 @@ import java.security.Principal;
 public class MyPageController {
 
     private final MyPageService myPageService;
+    private final FaqService faqService;
+
+    @GetMapping("/faqs")
+    public ApiResponse<List<FaqResponseDto>> getFaqList() {
+        return ApiResponse.success(faqService.getAllFaqs());
+    }
 
     @GetMapping
     public MyPageDto.Response getMyPageInfo(Principal principal) {
