@@ -7,6 +7,8 @@ import lombok.Setter;
 
 public class UserAddressDto {
 
+    public record SearchResponse(String name, String address, Double x, Double y) {}
+
     @Getter
     @Setter
     public static class CreateRequest {
