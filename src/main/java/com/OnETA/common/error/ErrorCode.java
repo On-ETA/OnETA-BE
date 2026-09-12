@@ -21,6 +21,7 @@ public enum ErrorCode {
     USER_NOT_FOUND(HttpStatus.NOT_FOUND, "U001", "사용자를 찾을 수 없습니다."),
 
     // Address
+    ADDRESS_SEARCH_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "A005", "주소 검색 서비스를 사용할 수 없습니다. 잠시 후 다시 시도해주세요."),
     ADDRESS_NOT_FOUND(HttpStatus.NOT_FOUND, "A001", "주소를 찾을 수 없습니다."),
     ADDRESS_LIMIT_EXCEEDED(HttpStatus.BAD_REQUEST, "A002", "주소는 최대 5개까지 등록할 수 있습니다."),
     CURRENT_ADDRESS_NOT_SET(HttpStatus.NOT_FOUND, "A003", "현재 설정된 주소가 없습니다."),

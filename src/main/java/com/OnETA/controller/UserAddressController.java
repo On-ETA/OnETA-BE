@@ -5,6 +5,7 @@ import com.OnETA.common.exception.GlobalException;
 import com.OnETA.common.response.ApiResponse;
 import com.OnETA.dto.UserAddressDto;
 import com.OnETA.service.UserAddressService;
+import com.OnETA.service.AddressSearchService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
@@ -17,6 +18,14 @@ import java.util.List;
 public class UserAddressController {
 
     private final UserAddressService userAddressService;
+    private final AddressSearchService addressSearchService;
+
+    @GetMapping("/search")
+    public ApiResponse<List<UserAddressDto.SearchResponse>> search(
+            Principal principal, @RequestParam String keyword) {
+        emailOf(principal);
+        return ApiResponse.success(addressSearchService.search(keyword));
+    }
 
     @PostMapping
     public ApiResponse<UserAddressDto.Response> create(Principal principal,
