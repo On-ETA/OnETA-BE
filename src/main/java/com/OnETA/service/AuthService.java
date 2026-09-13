@@ -84,18 +84,20 @@ public class AuthService {
             throw new GlobalException(ErrorCode.INVALID_INPUT_VALUE, "필수 약관에 모두 동의해야 서비스 이용이 가능합니다.");
         }
 
-        // 사용자가 이미 USER role 인 경우 예외 처리
-        if(user.getRole() == Role.USER){
-            throw new GlobalException(ErrorCode.INVALID_INPUT_VALUE, "이미 정식 가입이 완료된 사용자입니다.");
+        // 사용자가 GUEST role 이 아닌 모든 상태 접근 차단
+        if(user.getRole() != Role.USER){
+            throw new GlobalException(ErrorCode.INVALID_INPUT_VALUE, "약관 동의 대상자가 아닙니다. 이미 가입이 완료되었거나 권한이 없습니다.");
         }
 
         // GUEST -> USER role 변경 후 DB 저장
         user.upgradeToUser();
         userRepository.save(user);
 
+        // USER 권한이 들어간 새로운 인증 토큰 발급
         String newAccessToken = jwtProvider.createAccessToken(user.getEmail(), Role.USER.getKey());
         String newRefreshToken = jwtProvider.createRefreshToken(user.getEmail());
 
+        // 리프레시 토큰 DB 갱신
         saveOrUpdateRefreshToken(user.getEmail(), newRefreshToken);
 
         return new TokenResponseDto(newAccessToken, newRefreshToken);

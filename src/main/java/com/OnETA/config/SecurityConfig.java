@@ -25,6 +25,7 @@ public class SecurityConfig {
 
     private final CustomOAuth2UserService customOAuth2UserService;
     private final OAuth2SuccessHandler oAuth2SuccessHandler;
+    private final OAuth2FailureHandler oAuth2FailureHandler;
     private final JwtProvider jwtProvider;
     private final CustomAuthenticationEntryPoint customAuthenticationEntryPoint;
     private final CustomAccessDeniedHandler customAccessDeniedHandler;
@@ -51,16 +52,13 @@ public class SecurityConfig {
                                 "/login**",
                                 "/api/token-test",
                                 "/api/auth/**",
-                                "/api-docs/**",
                                 "/v3/api-docs/**",     // Swagger 기본 설정 (혹시 모를 대비)
                                 "/api-docs/**",        // Custom Swagger 데이터 경로
                                 "/swagger-ui/**",      // Swagger UI 화면
                                 "/swagger-ui.html",    // Swagger UI 진입점
-                                "/test/sync-bus/**",    // 테스트용 임시
-                                "/swagger-ui.html",    // Swagger UI 진입점
                                 "/h2-console/**"       // H2 Console (enabled only in local profile)
                         ).permitAll() // 토큰 테스트 URL은 통과시켜 줍니다.
-                        .anyRequest().authenticated()
+                        .anyRequest().hasRole("USER")
                 )
 
                 .oauth2Login(oauth2 -> oauth2
@@ -69,6 +67,7 @@ public class SecurityConfig {
                         )
                         // 💡 중요: 로그인 성공 시 기본 URL로 가는 대신, 우리가 만든 핸들러가 작동하도록 설정합니다.
                         .successHandler(oAuth2SuccessHandler)
+                        .failureHandler(oAuth2FailureHandler)// 실패 핸들러 추가
                 )
 
                 // 💡 인증 인가 실패 시 처리 핸들러 등록
