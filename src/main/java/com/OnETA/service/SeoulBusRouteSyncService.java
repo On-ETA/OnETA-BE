@@ -75,8 +75,9 @@ public class SeoulBusRouteSyncService {
                         .build(true) // true: 파라미터들이 이미 인코딩되어 있으니 추가 인코딩 X
                         .toUri();
 
-                String rawResponse = restTemplate.getForObject(uri, String.class);
                 log.info("[API 호출 시도] URI: {}", uri);
+
+                String rawResponse = restTemplate.getForObject(uri, String.class);
                 log.info("[API 응답 본문] 키워드 '{}' 응답: {}", keyword, rawResponse);
 
                 // ** [서울특별시_노선정보조회 서비스] API 호출 **
