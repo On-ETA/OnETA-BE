@@ -58,7 +58,7 @@ public class SecurityConfig {
                                 "/swagger-ui.html",    // Swagger UI 진입점
                                 "/h2-console/**"       // H2 Console (enabled only in local profile)
                         ).permitAll() // 토큰 테스트 URL은 통과시켜 줍니다.
-                        .anyRequest().hasRole("USER")
+                        .anyRequest().hasAuthority("ROLE_USER")
                 )
 
                 .oauth2Login(oauth2 -> oauth2
