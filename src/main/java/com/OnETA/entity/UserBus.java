@@ -43,4 +43,9 @@ public class UserBus {
         this.direction = direction;
         this.directionName = directionName;
     }
+
+    public void updateDirection(BusDirection direction, String directionName) {
+        this.direction = direction;
+        this.directionName = directionName;
+    }
 }

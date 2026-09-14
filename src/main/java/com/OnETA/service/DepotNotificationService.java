@@ -4,6 +4,7 @@ import com.OnETA.common.error.ErrorCode;
 import com.OnETA.common.exception.GlobalException;
 import com.OnETA.dto.bus.DepotNotificationRequestDto;
 import com.OnETA.dto.bus.DepotNotificationResponseDto;
+import com.OnETA.dto.bus.DepotNotificationUpdateRequestDto;
 import com.OnETA.entity.BusDirection;
 import com.OnETA.entity.DepotNotification;
 import com.OnETA.entity.User;
@@ -94,6 +95,39 @@ public class DepotNotificationService {
         if (!notification.isActive()) {
             notification.enableNotification();
         }
+    }
+
+    // 등록된 출고지 알림 방면 수정
+    @Transactional
+    public void updateDepotNotificationDirection(String email, Long userBusId, DepotNotificationUpdateRequestDto request) {
+
+        // 수정할 버스 알림 내역 조회
+        UserBus userBus = userBusRepository.findById(userBusId)
+                .orElseThrow(() -> new GlobalException(ErrorCode.INVALID_INPUT_VALUE, "등록된 버스 정보를 찾을 수 없습니다."));
+
+        // 본인의 버스인지 권한 확인
+        if (!userBus.getUser().getEmail().equals(email)) {
+            throw new GlobalException(ErrorCode.HANDLE_ACCESS_DENIED, "수정 권한이 없습니다.");
+        }
+
+        // 중복 방지 : 동일한 노선에 대해 '바꾸려는 방면'으로 이미 등록해 둔 알림이 있는지 확인
+        Optional<UserBus> existingDuplicateBus = userBusRepository.findByUserAndRouteIdAndDirection(
+                userBus.getUser(), userBus.getRouteId(), request.getDirection()
+        );
+
+        // 만약 존재하는데, 지금 수정하려는 항목(userBusId)과 다른 항목이라면 중복 에러 발생
+        if (existingDuplicateBus.isPresent() && !existingDuplicateBus.get().getId().equals(userBus.getId())) {
+            throw new GlobalException(ErrorCode.INVALID_INPUT_VALUE, "해당 방면의 알림이 이미 등록되어 있습니다.");
+        }
+
+        // 방면 정보 업데이트 (JPA 더티 체킹)
+        userBus.updateDirection(request.getDirection(), request.getDirectionName());
+
+        // 사용자가 수정하고 '저장'을 눌렀으므로, 해당 알림을 활성화(true) 상태로 전환
+        DepotNotification notification = depotNotificationRepository.findByUserBus(userBus)
+                .orElseThrow(() -> new GlobalException(ErrorCode.INTERNAL_SERVER_ERROR, "알림 설정 정보를 찾을 수 없습니다."));
+
+        notification.enableNotification();
     }
 
     // 출고지 알림 삭제 (DepotNotification 삭제가 아닌 UserBus 자체를 삭제하여 Cascade 연쇄 삭제)
