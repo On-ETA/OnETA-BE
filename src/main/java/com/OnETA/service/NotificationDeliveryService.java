@@ -316,7 +316,7 @@ public class NotificationDeliveryService {
             if (current != null && !current.isDone()) return current;
             return notificationRetryExecutor.schedule(() -> {
                 retryTasks.remove(id);
-                processDelivery(id);
+                com.OnETA.common.ExternalApiCallCounter.runScheduler("알림 발송 재시도", () -> processDelivery(id));
             }, delayMillis, TimeUnit.MILLISECONDS);
         });
     }

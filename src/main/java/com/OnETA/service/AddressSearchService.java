@@ -61,6 +61,7 @@ public class AddressSearchService {
         headers.set(HttpHeaders.AUTHORIZATION, "KakaoAK " + restApiKey.trim());
 
         try {
+            com.OnETA.common.ExternalApiCallCounter.record("KAKAO", "keyword-search");
             String body = restTemplate.exchange(uri, HttpMethod.GET,
                     new HttpEntity<>(headers), String.class).getBody();
             JsonNode root = objectMapper.readTree(body);

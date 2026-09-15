@@ -141,6 +141,7 @@ public class TransitApiService {
         try {
             log.debug("ODsay search request: host={}, endpoint={}, odsayApiKeyConfigured={}",
                     uri.getHost(), uri.getPath(), odsayApiKey != null && !odsayApiKey.isBlank());
+            com.OnETA.common.ExternalApiCallCounter.record("ODSAY", "searchPubTransPathR");
             ResponseEntity<String> response = restTemplate.exchange(
                     uri, HttpMethod.GET, new HttpEntity<>(headers), String.class);
             return parseOdsayResponse(response.getBody()).stream()

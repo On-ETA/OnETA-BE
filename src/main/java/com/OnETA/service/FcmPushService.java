@@ -103,6 +103,7 @@ public class FcmPushService {
             }
 
             Message message = messageBuilder.build();
+            com.OnETA.common.ExternalApiCallCounter.record("FCM", "send");
             String messageId = FirebaseMessaging.getInstance().send(message);
             log.info("FCM push sent. messageId={}", messageId);
         } catch (FirebaseMessagingException e) {

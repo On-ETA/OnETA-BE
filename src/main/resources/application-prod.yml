@@ -78,7 +78,7 @@ springdoc:
 app:
   scheduler:
     notification:
-      enabled: false
+      enabled: true
 
 server:
   port: 8080
