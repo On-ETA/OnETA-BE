@@ -92,6 +92,7 @@ public class PublicDataTransitService {
                 coordinateKey(longitude), coordinateKey(latitude));
         ArrivalEstimate cached = getCachedArrival(cacheKey);
         if (cached != null) {
+            com.OnETA.common.ExternalApiCallCounter.note("캐시 사용");
             return cached;
         }
 
@@ -124,6 +125,7 @@ public class PublicDataTransitService {
         URI uri = buildUri(normalizeBaseUrl(seoulApiUrl, "http://ws.bus.go.kr") + SEOUL_ARRIVAL_PATH,
                 Map.of("busRouteId", routeId));
         try {
+            com.OnETA.common.ExternalApiCallCounter.record("SEOUL_BUS", "arrival");
             String xml = restTemplate.getForObject(uri, String.class);
             return parseSeoulArrival(xml, routeId, stationId, arsId);
         } catch (GlobalException e) {
@@ -170,6 +172,7 @@ public class PublicDataTransitService {
                 longitude, latitude, normalizeName(stationName));
         StationMatch cached = stationCache.get(cacheKey);
         if (cached != null) {
+            com.OnETA.common.ExternalApiCallCounter.note("캐시 사용");
             return cached;
         }
 
@@ -252,6 +255,7 @@ public class PublicDataTransitService {
         ensureApiKey();
         URI uri = buildUri(normalizeBaseUrl(tagoApiUrl, "https://apis.data.go.kr") + path, params);
         try {
+            com.OnETA.common.ExternalApiCallCounter.record("TAGO", path);
             String body = restTemplate.getForObject(uri, String.class);
             JsonNode response = objectMapper.readTree(body).path("response");
             String resultCode = response.path("header").path("resultCode").asText();

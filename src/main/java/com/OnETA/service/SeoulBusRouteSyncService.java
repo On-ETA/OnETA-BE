@@ -58,6 +58,10 @@ public class SeoulBusRouteSyncService {
     @Scheduled(cron = "0 0 2 ? * SUN", zone = "Asia/Seoul")
     @Transactional
     public void syncSeoulBusRoutes() {
+        com.OnETA.common.ExternalApiCallCounter.runScheduler("서울 버스 노선 동기화", this::syncSeoulBusRoutesRun);
+    }
+
+    private void syncSeoulBusRoutesRun() {
         log.info("서울시 버스 노선 목록 동기화를 시작합니다.");
 
         // 중복 제거를 위한 Map (Key: 노선ID, Value: Entity)
@@ -81,6 +85,7 @@ public class SeoulBusRouteSyncService {
                 log.info("[API 응답 본문] 키워드 '{}' 응답: {}", keyword, rawResponse);
 
                 // ** [서울특별시_노선정보조회 서비스] API 호출 **
+                com.OnETA.common.ExternalApiCallCounter.record("SEOUL_BUS", "routes");
                 BusRouteApiResponseDto response = restTemplate.getForObject(uri, BusRouteApiResponseDto.class);
 
                 // 파싱 및 Map에 담기 (중복 시 덮어쓰기 됨)
@@ -171,6 +176,7 @@ public class SeoulBusRouteSyncService {
                     .toUri();
 
             // ** [서울특별시_노선정보조회 서비스] API 호출 **
+            com.OnETA.common.ExternalApiCallCounter.record("SEOUL_BUS", "route-stations");
             BusRouteStationApiResponseDto response = restTemplate.getForObject(uri, BusRouteStationApiResponseDto.class);
 
             if (response != null && response.getMsgBody() != null && response.getMsgBody().getItemList() != null) {

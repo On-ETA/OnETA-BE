@@ -55,6 +55,7 @@ public class SeoulBusLocationService {
                     .toUri();
 
             // *** [서울특별시_버스위치정보조회 서비스] API 호출 ***
+            com.OnETA.common.ExternalApiCallCounter.record("SEOUL_BUS", "location");
             BusPosApiResponseDto response = restTemplate.getForObject(uri, BusPosApiResponseDto.class);
 
             // 운행 중인 버스가 없는 경우

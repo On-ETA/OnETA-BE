@@ -67,11 +67,16 @@ public class NotificationScheduler {
 
     @Scheduled(cron = "0 * * * * *", zone = "${app.time-zone:Asia/Seoul}")
     public void scheduleArrivalNotifications() {
+        com.OnETA.common.ExternalApiCallCounter.runScheduler("도착 알림 확인", this::scheduleArrivalNotificationsRun);
+    }
+
+    private void scheduleArrivalNotificationsRun() {
         log.info("Executing arrival notification scheduler...");
 
         // TODO: Replace this full scan with findActiveCandidates(now) when the notification window/query is introduced.
         List<ArrivalNotification> activeNotifications =
                 arrivalNotificationRepository.findAllByIsActiveTrue();
+        if (activeNotifications.isEmpty()) com.OnETA.common.ExternalApiCallCounter.note("활성 알림 없음");
         ZoneId zoneId = ZoneId.of(timeZone);
         LocalDateTime now = ZonedDateTime.now(clock.withZone(zoneId)).toLocalDateTime();
         LocalDate today = now.toLocalDate();
@@ -82,6 +87,7 @@ public class NotificationScheduler {
             if (!isTodayCandidate(notification, now, oneTime)) continue;
 
             try {
+                com.OnETA.common.ExternalApiCallCounter.note("처리 후보");
                 if (notification.getScheduleType() != null
                         && notification.getScheduleType() != NotificationScheduleType.NORMAL
                         && transitScheduleService != null) {

@@ -324,6 +324,7 @@ public class TransitScheduleService {
         headers.set(HttpHeaders.ORIGIN, originFromReferer(odsayReferer));
         log.debug("ODsay schedule request: host={}, endpoint={}", uri.getHost(), uri.getPath());
         try {
+            com.OnETA.common.ExternalApiCallCounter.record("ODSAY", path);
             ResponseEntity<String> response = restTemplate.exchange(
                     uri, HttpMethod.GET, new HttpEntity<>(headers), String.class);
             return objectMapper.readTree(response.getBody());

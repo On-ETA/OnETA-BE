@@ -48,6 +48,7 @@ public class FcmService {
 
         // 발송
         try {
+            com.OnETA.common.ExternalApiCallCounter.record("FCM", "send");
             String response = FirebaseMessaging.getInstance().send(message);
             log.info("[FCM 발송 성공] Email: {}, MessageID: {}", targetEmail, response);
         } catch (Exception e) {

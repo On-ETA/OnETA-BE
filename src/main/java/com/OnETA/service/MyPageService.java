@@ -107,6 +107,7 @@ public class MyPageService {
         message.setText(mailText);
 
         try {
+            com.OnETA.common.ExternalApiCallCounter.record("SMTP", "send");
             javaMailSender.send(message);
         } catch (Exception e) {
             throw new GlobalException(ErrorCode.INTERNAL_SERVER_ERROR, "문의 메일 전송에 실패했습니다. 잠시 후 다시 시도해주세요.");

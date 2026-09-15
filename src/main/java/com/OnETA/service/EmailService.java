@@ -110,6 +110,8 @@ public class EmailService {
                 + "인증번호: " + code + "\n\n"
                 + "해당 인증번호는 5분간 유효합니다.");
 
+        com.OnETA.common.ExternalApiCallCounter.record("SMTP", "send");
+
         javaMailSender.send(message);
     }
 }

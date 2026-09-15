@@ -24,10 +24,14 @@ public class BusLocationPollingService {
     // 1분마다 실행, 차고지 및 회차지 출발을 감지
     @Scheduled(fixedDelay = 60000)
     public void pollBusLocations() {
+        com.OnETA.common.ExternalApiCallCounter.runScheduler("버스 위치 확인", this::pollBusLocationsRun);
+    }
+
+    private void pollBusLocationsRun() {
         // 현재 알림 대기 중인 노선 ID만 조회
         List<String> activeRouteIds = depotNotificationRepository.findDistinctActiveRouteIds();
 
-        if (activeRouteIds.isEmpty()) { return; } // 켜져있는 알림이 없으면 호출 생략
+        if (activeRouteIds.isEmpty()) { com.OnETA.common.ExternalApiCallCounter.note("처리 대상 없음"); return; } // 켜져있는 알림이 없으면 호출 생략
 
         // 활성화된 노선들에 대해서 실시간 위치 확인
         for (String routeId : activeRouteIds) {

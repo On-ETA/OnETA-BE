@@ -6,6 +6,7 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 
 @EnableScheduling
 @SpringBootApplication
+@org.springframework.context.annotation.Import(com.HomeRun.scheduler.NotificationScheduler.class)
 public class OnETAApplication {
 
 	public static void main(String[] args) {
