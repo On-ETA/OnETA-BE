@@ -21,8 +21,8 @@ public class BusLocationPollingService {
     // API(getBusPosByRtid) 정보 파싱을 SeoulBusLocationService::getRealTimeBusLocations 에서 진행
     private final SeoulBusLocationService seoulBusLocationService;
 
-    // 1분마다 실행, 차고지 및 회차지 출발을 감지
-    @Scheduled(fixedDelay = 60000)
+    // 30초마다 실행, 차고지 및 회차지 출발을 감지
+    @Scheduled(fixedDelay = 30000)
     public void pollBusLocations() {
         // 현재 알림 대기 중인 노선 ID만 조회
         List<String> activeRouteIds = depotNotificationRepository.findDistinctActiveRouteIds();

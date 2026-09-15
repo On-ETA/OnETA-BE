@@ -77,8 +77,8 @@ public class SeoulBusRouteSyncService {
 
                 log.info("[API 호출 시도] URI: {}", uri);
 
-                String rawResponse = restTemplate.getForObject(uri, String.class);
-                log.info("[API 응답 본문] 키워드 '{}' 응답: {}", keyword, rawResponse);
+                // String rawResponse = restTemplate.getForObject(uri, String.class);
+                // log.info("[API 응답 본문] 키워드 '{}' 응답: {}", keyword, rawResponse);
 
                 // ** [서울특별시_노선정보조회 서비스] API 호출 **
                 BusRouteApiResponseDto response = restTemplate.getForObject(uri, BusRouteApiResponseDto.class);
