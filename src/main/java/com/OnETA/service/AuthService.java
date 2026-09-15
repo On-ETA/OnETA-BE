@@ -85,7 +85,7 @@ public class AuthService {
         }
 
         // 사용자가 GUEST role 이 아닌 모든 상태 접근 차단
-        if(user.getRole() != Role.USER){
+        if(user.getRole() != Role.GUEST){
             throw new GlobalException(ErrorCode.INVALID_INPUT_VALUE, "약관 동의 대상자가 아닙니다. 이미 가입이 완료되었거나 권한이 없습니다.");
         }
 
