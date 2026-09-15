@@ -94,3 +94,7 @@ jwt:
 api:
   seoul-bus:
     service-key: ${PUBLICDATA_API_KEY}
+
+logging:
+  level:
+    org.springframework.security: TRACE
