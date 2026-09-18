@@ -1,7 +1,9 @@
 package com.OnETA.security;
 
+import com.OnETA.common.exception.GlobalException;
 import com.OnETA.entity.*;
 import com.OnETA.repository.UserRepository;
+import com.OnETA.service.AuthService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.oauth2.core.user.OAuth2User;
@@ -10,12 +12,17 @@ import org.springframework.stereotype.Component;
 
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import org.springframework.web.util.UriComponentsBuilder;
+
 import java.io.IOException;
+
+import static com.OnETA.common.error.ErrorCode.USER_NOT_FOUND;
 
 @Component
 @RequiredArgsConstructor
 public class OAuth2SuccessHandler extends SimpleUrlAuthenticationSuccessHandler {
 
+    private final AuthService authService;
     private final JwtProvider jwtProvider;
     private final UserRepository userRepository;
 
@@ -25,18 +32,30 @@ public class OAuth2SuccessHandler extends SimpleUrlAuthenticationSuccessHandler 
         OAuth2User oAuth2User = (OAuth2User) authentication.getPrincipal();
         String email = oAuth2User.getAttribute("email");
 
-        User user = userRepository.findByEmail(email).orElseThrow();
+        User user = userRepository.findByEmail(email)
+                .orElseThrow(() -> new GlobalException(USER_NOT_FOUND));
 
         // 2. 해당 사용자의 이메일로 access Token, refresh Token 생성
         String accessToken = jwtProvider.createAccessToken(email, user.getRole().getKey());
         String refreshToken = jwtProvider.createRefreshToken(email);
 
-        // 3. 토큰을 가지고 우리가 원하는 엔드포인트(혹은 앱의 스킴)로 리다이렉트
-        // 구글 가입자도 DB에 리프레시 토큰 저장 필요 (AuthService 의존성 주입 등 활용 권장, 여기서는 생략된 구조를 직접 구현해야 할 수 있음.
-        // 간단하게 바로 저장하도록 Service에 넘기는 방식을 추천합니다.)
-        // 클라이언트로 리다이렉트 (임시로 URL 파라미터 2개 전송)
-        String targetUrl = "/api/token-test?accessToken=" + accessToken + "&refreshToken=" + refreshToken;
+        // 구글 가입자도 DB에 리프레시 토큰 저장 필요
+        authService.saveOrUpdateRefreshToken(email, refreshToken);
 
-        getRedirectStrategy().sendRedirect(request, response, targetUrl);
+        String targetUrl;
+
+        if (user.getRole() == Role.GUEST) { // 신규 구글 가입자 -> 약관 동의 화면 이동
+            targetUrl = "https://on-eta.com/signup/consent";
+        } else { // 기존 회원 (USER) -> 홈 화면 이동
+            targetUrl = "https://on-eta.com/home";
+        }
+
+        // 3. 토큰을 가지고 우리가 원하는 엔드포인트로 리다이렉트 (URL 파라미터 2개 전송)
+        String finalUrl = UriComponentsBuilder.fromUriString(targetUrl)
+                .queryParam("accessToken", accessToken)
+                .queryParam("refreshToken", refreshToken)
+                .build().toUriString();
+
+        getRedirectStrategy().sendRedirect(request, response, finalUrl);
     }
 }

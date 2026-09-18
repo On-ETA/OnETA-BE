@@ -50,17 +50,17 @@ public class SecurityConfig {
                         .requestMatchers(
                                 "/",
                                 "/login**",
-                                "/api/token-test",
                                 "/api/auth/**",
-                                "/v3/api-docs/**",     // Swagger 기본 설정 (혹시 모를 대비)
-                                "/api-docs/**",        // Custom Swagger 데이터 경로
-                                "/swagger-ui/**",      // Swagger UI 화면
-                                "/swagger-ui.html",    // Swagger UI 진입점
+                                "/v3/api-docs/**",      // Swagger 기본 설정 (혹시 모를 대비)
+                                "/api-docs/**",         // Custom Swagger 데이터 경로
+                                "/swagger-ui/**",       // Swagger UI 화면
+                                "/swagger-ui.html",     // Swagger UI 진입점
                                 "/h2-console/**",       // H2 Console (enabled only in local profile)
                                 "/oauth2/**",
                                 "/login/oauth2/code/**", // 구글 로그인 진입점 및 리다이렉트 주소 허용
-                                "/error"                 // 내부 에러 발생 시 시큐리티가 막지 않도록 허용
-                        ).permitAll() // 토큰 테스트 URL은 통과시켜 줍니다.
+                                "/error",                // 내부 에러 발생 시 시큐리티가 막지 않도록 허용
+                                "/favicon.ico"          // 브라우저 기본 파비콘 요청 허용하여 불필요한 에러 로그 방지
+                        ).permitAll() // 토큰 테스트 URL은 통과
 
                         // 명시되지 않은 API는 ROLE_USER 권한이 있어야 통과
                         .anyRequest().hasAuthority("ROLE_USER")
