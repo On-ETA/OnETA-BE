@@ -4,7 +4,7 @@ import java.util.Locale;
 
 enum ApiQuota {
     ODSAY(1000), KAKAO(100000), KAKAO_TRANSIT(1000), SEOUL_ARRIVAL(1000), SEOUL_LOCATION(1000),
-    SEOUL_ROUTES(1000), SEOUL_STATIONS(1000), TAGO_ARRIVAL(10000), TAGO_STATIONS(10000), FCM(0), SMTP(0), UNKNOWN(0);
+    SEOUL_ROUTES(1000), SEOUL_STATIONS(1000), TAGO_ARRIVAL(10000), TAGO_STATIONS(10000), TAGO_SUBWAY(10000), FCM(0), SMTP(0), UNKNOWN(0);
 
     final long referenceLimit;
     ApiQuota(long referenceLimit) { this.referenceLimit = referenceLimit; }
@@ -23,6 +23,7 @@ enum ApiQuota {
             case "TAGO" -> api.contains("ArvlInfoInqireService") ? TAGO_ARRIVAL
                     : api.contains("BusSttnInfoInqireService") ? TAGO_STATIONS : UNKNOWN;
             case "FCM" -> FCM;
+            case "TAGO_SUBWAY" -> TAGO_SUBWAY;
             case "SMTP" -> SMTP;
             default -> UNKNOWN;
         };

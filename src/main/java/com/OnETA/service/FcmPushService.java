@@ -11,6 +11,7 @@ import com.google.firebase.messaging.MessagingErrorCode;
 import com.google.firebase.messaging.AndroidConfig;
 import com.google.firebase.messaging.ApnsConfig;
 import com.google.firebase.messaging.Message;
+import com.google.firebase.messaging.WebpushConfig;
 import com.google.firebase.messaging.Notification;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -72,8 +73,7 @@ public class FcmPushService {
     public void sendPushMessage(String deviceToken, String title, String body,
                                 java.time.LocalDateTime hardDeadlineAt) {
         if (!firebaseEnabled) {
-            log.debug("Firebase is disabled; skipping FCM push.");
-            return;
+            throw new FcmPushException("FIREBASE_DISABLED", "Firebase 발송이 비활성화되어 있습니다.", true, null);
         }
 
         try {
@@ -96,6 +96,8 @@ public class FcmPushService {
                 messageBuilder.setAndroidConfig(AndroidConfig.builder()
                         .setTtl(remainingMillis)
                         .build());
+                messageBuilder.setWebpushConfig(WebpushConfig.builder()
+                        .putHeader("TTL", Long.toString((remainingMillis + 999) / 1000)).build());
                 messageBuilder.setApnsConfig(ApnsConfig.builder()
                         .putHeader("apns-expiration",
                                 String.valueOf(hardDeadlineAt.toInstant(ZoneOffset.UTC).getEpochSecond()))

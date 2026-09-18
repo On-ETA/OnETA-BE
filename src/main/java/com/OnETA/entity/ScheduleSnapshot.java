@@ -40,6 +40,7 @@ public class ScheduleSnapshot {
     @Column(name = "status", nullable = false, length = 32) private String status;
     @Column(name = "calculated_at", nullable = false) private LocalDateTime calculatedAt;
     @Column(name = "estimated_duration_minutes", nullable = false) private int estimatedDurationMinutes;
+    @Column(name = "provider_details", columnDefinition = "TEXT") private String providerDetails;
 
     public ScheduleSnapshot(ArrivalNotification notification, LocalDate serviceDate,
                             NotificationScheduleType scheduleType, String routeHash,
@@ -76,4 +77,14 @@ public class ScheduleSnapshot {
     public void markRecoveryDeliveryCreated() { this.evaluationMode = ScheduleEvaluationMode.RECOVERY; this.recoveryStatus = RecoveryStatus.DELIVERY_CREATED; this.recoveryNextRetryAt = null; }
     public void finish() { this.evaluationMode = ScheduleEvaluationMode.FINISHED; this.recoveryStatus = RecoveryStatus.FINISHED; }
     public void useSeoulBusSource() { this.source = "SEOUL_BUS"; }
+    public void useSeoulTransferSource(String details) {
+        this.source = "SEOUL_BUS_TRANSFER";
+        this.providerDetails = details;
+    }
+    public void updateConnection(LocalDateTime departure, LocalDateTime scheduled, int duration, LocalDateTime now) {
+        this.effectiveDepartureAt = departure;
+        this.effectiveScheduledAt = scheduled;
+        this.estimatedDurationMinutes = duration;
+        this.lastRealtimeEvaluatedAt = now;
+    }
 }

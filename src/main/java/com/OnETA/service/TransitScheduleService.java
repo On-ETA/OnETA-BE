@@ -76,6 +76,10 @@ public class TransitScheduleService {
         LocalDateTime deadline = snapshot.getEffectiveDepartureAt();
         DeliveryPhase phase = DeliveryPhase.BASE;
 
+        if ("SEOUL_BUS_TRANSFER".equals(snapshot.getSource())) {
+            return evaluateSeoulTransfer(snapshot, notification, now, type, offset);
+        }
+
         if ("SEOUL_BUS".equals(snapshot.getSource())) {
             if (!deadline.isAfter(now)) return null;
             return new Decision(scheduled, deadline, phase, snapshot.getBaseDepartureAt(),
@@ -146,19 +150,25 @@ public class TransitScheduleService {
         for (TransitDto.RouteSegment s : segments) {
             if ("BUS".equals(s.getTransitType()) || "SUBWAY".equals(s.getTransitType())) {
                 LocalDateTime service = serviceTime(s, type, date);
-                if (service != null) candidates.add(service.minusMinutes(prefix));
+                if (service == null) throw new com.OnETA.common.exception.GlobalException(
+                        com.OnETA.common.error.ErrorCode.TRANSIT_SCHEDULE_UNSUPPORTED);
+                candidates.add(service);
             }
             prefix += Math.max(0, s.getDurationMinutes() == null ? 0 : s.getDurationMinutes());
         }
         if (candidates.isEmpty()) throw new IllegalStateException("운행정보가 있는 transit segment가 없습니다.");
-        departure = type == NotificationScheduleType.FIRST_TRANSIT
-                ? candidates.stream().max(LocalDateTime::compareTo).orElseThrow()
-                : candidates.stream().min(LocalDateTime::compareTo).orElseThrow();
+        TransitScheduleCalculator.Plan plan;
+        try { plan = TransitScheduleCalculator.calculate(segments, candidates, type); }
+        catch (com.OnETA.common.exception.GlobalException e) {
+            if (e.getErrorCode() != com.OnETA.common.error.ErrorCode.TRANSIT_CONNECTION_UNVERIFIED) throw e;
+            plan = TransitScheduleCalculator.conservative(segments, candidates, type);
+        }
+        departure = plan.departure();
         int offset = type == NotificationScheduleType.FIRST_TRANSIT
                 ? n.getReminderOffsetMinutesList().stream().max(Integer::compareTo).orElse(0)
                 : n.getReminderOffsetMinutes();
         LocalDateTime scheduled = departure.minusMinutes(offset);
-        int duration = route.getTotalDurationMinutes() == null ? prefix : route.getTotalDurationMinutes();
+        int duration = plan.durationMinutes();
         LocalDateTime start = scheduled.minusMinutes(Math.max(15, Math.min(60, duration)));
         return snapshotRepository.save(new ScheduleSnapshot(n, date, type, hash, departure, scheduled, start,
                 LocalDateTime.now(ZoneOffset.UTC), duration));
@@ -166,22 +176,89 @@ public class TransitScheduleService {
 
     private ScheduleSnapshot createSeoulSnapshot(ArrivalNotification n, TransitDto.RouteOptionResponse route,
                                                  LocalDate date, NotificationScheduleType type, String hash) {
-        var times = seoulBusScheduleService.resolve(route, date);
-        int walkMinutes = 0;
-        for (var segment : route.getSegments()) {
-            if ("BUS".equals(segment.getTransitType())) break;
-            walkMinutes += segment.getDurationMinutes();
+        long rides = route.getSegments().stream().filter(s -> !"WALK".equals(s.getTransitType())).count();
+        if (rides > 1 || route.getSegments().stream().anyMatch(s -> "SUBWAY".equals(s.getTransitType()))) {
+            var times = seoulBusScheduleService.resolveRoute(route, date);
+            List<LocalDateTime> bounds = new ArrayList<>();
+            int prefix = 0, ride = 0;
+            for (var segment : route.getSegments()) {
+                if (!"WALK".equals(segment.getTransitType())) {
+                    var time = times.get(ride++);
+                    bounds.add(type == NotificationScheduleType.FIRST_TRANSIT ? time.first() : time.last());
+                }
+                prefix += segment.getDurationMinutes();
+            }
+            var fallback = TransitScheduleCalculator.conservative(route.getSegments(), bounds, type);
+            LocalDateTime departure = fallback.departure();
+            int offset = type == NotificationScheduleType.FIRST_TRANSIT
+                    ? n.getReminderOffsetMinutesList().stream().max(Integer::compareTo).orElse(0)
+                    : n.getReminderOffsetMinutes();
+            LocalDateTime scheduled = departure.minusMinutes(offset);
+            var snapshot = new ScheduleSnapshot(n, date, type, hash, departure, scheduled,
+                    scheduled.minusMinutes(Math.max(60, prefix)), LocalDateTime.now(ZoneOffset.UTC), fallback.durationMinutes());
+            snapshot.useSeoulTransferSource(objectMapper.writeValueAsString(times));
+            return snapshotRepository.save(snapshot);
         }
+        var times = seoulBusScheduleService.resolve(route, date);
         LocalDateTime boarding = type == NotificationScheduleType.FIRST_TRANSIT ? times.first() : times.last();
-        LocalDateTime departure = boarding.minusMinutes(walkMinutes);
+        var plan = TransitScheduleCalculator.calculate(route.getSegments(), List.of(boarding), type);
+        LocalDateTime departure = plan.departure();
         int offset = type == NotificationScheduleType.FIRST_TRANSIT
                 ? n.getReminderOffsetMinutesList().stream().max(Integer::compareTo).orElse(0)
                 : n.getReminderOffsetMinutes();
         LocalDateTime scheduled = departure.minusMinutes(offset);
         ScheduleSnapshot snapshot = new ScheduleSnapshot(n, date, type, hash, departure, scheduled,
-                scheduled, LocalDateTime.now(ZoneOffset.UTC), route.getTotalDurationMinutes());
+                scheduled, LocalDateTime.now(ZoneOffset.UTC), plan.durationMinutes());
         snapshot.useSeoulBusSource();
         return snapshotRepository.save(snapshot);
+    }
+
+    private Decision evaluateSeoulTransfer(ScheduleSnapshot snapshot, ArrivalNotification n,
+                                            LocalDateTime now, NotificationScheduleType type, int offset) {
+        if (now.isBefore(snapshot.getRealtimeEvaluationStartAt())) return null;
+        // Bounded polling; no midday recovery of a missed first service.
+        if (now.isAfter(snapshot.getBaseDepartureAt().plusMinutes(60))) return null;
+        var route = transitApiService.readSavedRoute(n.getRouteDetails());
+        var schedules = objectMapper.readValue(snapshot.getProviderDetails(), SeoulBusScheduleService.Schedule[].class);
+        List<List<SeoulBusScheduleService.LiveBus>> arrivals = new ArrayList<>();
+        for (var schedule : schedules) {
+            try {
+            arrivals.add(seoulBusScheduleService.arrivals(schedule, now).stream()
+                    .filter(bus -> !bus.boarding().isBefore(schedule.first().minusMinutes(5))
+                            && !bus.boarding().isAfter(schedule.last().plusMinutes(60)))
+                    .toList());
+            } catch (RuntimeException e) {
+                log.debug("Using conservative timetable after live lookup failure: notificationId={}", n.getId());
+                arrivals.add(List.of());
+            }
+        }
+        List<LocalDateTime> observedBounds = new ArrayList<>();
+        boolean earlierObserved = false;
+        for (int i = 0; i < schedules.length; i++) {
+            LocalDateTime boundary = type == NotificationScheduleType.FIRST_TRANSIT ? schedules[i].first() : schedules[i].last();
+            var candidates = arrivals.get(i).stream()
+                    .filter(bus -> type == NotificationScheduleType.FIRST_TRANSIT || bus.last())
+                    .map(SeoulBusScheduleService.LiveBus::boarding).min(LocalDateTime::compareTo);
+            if (candidates.isPresent() && candidates.get().isBefore(boundary)) {
+                boundary = candidates.get();
+                earlierObserved = true;
+            }
+            observedBounds.add(boundary);
+        }
+        var earlyEstimate = TransitScheduleCalculator.conservative(route.getSegments(), observedBounds, type);
+        var plan = TransitScheduleCalculator.live(route.getSegments(), arrivals, type, now);
+        // Missing live data must not suppress a conservative early-departure alert.
+        // Live observations can advance the alert but must never postpone it.
+        if (plan == null || plan.departure().isAfter(snapshot.getEffectiveDepartureAt())) {
+            plan = new TransitScheduleCalculator.Plan(snapshot.getEffectiveDepartureAt(), snapshot.getEstimatedDurationMinutes());
+        }
+        if (earlierObserved && earlyEstimate.departure().isBefore(plan.departure())) plan = earlyEstimate;
+        if (!plan.departure().isAfter(now)) return null;
+        LocalDateTime scheduled = plan.departure().minusMinutes(offset);
+        snapshot.updateConnection(plan.departure(), scheduled, plan.durationMinutes(), now);
+        snapshotRepository.save(snapshot);
+        return new Decision(scheduled, plan.departure(), DeliveryPhase.BASE, snapshot.getBaseDepartureAt(),
+                plan.departure(), false, plan.durationMinutes());
     }
 
     private void evaluateFirstSafety(ScheduleSnapshot snapshot, ArrivalNotification n, LocalDateTime now, ZoneId zone) {
@@ -392,7 +469,7 @@ public class TransitScheduleService {
         } catch (Exception e) { return null; }
     }
     private boolean same(JsonNode n, String value) { return value != null && !n.isMissingNode() && value.equals(n.asText()); }
-    private String hash(String v) { try { return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest((v==null?"":v).getBytes(StandardCharsets.UTF_8))); } catch(Exception e){throw new IllegalStateException(e);} }
+    private String hash(String v) { try { return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(("schedule-v3:" + (v==null?"":v)).getBytes(StandardCharsets.UTF_8))); } catch(Exception e){throw new IllegalStateException(e);} }
     public record Decision(LocalDateTime scheduledAt, LocalDateTime hardDeadlineAt, DeliveryPhase phase, LocalDateTime baseDepartureAt, LocalDateTime effectiveDepartureAt, boolean recovery, int estimatedDuration) {}
     private record RecoveryCandidate(LocalDateTime boardingAt, LocalDateTime scheduledAt) {}
 }

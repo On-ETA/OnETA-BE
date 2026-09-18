@@ -16,6 +16,7 @@ public class NotificationDto {
     @Setter
     public static class CreateArrivalRequest {
         private String routeName;
+        @io.swagger.v3.oas.annotations.media.Schema(description = "NORMAL에서만 필수. FIRST_TRANSIT/LAST_TRANSIT은 생략 가능하며 저장하지 않습니다.", requiredMode = io.swagger.v3.oas.annotations.media.Schema.RequiredMode.NOT_REQUIRED)
         private LocalTime targetArrivalTime;
         private List<Integer> reminderOffsetMinutes;
         private List<String> repeatDays;
@@ -43,6 +44,7 @@ public class NotificationDto {
     @Getter
     @Builder
     public static class ArrivalResponse {
+        private com.OnETA.entity.NotificationCategory category;
         private Long notificationId;
         private String routeName;
         private LocalTime targetArrivalTime;
@@ -54,6 +56,7 @@ public class NotificationDto {
 
         public static ArrivalResponse fromEntity(ArrivalNotification entity, RepeatDaysService repeatDaysService) {
             return ArrivalResponse.builder()
+                    .category(com.OnETA.entity.NotificationCategory.of(entity.getScheduleType()))
                     .notificationId(entity.getId())
                     .routeName(entity.getName())
                     .targetArrivalTime(entity.getTargetArrivalTime())
@@ -69,6 +72,7 @@ public class NotificationDto {
     @Getter
     @Builder
     public static class ArrivalDetailResponse {
+        private com.OnETA.entity.NotificationCategory category;
         private Long notificationId;
         private String routeName;
         private LocalTime targetArrivalTime;

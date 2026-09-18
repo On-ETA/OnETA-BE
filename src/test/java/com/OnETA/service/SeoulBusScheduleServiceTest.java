@@ -123,6 +123,68 @@ class SeoulBusScheduleServiceTest {
                 e -> assertThat(e.getErrorCode()).isEqualTo(ErrorCode.TRANSIT_SCHEDULE_UNSUPPORTED));
     }
 
+    @Test
+    void matchesPlatformAnnotationsWithoutDroppingDirectionIdentity() {
+        mapping(false, "3"); times("0530", "2330");
+        var original = route();
+        var bus = original.getSegments().get(1).toBuilder().startStation("출발역(7번승강장)(중)")
+                .stations(List.of(TransitDto.RouteStation.builder().name("출발역(7번승강장)(중)").build(),
+                        TransitDto.RouteStation.builder().name("도착역").build())).build();
+        assertThat(service.resolve(original.toBuilder().segments(List.of(bus)).build(), DAY).order()).isEqualTo(1);
+        server.verify();
+    }
+
+    @Test
+    void resolvesEveryBusOfTransferRouteAndReusesMappingCache() {
+        mapping(false, "3"); times("0530", "2330");
+        var bus = route().getSegments().get(1);
+        var transfer = route().toBuilder().transferCount(1).segments(List.of(bus, bus)).build();
+        assertThat(service.resolveRoute(transfer, DAY)).hasSize(2);
+        server.verify();
+    }
+
+    @Test
+    void resolvesBusAndSubwayTogetherInOriginalSegmentOrder() {
+        mapping(false, "3"); times("0530", "2330");
+        var subwayClient = org.mockito.Mockito.mock(TagoSubwayScheduleService.class);
+        service.setSubway(subwayClient);
+        var bus = route().getSegments().get(1);
+        var subway = bus.toBuilder().transitType("SUBWAY").transitName("4호선").build();
+        var schedule = new SeoulBusScheduleService.Schedule("START", "", "TAGO_SUBWAY:4호선",
+                DAY.atTime(6, 0), DAY.atTime(23, 50));
+        org.mockito.Mockito.when(subwayClient.resolve(subway, DAY)).thenReturn(schedule);
+        var resolved = service.resolveRoute(route().toBuilder().segments(List.of(bus, subway)).build(), DAY);
+        assertThat(resolved).hasSize(2);
+        assertThat(resolved.get(0).routeId()).isEqualTo("100100088");
+        assertThat(resolved.get(1)).isEqualTo(schedule);
+        server.verify();
+    }
+
+    @Test
+    void livePredictionsUseExactStopOrderSameVehicleAndProviderObservationTime() {
+        var schedule = new SeoulBusScheduleService.Schedule("100000001", "01001", "100100088",
+                DAY.atTime(5, 30), DAY.atTime(23, 30), 10, "100000002", 20);
+        String start = "<itemList><stId>100000001</stId><staOrd>10</staOrd><mkTm>2026-09-18 12:00:00.0</mkTm>"
+                + "<vehId1>111</vehId1><exps1>600</exps1><isLast1>1</isLast1>"
+                + "<vehId2>222</vehId2><exps2>900</exps2><full2>1</full2></itemList>";
+        String end = "<itemList><stId>100000002</stId><staOrd>20</staOrd><mkTm>2026-09-18 12:00:00.0</mkTm>"
+                + "<vehId1>111</vehId1><exps1>1200</exps1></itemList>";
+        server.expect(requestTo("https://seoul.test/api/rest/arrive/getArrInfoByRouteAll?serviceKey=key&busRouteId=100100088"))
+                .andRespond(withSuccess(xml(start + end), MediaType.APPLICATION_XML));
+        var arrivals = service.arrivals(schedule, DAY.atTime(12, 0));
+        assertThat(arrivals).hasSize(1);
+        assertThat(arrivals.get(0).boarding()).isEqualTo(DAY.atTime(12, 10));
+        assertThat(arrivals.get(0).alighting()).isEqualTo(DAY.atTime(12, 20));
+        assertThat(arrivals.get(0).last()).isTrue();
+        // Cached predictions must not slide forward when polled again.
+        assertThat(service.arrivals(schedule, DAY.atTime(12, 0, 10))).isEqualTo(arrivals);
+        assertThat(service.arrivals(schedule, DAY.atTime(12, 2))).isEmpty();
+        var wrongOrder = new SeoulBusScheduleService.Schedule("100000001", "01001", "100100088",
+                DAY.atTime(5, 30), DAY.atTime(23, 30), 11, "100000002", 20);
+        assertThat(service.arrivals(wrongOrder, DAY.atTime(12, 0))).isEmpty();
+        server.verify();
+    }
+
     @ParameterizedTest
     @ValueSource(strings = {"a+b/c==", "a%2Bb%2Fc%3D%3D"})
     void preservesReservedCharactersInRawAndEncodedServiceKeys(String key) {

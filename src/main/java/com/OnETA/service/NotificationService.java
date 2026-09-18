@@ -62,9 +62,16 @@ public class NotificationService {
                 .collect(Collectors.toList());
     }
 
+    public List<NotificationDto.ArrivalResponse> getArrivalNotifications(String email,
+            com.OnETA.entity.NotificationCategory category) {
+        return getArrivalNotifications(email).stream()
+                .filter(n -> category == null || n.getCategory() == category).toList();
+    }
+
     public NotificationDto.ArrivalDetailResponse getArrivalNotificationDetail(String email, Long id) {
         ArrivalNotification notification = getArrivalNotificationByEmailAndId(email, id);
         return NotificationDto.ArrivalDetailResponse.builder()
+                .category(com.OnETA.entity.NotificationCategory.of(notification.getScheduleType()))
                 .notificationId(notification.getId())
                 .routeName(notification.getName())
                 .targetArrivalTime(notification.getTargetArrivalTime())

@@ -76,7 +76,7 @@ public class TransitApiService {
     }
 
     public void validateSeoulSchedule(TransitDto.RouteOptionResponse route) {
-        seoulBusScheduleService.resolve(route, seoulBusScheduleService.today());
+        seoulBusScheduleService.resolveRoute(route, seoulBusScheduleService.today());
     }
 
     /**
