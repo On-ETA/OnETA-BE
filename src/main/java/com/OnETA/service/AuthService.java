@@ -126,7 +126,7 @@ public class AuthService {
     }
 
     // 리프레시 토큰 저장 내부 로직
-    private void saveOrUpdateRefreshToken(String email, String refreshToken) {
+    public void saveOrUpdateRefreshToken(String email, String refreshToken) {
         refreshTokenRepository.findByEmail(email)
                 .ifPresentOrElse(
                         token -> token.updateToken(refreshToken),
