@@ -32,6 +32,30 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 class NotificationDeliveryServiceTest {
 
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.EnumSource(value = com.OnETA.entity.NotificationScheduleType.class,
+            names = {"FIRST_TRANSIT", "LAST_TRANSIT"})
+    void scheduledTransitBodyDoesNotIncludeNullArrivalTime(com.OnETA.entity.NotificationScheduleType type) {
+        var deliveries = mock(NotificationDeliveryRepository.class);
+        var tokens = mock(UserDeviceTokenRepository.class);
+        User user = mock(User.class);
+        when(user.getId()).thenReturn(1L);
+        when(tokens.findByUserId(1L)).thenReturn(Optional.of(new UserDeviceToken(user, "token")));
+        ArrivalNotification notification = new ArrivalNotification(user, "경로", List.of(10), 0,
+                null, "{}", type);
+        NotificationDeliveryService service = new NotificationDeliveryService(deliveries,
+                mock(ArrivalNotificationRepository.class), tokens, mock(FcmPushService.class),
+                mock(PlatformTransactionManager.class), retryProperties(),
+                mock(ScheduledExecutorService.class), new Semaphore(4));
+        LocalDateTime scheduled = LocalDateTime.of(2026, 9, 18, 9, 0);
+        assertThat(service.prepare(notification, 30, scheduled.toLocalDate(), scheduled,
+                10, scheduled.plusMinutes(10), DeliveryPhase.BASE)).isTrue();
+        ArgumentCaptor<NotificationDelivery> saved = ArgumentCaptor.forClass(NotificationDelivery.class);
+        verify(deliveries).save(saved.capture());
+        assertThat(saved.getValue().getBody()).doesNotContain("null", "목표 시간")
+                .contains(type == com.OnETA.entity.NotificationScheduleType.FIRST_TRANSIT ? "첫차" : "막차");
+    }
+
     @Test
     void sentDeliveryIsNotDispatchedAgain() {
         NotificationDeliveryRepository deliveries = mock(NotificationDeliveryRepository.class);

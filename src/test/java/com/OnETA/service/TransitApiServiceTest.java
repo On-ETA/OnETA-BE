@@ -3,12 +3,17 @@ package com.OnETA.service;
 import com.OnETA.dto.TransitDto;
 import tools.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
+import com.OnETA.common.error.ErrorCode;
+import com.OnETA.common.exception.GlobalException;
 import org.springframework.http.MediaType;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.web.client.RestTemplate;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -17,6 +22,36 @@ import static org.springframework.test.web.client.match.MockRestRequestMatchers.
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 
 class TransitApiServiceTest {
+
+    @ParameterizedTest
+    @CsvSource(delimiter = '|', value = {
+            "{\"error\":[{\"code\":\"429\",\"message\":\"Daily quota exceeded\"}]}|TRANSIT_API_UNAVAILABLE",
+            "{\"error\":{\"code\":\"-99\"}}|TRANSIT_ROUTE_NOT_FOUND",
+            "{\"error\":[{\"code\":\"-98\"}]}|INVALID_INPUT_VALUE",
+            "{\"result\":{\"searchType\":1,\"trainRequest\":{\"count\":1}}}|TRANSIT_ROUTE_UNSUPPORTED",
+            "{\"result\":{\"searchType\":2}}|TRANSIT_ROUTE_UNSUPPORTED",
+            "{\"result\":{\"path\":[]}}|TRANSIT_ROUTE_NOT_FOUND",
+            "{\"result\":{}}|TRANSIT_INVALID_RESPONSE",
+            "null|TRANSIT_INVALID_RESPONSE",
+            "not-json|TRANSIT_INVALID_RESPONSE",
+            "{\"result\":{\"path\":[{\"info\":{},\"subPath\":[{\"trafficType\":4}]}]}}|TRANSIT_ROUTE_UNSUPPORTED"
+    })
+    void classifiesProviderResponses(String body, ErrorCode expected) {
+        RestTemplate restTemplate = new RestTemplate();
+        MockRestServiceServer server = MockRestServiceServer.bindTo(restTemplate).build();
+        TransitApiService service = new TransitApiService(mock(PublicDataTransitService.class),
+                new ObjectMapper(), restTemplate);
+        ReflectionTestUtils.setField(service, "odsayApiKey", "test-key");
+        ReflectionTestUtils.setField(service, "odsayApiUrl", "https://api.odsay.com/v1/api/searchPubTransPathR");
+        server.expect(queryParam("SX", "127.05593797036339"))
+                .andRespond(withSuccess(body, MediaType.APPLICATION_JSON));
+
+        assertThatThrownBy(() -> service.searchRoutes(127.05593797036339, 35.99330835090628,
+                127.060175955621, 37.2042695838843))
+                .isInstanceOfSatisfying(GlobalException.class,
+                        exception -> assertThat(exception.getErrorCode()).isEqualTo(expected));
+        server.verify();
+    }
 
     @Test
     void sendsOdsayRefererAndCalculatesDurationWithBusWait() {

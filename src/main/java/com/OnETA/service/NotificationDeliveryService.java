@@ -72,8 +72,7 @@ public class NotificationDeliveryService {
         boolean[] created = {false};
         userDeviceTokenRepository.findByUserId(notification.getUser().getId()).ifPresent(token -> {
             String title = "출발 알림: " + notification.getName();
-            String body = String.format("지금 출발하시면 목표 시간(%s)에 도착할 수 있습니다. (예상 소요 시간: %d분)",
-                    notification.getTargetArrivalTime(), estimatedDuration);
+            String body = notificationBody(notification, estimatedDuration);
             deliveryRepository.save(new NotificationDelivery(notification, deliveryDate, reminderOffsetMinutes,
                     phase, token.getDeviceToken(), title, body, scheduledAt, hardDeadlineAt));
             created[0] = true;
@@ -99,15 +98,24 @@ public class NotificationDeliveryService {
                                                int reminderOffsetMinutes) {
         userDeviceTokenRepository.findByUserId(notification.getUser().getId()).ifPresent(token -> {
             String title = "출발 알림: " + notification.getName();
-            String body = String.format(
-                    "지금 출발하시면 목표 시간(%s)에 도착할 수 있습니다. (예상 소요 시간: %d분)",
-                    notification.getTargetArrivalTime(), estimatedDuration);
+            String body = notificationBody(notification, estimatedDuration);
             LocalDateTime hardDeadlineAt = scheduledAt.plusMinutes(
                     reminderOffsetMinutes);
         deliveryRepository.save(new NotificationDelivery(
                 notification, deliveryDate, reminderOffsetMinutes, token.getDeviceToken(), title, body,
                     scheduledAt, hardDeadlineAt));
         });
+    }
+
+    private String notificationBody(ArrivalNotification notification, int estimatedDuration) {
+        if (notification.getScheduleType() == com.OnETA.entity.NotificationScheduleType.FIRST_TRANSIT) {
+            return "첫차 이용을 위한 출발 시간입니다. 정류장 또는 역으로 이동해주세요.";
+        }
+        if (notification.getScheduleType() == com.OnETA.entity.NotificationScheduleType.LAST_TRANSIT) {
+            return "막차 이용을 위한 출발 시간입니다. 정류장 또는 역으로 이동해주세요.";
+        }
+        return String.format("지금 출발하시면 목표 시간(%s)에 도착할 수 있습니다. (예상 소요 시간: %d분)",
+                notification.getTargetArrivalTime(), estimatedDuration);
     }
 
     public void processPending() {
@@ -195,7 +203,7 @@ public class NotificationDeliveryService {
                         delivery.getNotification().completeOneTimeNotification();
                     }
                 }
-                arrivalNotificationRepository.save((ArrivalNotification) delivery.getNotification());
+                arrivalNotificationRepository.save((ArrivalNotification) org.hibernate.Hibernate.unproxy(delivery.getNotification()));
                 deliveryRepository.save(delivery);
             }
         });
@@ -330,7 +338,7 @@ public class NotificationDeliveryService {
     private void completeOneTimeIfNecessary(NotificationDelivery delivery) {
         if (delivery.getNotification().getRepeatDays() == 0 && isFinalReminder(delivery)) {
             delivery.getNotification().completeOneTimeNotification();
-            arrivalNotificationRepository.save((ArrivalNotification) delivery.getNotification());
+            arrivalNotificationRepository.save((ArrivalNotification) org.hibernate.Hibernate.unproxy(delivery.getNotification()));
         }
     }
 

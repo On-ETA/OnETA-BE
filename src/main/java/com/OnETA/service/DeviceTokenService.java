@@ -20,22 +20,27 @@ public class DeviceTokenService {
 
     @Transactional
     public void registerOrUpdateToken(String email, String token) {
+        if (token == null || token.isBlank() || token.length() > 255
+                || token.chars().anyMatch(Character::isWhitespace)) {
+            throw new com.OnETA.common.exception.GlobalException(
+                    com.OnETA.common.error.ErrorCode.INVALID_INPUT_VALUE,
+                    "deviceToken은 공백 없는 255자 이하의 문자열이어야 합니다.");
+        }
         User user = userRepository.findByEmail(email)
                 .orElseThrow(() -> new com.OnETA.common.exception.GlobalException(com.OnETA.common.error.ErrorCode.USER_NOT_FOUND));
 
         Optional<UserDeviceToken> existingToken = userDeviceTokenRepository.findByUserId(user.getId());
 
+        userDeviceTokenRepository.findByDeviceToken(token)
+                .filter(other -> existingToken.isEmpty() || !other.getId().equals(existingToken.get().getId()))
+                .ifPresent(other -> {
+                    throw new com.OnETA.common.exception.GlobalException(
+                            com.OnETA.common.error.ErrorCode.DEVICE_TOKEN_CONFLICT);
+                });
+
         if (existingToken.isPresent()) {
-            userDeviceTokenRepository.findByDeviceToken(token)
-                    .filter(other -> !other.getId().equals(existingToken.get().getId()))
-                    .ifPresent(other -> {
-                        throw new IllegalArgumentException("이미 다른 사용자에게 등록된 디바이스 토큰입니다.");
-                    });
             existingToken.get().updateToken(token);
         } else {
-            // Also ensure no other user has this token (if it was reassigned to a new device)
-            userDeviceTokenRepository.findByDeviceToken(token).ifPresent(userDeviceTokenRepository::delete);
-            
             UserDeviceToken newToken = new UserDeviceToken(user, token);
             userDeviceTokenRepository.save(newToken);
         }

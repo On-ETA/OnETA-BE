@@ -92,6 +92,12 @@ public class NotificationService {
         ArrivalNotification notification = getArrivalNotificationByEmailAndId(email, id);
 
         validateReminderOffsets(request.getReminderOffsetMinutes(), false);
+        NotificationScheduleType effectiveType = request.getScheduleType() == null
+                ? notification.getScheduleType() : request.getScheduleType();
+        validateTargetArrivalTime(effectiveType, request.getTargetArrivalTime() == null
+                ? notification.getTargetArrivalTime() : request.getTargetArrivalTime());
+        validateRouteSchedule(effectiveType, request.getRouteDetails() == null
+                ? notification.getRouteDetails() : request.getRouteDetails());
 
         Integer requestedRepeatDays = request.getRepeatDays() == null
                 ? null
@@ -127,14 +133,32 @@ public class NotificationService {
     }
 
     private void validateCreateRequest(NotificationDto.CreateArrivalRequest request) {
-        if (request == null || request.getTargetArrivalTime() == null
-                || request.getReminderOffsetMinutes() == null
+        if (request == null || request.getReminderOffsetMinutes() == null
                 || request.getRouteDetails() == null || request.getRouteDetails().isBlank()) {
             throw new com.OnETA.common.exception.GlobalException(
                     com.OnETA.common.error.ErrorCode.INVALID_INPUT_VALUE,
-                    "목표 도착시간, 미리 알림 시간, 경로 정보는 필수입니다.");
+                    "미리 알림 시간, 경로 정보는 필수입니다.");
         }
+        validateTargetArrivalTime(request.getScheduleType(), request.getTargetArrivalTime());
+        validateRouteSchedule(request.getScheduleType(), request.getRouteDetails());
         validateReminderOffsets(request.getReminderOffsetMinutes(), true);
+    }
+
+    private void validateRouteSchedule(NotificationScheduleType type, String details) {
+        if (type == null || type == NotificationScheduleType.NORMAL) return;
+        var route = transitApiService.readSavedRoute(details);
+        if (route != null && ("KAKAO".equals(route.getProvider())
+                || (route.getRouteId() != null && route.getRouteId().startsWith("KAKAO_")))) {
+            transitApiService.validateSeoulSchedule(route);
+        }
+    }
+
+    private void validateTargetArrivalTime(NotificationScheduleType type, java.time.LocalTime time) {
+        if ((type == null || type == NotificationScheduleType.NORMAL) && time == null) {
+            throw new com.OnETA.common.exception.GlobalException(
+                    com.OnETA.common.error.ErrorCode.INVALID_INPUT_VALUE,
+                    "일반 경로(NORMAL)는 목표 도착시간이 필수입니다.");
+        }
     }
 
     private void validateReminderOffsets(List<Integer> offsets, boolean required) {

@@ -27,7 +27,7 @@ public class DeviceTokenController {
             throw new com.OnETA.common.exception.GlobalException(com.OnETA.common.error.ErrorCode.UNAUTHENTICATED);
         }
         
-        deviceTokenService.registerOrUpdateToken(principal.getName(), request.getDeviceToken());
+        deviceTokenService.registerOrUpdateToken(principal.getName(), request == null ? null : request.getDeviceToken());
         return ApiResponse.success(null);
     }
 }

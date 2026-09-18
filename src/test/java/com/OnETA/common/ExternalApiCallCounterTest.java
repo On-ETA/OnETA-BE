@@ -8,6 +8,11 @@ import static org.mockito.Mockito.*;
 
 class ExternalApiCallCounterTest {
     @Test
+    void separatesKakaoTransitQuotaFromAddressSearch() {
+        assertThat(ApiQuota.of("KAKAO", "publictraffic")).isEqualTo(ApiQuota.KAKAO_TRANSIT);
+        assertThat(ApiQuota.of("KAKAO", "search")).isEqualTo(ApiQuota.KAKAO);
+    }
+    @Test
     void schedulerReportsZeroCallsAndCleansUpAfterFailure() {
         var logger = (ch.qos.logback.classic.Logger) org.slf4j.LoggerFactory.getLogger(ExternalApiCallCounter.class);
         var appender = new ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent>();

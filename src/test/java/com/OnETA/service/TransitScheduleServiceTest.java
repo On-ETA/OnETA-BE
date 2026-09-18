@@ -29,6 +29,44 @@ class TransitScheduleServiceTest {
     private static final ZoneId SEOUL = ZoneId.of("Asia/Seoul");
 
     @Test
+    void seoulSingleBusUsesStationTimeMinusAccessWalkAndNoOdsayOrRealtime() {
+        TransitScheduleService service = service("05:30", "23:30");
+        var seoul = mock(SeoulBusScheduleService.class);
+        ReflectionTestUtils.setField(service, "seoulBusScheduleService", seoul);
+        var route = SeoulBusScheduleServiceTest.route();
+        when(serviceApi(service).readSavedRoute("route")).thenReturn(route);
+        when(seoul.resolve(route, DATE)).thenReturn(new SeoulBusScheduleService.Schedule(
+                "100000001", "01001", "100100088", DATE.atTime(5, 30), DATE.plusDays(1).atTime(0, 30)));
+        var first = service.evaluate(notification(NotificationScheduleType.FIRST_TRANSIT, 10), DATE, DATE.atTime(5, 10), SEOUL);
+        assertThat(first.baseDepartureAt()).isEqualTo(DATE.atTime(5, 20));
+        assertThat(first.scheduledAt()).isEqualTo(DATE.atTime(5, 10));
+        var last = service.evaluate(notification(NotificationScheduleType.LAST_TRANSIT, 10), DATE, DATE.atTime(23, 0), SEOUL);
+        assertThat(last.scheduledAt()).isEqualTo(DATE.plusDays(1).atTime(0, 10));
+        verifyNoInteractions(publicData(service));
+        var saved = org.mockito.ArgumentCaptor.forClass(ScheduleSnapshot.class);
+        verify(snapshotRepo(service), times(2)).save(saved.capture());
+        assertThat(saved.getAllValues()).allSatisfy(s -> assertThat(s.getSource()).isEqualTo("SEOUL_BUS"));
+    }
+
+    @Test
+    void previousDaySeoulSnapshotWorksAfterMidnightWithoutFetchingYesterday() {
+        TransitScheduleService service = service("05:30", "23:30");
+        var seoul = mock(SeoulBusScheduleService.class);
+        ReflectionTestUtils.setField(service, "seoulBusScheduleService", seoul);
+        var n = notification(NotificationScheduleType.LAST_TRANSIT, 10);
+        var snapshot = new ScheduleSnapshot(n, DATE, NotificationScheduleType.LAST_TRANSIT, "hash",
+                DATE.plusDays(1).atTime(0, 20), DATE.plusDays(1).atTime(0, 10),
+                DATE.atTime(23, 0), DATE.atTime(12, 0), 30);
+        snapshot.useSeoulBusSource();
+        when(snapshotRepo(service).findForUpdate(any(), any(), any(), any())).thenReturn(Optional.of(snapshot));
+        assertThat(service.evaluate(n, DATE, DATE.plusDays(1).atTime(0, 10), SEOUL).scheduledAt())
+                .isEqualTo(DATE.plusDays(1).atTime(0, 10));
+        when(snapshotRepo(service).findForUpdate(any(), any(), any(), any())).thenReturn(Optional.empty());
+        assertThat(service.evaluate(n, DATE, DATE.plusDays(1).atTime(0, 10), SEOUL)).isNull();
+        verifyNoInteractions(seoul, publicData(service));
+    }
+
+    @Test
     void calculatesFirstUsingMaxCandidateAndOffset() throws Exception {
         TransitScheduleService service = service("05:30", "23:30");
         TransitDto.RouteOptionResponse route = route(10, 20, "1");

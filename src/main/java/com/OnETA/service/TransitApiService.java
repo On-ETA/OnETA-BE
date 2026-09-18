@@ -31,6 +31,8 @@ public class TransitApiService {
     private final ObjectMapper objectMapper;
     private final RestTemplate restTemplate;
     private final UserAddressService userAddressService;
+    private KakaoTransitClient kakaoTransitClient;
+    private SeoulBusScheduleService seoulBusScheduleService;
 
     @Value("${odsay.api.key:}")
     private String odsayApiKey;
@@ -43,8 +45,11 @@ public class TransitApiService {
 
     @Autowired
     public TransitApiService(PublicDataTransitService publicDataTransitService, ObjectMapper objectMapper,
-                             UserAddressService userAddressService) {
-        this(publicDataTransitService, objectMapper, new RestTemplate(), userAddressService);
+                             UserAddressService userAddressService, KakaoTransitClient kakaoTransitClient,
+                             SeoulBusScheduleService seoulBusScheduleService) {
+        this(publicDataTransitService, objectMapper, createRestTemplate(), userAddressService);
+        this.kakaoTransitClient = kakaoTransitClient;
+        this.seoulBusScheduleService = seoulBusScheduleService;
     }
 
     TransitApiService(PublicDataTransitService publicDataTransitService,
@@ -61,6 +66,17 @@ public class TransitApiService {
         this.objectMapper = objectMapper;
         this.restTemplate = restTemplate;
         this.userAddressService = userAddressService;
+    }
+
+    private static RestTemplate createRestTemplate() {
+        var factory = new org.springframework.http.client.SimpleClientHttpRequestFactory();
+        factory.setConnectTimeout(3000);
+        factory.setReadTimeout(10000);
+        return new RestTemplate(factory);
+    }
+
+    public void validateSeoulSchedule(TransitDto.RouteOptionResponse route) {
+        seoulBusScheduleService.resolve(route, seoulBusScheduleService.today());
     }
 
     /**
@@ -120,8 +136,20 @@ public class TransitApiService {
             Double originX, Double originY, Double destX, Double destY) {
 
         validateCoordinates(originX, originY, destX, destY);
+        try {
+            return searchOdsayRoutes(originX, originY, destX, destY);
+        } catch (GlobalException e) {
+            if (e.getErrorCode() == ErrorCode.INVALID_INPUT_VALUE
+                    || kakaoTransitClient == null || !kakaoTransitClient.isConfigured()) throw e;
+            log.info("ODsay route search failed ({}); trying Kakao", e.getErrorCode().getCode());
+            return kakaoTransitClient.search(originX, originY, destX, destY);
+        }
+    }
+
+    private List<TransitDto.RouteOptionResponse> searchOdsayRoutes(
+            Double originX, Double originY, Double destX, Double destY) {
         if (odsayApiKey == null || odsayApiKey.isBlank()) {
-            throw new GlobalException(ErrorCode.INTERNAL_SERVER_ERROR, "ODsay API 키가 설정되지 않았습니다.");
+            throw new GlobalException(ErrorCode.TRANSIT_API_UNAVAILABLE);
         }
 
         URI uri = UriComponentsBuilder.fromUriString(odsayApiUrl)
@@ -150,8 +178,8 @@ public class TransitApiService {
         } catch (GlobalException e) {
             throw e;
         } catch (Exception e) {
-            throw new GlobalException(
-                    ErrorCode.INTERNAL_SERVER_ERROR, "경로 검색에 실패했습니다: " + e.getMessage());
+            log.warn("ODsay search request failed: {}", e.getClass().getSimpleName());
+            throw new GlobalException(ErrorCode.TRANSIT_API_UNAVAILABLE);
         }
     }
 
@@ -188,6 +216,10 @@ public class TransitApiService {
     }
 
     TransitDto.RouteOptionResponse enrichWithRealTimeArrivals(TransitDto.RouteOptionResponse route) {
+        // Kakao identifiers have not been resolved to local BIS identifiers yet.
+        if ("KAKAO".equals(route.getProvider())) {
+            return route.toBuilder().realTimeDurationMinutes(route.getTotalDurationMinutes()).build();
+        }
         int totalMinutes = route.getTotalDurationMinutes() == null ? 0 : route.getTotalDurationMinutes();
         boolean hasRealTimeArrival = false;
         List<TransitDto.RouteSegment> enrichedSegments = new ArrayList<>();
@@ -248,19 +280,38 @@ public class TransitApiService {
     private List<TransitDto.RouteOptionResponse> parseOdsayResponse(String jsonString) {
         try {
             JsonNode root = objectMapper.readTree(jsonString);
+            if (root == null || !root.isObject()) {
+                throw new GlobalException(ErrorCode.TRANSIT_INVALID_RESPONSE);
+            }
             if (root.has("error")) {
-                String message = root.path("error").path("message").asText("ODsay API 오류");
-                throw new GlobalException(ErrorCode.INTERNAL_SERVER_ERROR, message);
+                JsonNode error = root.path("error");
+                if (error.isArray()) error = error.isEmpty() ? objectMapper.createObjectNode() : error.get(0);
+                String code = error.path("code").asText("");
+                switch (code) {
+                    case "3", "4", "5", "6", "-99" -> throw new GlobalException(ErrorCode.TRANSIT_ROUTE_NOT_FOUND);
+                    case "-98" -> throw new GlobalException(ErrorCode.INVALID_INPUT_VALUE, "출발지와 도착지가 너무 가깝습니다. 700m 이상 떨어진 위치로 검색해주세요.");
+                    case "-8", "-9" -> throw new GlobalException(ErrorCode.INVALID_INPUT_VALUE, "경로 검색 좌표의 형식과 범위를 확인해주세요.");
+                    default -> throw new GlobalException(ErrorCode.TRANSIT_API_UNAVAILABLE);
+                }
             }
 
-            JsonNode paths = root.path("result").path("path");
-            if (!paths.isArray()) {
-                throw new GlobalException(ErrorCode.INTERNAL_SERVER_ERROR, "ODsay 경로 응답 형식이 올바르지 않습니다.");
+            JsonNode result = root.path("result");
+            int searchType = result.path("searchType").asInt(0);
+            if (searchType == 1 || searchType == 2) {
+                throw new GlobalException(ErrorCode.TRANSIT_ROUTE_UNSUPPORTED);
             }
+            JsonNode paths = result.path("path");
+            if (!paths.isArray()) {
+                throw new GlobalException(ErrorCode.TRANSIT_INVALID_RESPONSE);
+            }
+            if (paths.isEmpty()) throw new GlobalException(ErrorCode.TRANSIT_ROUTE_NOT_FOUND);
 
             List<TransitDto.RouteOptionResponse> results = new ArrayList<>();
             for (JsonNode path : paths) {
                 JsonNode info = path.path("info");
+                if (!info.isObject() || !path.path("subPath").isArray() || path.path("subPath").isEmpty()) {
+                    throw new GlobalException(ErrorCode.TRANSIT_INVALID_RESPONSE);
+                }
                 List<TransitDto.RouteSegment> segments = new ArrayList<>();
 
                 for (JsonNode subPath : path.path("subPath")) {
@@ -272,7 +323,8 @@ public class TransitApiService {
                     String transitType = switch (trafficType) {
                         case 1 -> "SUBWAY";
                         case 2 -> "BUS";
-                        default -> "WALK";
+                        case 3 -> "WALK";
+                        default -> throw new GlobalException(ErrorCode.TRANSIT_ROUTE_UNSUPPORTED);
                     };
                     String transitName = trafficType == 2
                             ? lane.path("busNo").asText("")
@@ -309,6 +361,7 @@ public class TransitApiService {
 
                 results.add(TransitDto.RouteOptionResponse.builder()
                         .routeId(stableRouteId(path))
+                        .provider("ODSAY")
                         .totalDurationMinutes(info.path("totalTime").asInt())
                         .totalCost(info.path("payment").asInt())
                         .transferCount(info.path("transitCount").asInt())
@@ -323,7 +376,7 @@ public class TransitApiService {
         } catch (GlobalException e) {
             throw e;
         } catch (Exception e) {
-            throw new GlobalException(ErrorCode.INTERNAL_SERVER_ERROR, "ODsay 응답 파싱에 실패했습니다.");
+            throw new GlobalException(ErrorCode.TRANSIT_INVALID_RESPONSE);
         }
     }
 
@@ -368,6 +421,8 @@ public class TransitApiService {
 
     private static void validateCoordinates(Double originX, Double originY, Double destX, Double destY) {
         if (originX == null || originY == null || destX == null || destY == null
+                || !Double.isFinite(originX) || !Double.isFinite(originY)
+                || !Double.isFinite(destX) || !Double.isFinite(destY)
                 || originX < 124 || originX > 132 || destX < 124 || destX > 132
                 || originY < 33 || originY > 39 || destY < 33 || destY > 39) {
             throw new GlobalException(ErrorCode.INVALID_INPUT_VALUE, "대한민국 범위의 출발지와 목적지 좌표를 입력해주세요.");
