@@ -27,6 +27,15 @@ public enum ErrorCode {
     CURRENT_ADDRESS_NOT_SET(HttpStatus.NOT_FOUND, "A003", "현재 설정된 주소가 없습니다."),
     ADDRESS_ALREADY_EXISTS(HttpStatus.CONFLICT, "A004", "동일한 위치의 주소가 이미 등록되어 있습니다."),
 
+    // Transit
+    TRANSIT_ROUTE_NOT_FOUND(HttpStatus.NOT_FOUND, "T001", "검색 가능한 대중교통 경로가 없습니다."),
+    TRANSIT_ROUTE_UNSUPPORTED(HttpStatus.UNPROCESSABLE_ENTITY, "T002", "현재 지원하지 않는 교통수단 또는 경로 형식입니다."),
+    TRANSIT_API_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "T003", "경로 검색 서비스를 일시적으로 사용할 수 없습니다. 잠시 후 다시 시도해주세요."),
+    TRANSIT_INVALID_RESPONSE(HttpStatus.BAD_GATEWAY, "T004", "경로 검색 서비스에서 올바르지 않은 응답을 받았습니다."),
+    TRANSIT_SCHEDULE_UNSUPPORTED(HttpStatus.UNPROCESSABLE_ENTITY, "T005", "첫차·막차 시간표를 확인할 수 없는 경로입니다. 카카오 경로는 서울 버스 단일 탑승 경로만 지원합니다."),
+    TRANSIT_SCHEDULE_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "T006", "서울 버스 시간표 조회에 실패했습니다. 잠시 후 다시 시도해주세요."),
+    DEVICE_TOKEN_CONFLICT(HttpStatus.CONFLICT, "N003", "이미 다른 사용자에게 등록된 디바이스 토큰입니다."),
+
     // Notification
     NOTICE_NOT_FOUND(HttpStatus.NOT_FOUND, "N001", "공지사항을 찾을 수 없습니다."),
     NOTIFICATION_NOT_FOUND(HttpStatus.NOT_FOUND, "N002", "알림을 찾을 수 없습니다.");

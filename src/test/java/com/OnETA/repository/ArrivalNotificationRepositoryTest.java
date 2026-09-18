@@ -44,5 +44,6 @@ class ArrivalNotificationRepositoryTest {
                 .orElseThrow();
 
         assertThat(loaded.getReminderOffsetMinutesList()).containsExactly(5, 15, 30);
+        assertThat(loaded.getTargetArrivalTime()).isNull();
     }
 }

@@ -31,6 +31,7 @@ public class TransitScheduleService {
     private final ScheduleSnapshotRepository snapshotRepository;
     private final ObjectMapper objectMapper;
     private final RestTemplate restTemplate;
+    private SeoulBusScheduleService seoulBusScheduleService;
 
     @Value("${odsay.api.key:}") private String apiKey;
     @Value("${odsay.schedule.url:https://api.odsay.com/v1/api}") private String scheduleBaseUrl;
@@ -40,8 +41,9 @@ public class TransitScheduleService {
     public TransitScheduleService(TransitApiService transitApiService,
                                   PublicDataTransitService publicDataTransitService,
                                   ScheduleSnapshotRepository snapshotRepository,
-                                  ObjectMapper objectMapper) {
+                                  ObjectMapper objectMapper, SeoulBusScheduleService seoulBusScheduleService) {
         this(transitApiService, publicDataTransitService, snapshotRepository, objectMapper, new RestTemplate());
+        this.seoulBusScheduleService = seoulBusScheduleService;
     }
 
     TransitScheduleService(TransitApiService transitApiService,
@@ -62,6 +64,8 @@ public class TransitScheduleService {
         String hash = hash(details);
         Optional<ScheduleSnapshot> existing = snapshotRepository
                 .findForUpdate(notification.getId(), date, type, hash);
+        // Previous-day Seoul schedules may only use a snapshot already fetched that day.
+        if (existing.isEmpty() && date.isBefore(now.toLocalDate())) return null;
         ScheduleSnapshot snapshot = existing.orElseGet(() -> createSnapshot(notification, date, type, hash, zone));
         if (snapshot.getEvaluationMode() == ScheduleEvaluationMode.FINISHED) return null;
 
@@ -71,6 +75,12 @@ public class TransitScheduleService {
         LocalDateTime scheduled = snapshot.getEffectiveScheduledAt();
         LocalDateTime deadline = snapshot.getEffectiveDepartureAt();
         DeliveryPhase phase = DeliveryPhase.BASE;
+
+        if ("SEOUL_BUS".equals(snapshot.getSource())) {
+            if (!deadline.isAfter(now)) return null;
+            return new Decision(scheduled, deadline, phase, snapshot.getBaseDepartureAt(),
+                    snapshot.getEffectiveDepartureAt(), false, snapshot.getEstimatedDurationMinutes());
+        }
 
         if (type == NotificationScheduleType.FIRST_TRANSIT) {
             if (now.isAfter(snapshot.getFirstOpportunityDeadline())) {
@@ -128,6 +138,7 @@ public class TransitScheduleService {
     private ScheduleSnapshot createSnapshot(ArrivalNotification n, LocalDate date,
                                              NotificationScheduleType type, String hash, ZoneId zone) {
         TransitDto.RouteOptionResponse route = transitApiService.readSavedRoute(n.getRouteDetails());
+        if (SeoulBusScheduleService.isKakao(route)) return createSeoulSnapshot(n, route, date, type, hash);
         List<TransitDto.RouteSegment> segments = route.getSegments() == null ? List.of() : route.getSegments();
         LocalDateTime departure = date.atStartOfDay(zone).toLocalDateTime();
         List<LocalDateTime> candidates = new ArrayList<>();
@@ -151,6 +162,26 @@ public class TransitScheduleService {
         LocalDateTime start = scheduled.minusMinutes(Math.max(15, Math.min(60, duration)));
         return snapshotRepository.save(new ScheduleSnapshot(n, date, type, hash, departure, scheduled, start,
                 LocalDateTime.now(ZoneOffset.UTC), duration));
+    }
+
+    private ScheduleSnapshot createSeoulSnapshot(ArrivalNotification n, TransitDto.RouteOptionResponse route,
+                                                 LocalDate date, NotificationScheduleType type, String hash) {
+        var times = seoulBusScheduleService.resolve(route, date);
+        int walkMinutes = 0;
+        for (var segment : route.getSegments()) {
+            if ("BUS".equals(segment.getTransitType())) break;
+            walkMinutes += segment.getDurationMinutes();
+        }
+        LocalDateTime boarding = type == NotificationScheduleType.FIRST_TRANSIT ? times.first() : times.last();
+        LocalDateTime departure = boarding.minusMinutes(walkMinutes);
+        int offset = type == NotificationScheduleType.FIRST_TRANSIT
+                ? n.getReminderOffsetMinutesList().stream().max(Integer::compareTo).orElse(0)
+                : n.getReminderOffsetMinutes();
+        LocalDateTime scheduled = departure.minusMinutes(offset);
+        ScheduleSnapshot snapshot = new ScheduleSnapshot(n, date, type, hash, departure, scheduled,
+                scheduled, LocalDateTime.now(ZoneOffset.UTC), route.getTotalDurationMinutes());
+        snapshot.useSeoulBusSource();
+        return snapshotRepository.save(snapshot);
     }
 
     private void evaluateFirstSafety(ScheduleSnapshot snapshot, ArrivalNotification n, LocalDateTime now, ZoneId zone) {

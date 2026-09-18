@@ -75,4 +75,5 @@ public class ScheduleSnapshot {
     public void markRecovery(RecoveryStatus status) { this.recoveryStatus = status; this.recoveryNextRetryAt = null; }
     public void markRecoveryDeliveryCreated() { this.evaluationMode = ScheduleEvaluationMode.RECOVERY; this.recoveryStatus = RecoveryStatus.DELIVERY_CREATED; this.recoveryNextRetryAt = null; }
     public void finish() { this.evaluationMode = ScheduleEvaluationMode.FINISHED; this.recoveryStatus = RecoveryStatus.FINISHED; }
+    public void useSeoulBusSource() { this.source = "SEOUL_BUS"; }
 }

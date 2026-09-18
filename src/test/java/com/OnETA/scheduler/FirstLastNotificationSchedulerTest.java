@@ -17,6 +17,26 @@ class FirstLastNotificationSchedulerTest {
     private static final ZoneId SEOUL = ZoneId.of("Asia/Seoul");
 
     @Test
+    void kakaoOvernightLastBusUsesPreviousSelectedWeekday() {
+        var n = notification(NotificationScheduleType.LAST_TRANSIT);
+        var repeats = new RepeatDaysService();
+        when(n.getRepeatDays()).thenReturn(repeats.toMask(List.of("THU")));
+        var schedules = mock(TransitScheduleService.class);
+        LocalDate serviceDay = LocalDate.of(2026, 8, 27);
+        when(schedules.evaluate(eq(n), eq(serviceDay), any(), any())).thenReturn(
+                new TransitScheduleService.Decision(serviceDay.plusDays(1).atTime(0, 10),
+                        serviceDay.plusDays(1).atTime(0, 20), DeliveryPhase.BASE,
+                        serviceDay.plusDays(1).atTime(0, 20), serviceDay.plusDays(1).atTime(0, 20), false, 30));
+        var delivery = mock(NotificationDeliveryService.class);
+        var scheduler = scheduler(n, schedules, delivery, "2026-08-28T00:10");
+        var transit = (TransitApiService) ReflectionTestUtils.getField(scheduler, "transitApiService");
+        when(transit.readSavedRoute("route")).thenReturn(com.OnETA.dto.TransitDto.RouteOptionResponse.builder().provider("KAKAO").build());
+        scheduler.scheduleArrivalNotifications();
+        verify(delivery).prepare(eq(n), eq(30), eq(serviceDay), any(), eq(10), any(), eq(DeliveryPhase.BASE));
+        verify(schedules, never()).evaluate(eq(n), eq(serviceDay.plusDays(1)), any(), any());
+    }
+
+    @Test
     void doesNotCreateBeforeBaseAndCreatesBaseWhenDue() {
         ArrivalNotification n = notification(NotificationScheduleType.FIRST_TRANSIT);
         TransitScheduleService schedules = mock(TransitScheduleService.class);
@@ -75,7 +95,7 @@ class FirstLastNotificationSchedulerTest {
         when(n.getScheduleType()).thenReturn(type); when(n.getRepeatDays()).thenReturn(0);
         when(n.getLastSentDate()).thenReturn(null); when(n.getReminderOffsetMinutes()).thenReturn(10);
         when(n.getReminderOffsetMinutesList()).thenReturn(List.of(10)); when(n.getRouteDetails()).thenReturn("route");
-        when(n.getIsActive()).thenReturn(true); when(n.getTargetArrivalTime()).thenReturn(LocalTime.of(18, 0));
+        when(n.getIsActive()).thenReturn(true); when(n.getTargetArrivalTime()).thenReturn(null);
         return n;
     }
     private NotificationScheduler scheduler(ArrivalNotification n, TransitScheduleService schedules,

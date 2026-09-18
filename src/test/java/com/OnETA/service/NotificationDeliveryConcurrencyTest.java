@@ -12,6 +12,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.util.ReflectionTestUtils;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -23,9 +24,13 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.*;
 
 @SpringBootTest
 class NotificationDeliveryConcurrencyTest {
+
+    @MockitoBean
+    private FcmPushService fcmPushService;
 
     @Autowired
     private NotificationDeliveryService deliveryService;
@@ -44,7 +49,7 @@ class NotificationDeliveryConcurrencyTest {
         User user = userRepository.save(new User(
                 "claim-race-" + System.nanoTime() + "@example.com", "password", "tester", Role.USER));
         ArrivalNotification notification = notificationRepository.saveAndFlush(
-                new ArrivalNotification(user, "race", 0, 21, LocalTime.of(18, 30), "route"));
+                new ArrivalNotification(user, "race", 10, 21, LocalTime.of(18, 30), "route"));
         NotificationDelivery delivery = new NotificationDelivery(
                 notification, LocalDate.of(2026, 8, 10), "race-token-" + System.nanoTime(),
                 "title", "body", LocalDateTime.now(ZoneOffset.UTC),
@@ -65,7 +70,8 @@ class NotificationDeliveryConcurrencyTest {
 
         NotificationDelivery result = deliveryRepository.findById(deliveryId).orElseThrow();
         assertThat(result.getAttempts()).isEqualTo(4);
-        assertThat(result.getStatus()).isEqualTo(NotificationDeliveryStatus.FAILED);
+        assertThat(result.getStatus()).isEqualTo(NotificationDeliveryStatus.SENT);
+        verify(fcmPushService, times(1)).sendPushMessage(any(), any(), any(), any());
     }
 
     private void processWhenReleased(CountDownLatch start, Long deliveryId) {

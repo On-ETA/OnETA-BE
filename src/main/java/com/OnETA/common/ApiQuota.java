@@ -3,8 +3,8 @@ package com.OnETA.common;
 import java.util.Locale;
 
 enum ApiQuota {
-    ODSAY(1000), KAKAO(100000), SEOUL_ARRIVAL(1000), SEOUL_LOCATION(1000),
-    SEOUL_ROUTES(1000), TAGO_ARRIVAL(10000), TAGO_STATIONS(10000), FCM(0), SMTP(0), UNKNOWN(0);
+    ODSAY(1000), KAKAO(100000), KAKAO_TRANSIT(1000), SEOUL_ARRIVAL(1000), SEOUL_LOCATION(1000),
+    SEOUL_ROUTES(1000), SEOUL_STATIONS(1000), TAGO_ARRIVAL(10000), TAGO_STATIONS(10000), FCM(0), SMTP(0), UNKNOWN(0);
 
     final long referenceLimit;
     ApiQuota(long referenceLimit) { this.referenceLimit = referenceLimit; }
@@ -12,11 +12,12 @@ enum ApiQuota {
     static ApiQuota of(String provider, String api) {
         return switch (provider) {
             case "ODSAY" -> ODSAY;
-            case "KAKAO" -> KAKAO;
+            case "KAKAO" -> "publictraffic".equals(api) ? KAKAO_TRANSIT : KAKAO;
             case "SEOUL_BUS" -> switch (api) {
                 case "arrival" -> SEOUL_ARRIVAL;
                 case "location" -> SEOUL_LOCATION;
                 case "routes", "route-stations" -> SEOUL_ROUTES;
+                case "stations" -> SEOUL_STATIONS;
                 default -> UNKNOWN;
             };
             case "TAGO" -> api.contains("ArvlInfoInqireService") ? TAGO_ARRIVAL

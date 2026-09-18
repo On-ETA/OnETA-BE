@@ -83,8 +83,6 @@ public class NotificationScheduler {
 
         for (ArrivalNotification notification : activeNotifications) {
             boolean oneTime = notification.getRepeatDays() == null || notification.getRepeatDays() == 0;
-            if (today.equals(notification.getLastSentDate())) continue;
-            if (!isTodayCandidate(notification, now, oneTime)) continue;
 
             try {
                 com.OnETA.common.ExternalApiCallCounter.note("처리 후보");
@@ -94,6 +92,8 @@ public class NotificationScheduler {
                     processScheduledTransit(notification, today, now, zoneId);
                     continue;
                 }
+                if (today.equals(notification.getLastSentDate())) continue;
+                if (!isTodayCandidate(notification, now, oneTime)) continue;
                 int estimatedDuration =
                         transitApiService.getRealTimeDuration(notification.getRouteDetails());
                 List<Integer> reminderOffsets = reminderOffsetsOf(notification);
@@ -131,6 +131,16 @@ public class NotificationScheduler {
 
     private void processScheduledTransit(ArrivalNotification notification, LocalDate today,
                                          LocalDateTime now, ZoneId zoneId) {
+        var route = transitApiService.readSavedRoute(notification.getRouteDetails());
+        if (com.OnETA.service.SeoulBusScheduleService.isKakao(route)) {
+            processScheduledServiceDay(notification, today.minusDays(1), now, zoneId);
+        }
+        processScheduledServiceDay(notification, today, now, zoneId);
+    }
+
+    private void processScheduledServiceDay(ArrivalNotification notification, LocalDate today,
+                                            LocalDateTime now, ZoneId zoneId) {
+        if (today.equals(notification.getLastSentDate())) return;
         if (!repeatDaysService.includes(notification.getRepeatDays(), today.getDayOfWeek())
                 && notification.getRepeatDays() != 0) return;
         TransitScheduleService.Decision decision = transitScheduleService.evaluate(notification, today, now, zoneId);

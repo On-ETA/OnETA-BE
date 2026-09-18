@@ -18,7 +18,7 @@ import java.util.List;
 @Table(name = "arrival_notifications")
 public class ArrivalNotification extends com.OnETA.entity.Notification {
 
-    @Column(name = "target_arrival_time", nullable = false)
+    @Column(name = "target_arrival_time")
     private LocalTime targetArrivalTime;
 
     @Column(name = "route_details", columnDefinition = "TEXT")
@@ -56,6 +56,7 @@ public class ArrivalNotification extends com.OnETA.entity.Notification {
                                NotificationScheduleType scheduleType) {
         this(user, name, reminderOffsetMinutes, repeatDays, targetArrivalTime, routeDetails);
         this.scheduleType = scheduleType == null ? NotificationScheduleType.NORMAL : scheduleType;
+        if (this.scheduleType != NotificationScheduleType.NORMAL) this.targetArrivalTime = null;
     }
 
     public void updateArrivalInfo(LocalTime targetArrivalTime, String routeDetails) {
@@ -65,6 +66,7 @@ public class ArrivalNotification extends com.OnETA.entity.Notification {
 
     public void updateScheduleType(NotificationScheduleType scheduleType) {
         if (scheduleType != null) this.scheduleType = scheduleType;
+        if (this.scheduleType != NotificationScheduleType.NORMAL) this.targetArrivalTime = null;
     }
 
     public void updateTrackingInfo(String firstStationId, String firstRouteId, LocalTime targetBoardingTime) {

@@ -93,7 +93,7 @@ class NotificationDeliveryRepositoryTest {
                                                LocalDateTime nextAttemptAt) {
         ArrivalNotification notification = notificationRepository.saveAndFlush(
                 new ArrivalNotification(user, "notification-" + marker + "-" + System.nanoTime(),
-                        0, 21, LocalTime.of(18, 30), "route"));
+                        10, 21, LocalTime.of(18, 30), "route"));
         NotificationDelivery delivery = new NotificationDelivery(
                 notification, LocalDate.of(2026, 8, 10), "token-" + marker + "-" + System.nanoTime(),
                 "title", "body", LocalDateTime.of(2026, 8, 10, 8, 59),
