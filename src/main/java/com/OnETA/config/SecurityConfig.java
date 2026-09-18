@@ -56,8 +56,12 @@ public class SecurityConfig {
                                 "/api-docs/**",        // Custom Swagger 데이터 경로
                                 "/swagger-ui/**",      // Swagger UI 화면
                                 "/swagger-ui.html",    // Swagger UI 진입점
-                                "/h2-console/**"       // H2 Console (enabled only in local profile)
+                                "/h2-console/**",       // H2 Console (enabled only in local profile)
+                                "/oauth2/**",
+                                "/login/oauth2/code/**" // 구글 로그인 진입점 및 리다이렉트 주소 허용
                         ).permitAll() // 토큰 테스트 URL은 통과시켜 줍니다.
+
+                        // 명시되지 않은 API는 ROLE_USER 권한이 있어야 통과
                         .anyRequest().hasAuthority("ROLE_USER")
                 )
 
