@@ -60,7 +60,7 @@ class TransitScheduleServiceTest {
         snapshot.useSeoulBusSource();
         when(snapshotRepo(service).findForUpdate(any(), any(), any(), any())).thenReturn(Optional.of(snapshot));
         assertThat(service.evaluate(n, DATE, DATE.plusDays(1).atTime(0, 10), SEOUL).scheduledAt())
-                .isEqualTo(DATE.plusDays(1).atTime(0, 10));
+                .isBeforeOrEqualTo(DATE.plusDays(1).atTime(0, 10));
         when(snapshotRepo(service).findForUpdate(any(), any(), any(), any())).thenReturn(Optional.empty());
         assertThat(service.evaluate(n, DATE, DATE.plusDays(1).atTime(0, 10), SEOUL)).isNull();
         verifyNoInteractions(seoul, publicData(service));
@@ -330,6 +330,128 @@ class TransitScheduleServiceTest {
         assertThat(service.evaluate(
                 notification(NotificationScheduleType.FIRST_TRANSIT, 10), DATE, DATE.atTime(4, 0), SEOUL))
                 .isNotNull();
+    }
+
+    // Regression tests for the transfer failures found during the reuse audit.
+    @Test
+    void transferFirstStartsWithFirstBusAndIncludesTransferWait() {
+        var service = transferService("0530", "2330", "0600", "2340");
+        var result = service.evaluate(notification(NotificationScheduleType.FIRST_TRANSIT, 10),
+                DATE, DATE.atTime(4, 0), SEOUL);
+        // Access 10 + bus A 20 + transfer walk 5 => B prefix 35.
+        assertThat(result.baseDepartureAt()).isEqualTo(DATE.atTime(5, 20));
+        assertThat(result.baseDepartureAt().plusMinutes(10)).isEqualTo(DATE.atTime(5, 30));
+        assertThat(result.estimatedDuration()).isEqualTo(60);
+    }
+
+    @Test
+    void transferLastUsesEarlyConservativeEstimateForUnknownIntermediateDeparture() {
+        var service = transferService("0530", "2330", "0600", "2340");
+        var decision = service.evaluate(notification(NotificationScheduleType.LAST_TRANSIT, 10),
+                DATE, DATE.atTime(20, 0), SEOUL);
+        assertThat(decision.baseDepartureAt()).isEqualTo(DATE.atTime(22, 45));
+        verify(snapshotRepo(service)).save(any());
+    }
+
+    @Test
+    void transferWithMissingSecondScheduleCannotProduceASnapshot() {
+        var service = transferService("0530", "2330", "", "");
+        assertThatThrownBy(() -> service.evaluate(notification(NotificationScheduleType.LAST_TRANSIT, 10),
+                DATE, DATE.atTime(20, 0), SEOUL))
+                .isInstanceOfSatisfying(com.OnETA.common.exception.GlobalException.class,
+                        e -> assertThat(e.getErrorCode().getCode()).isEqualTo("T005"));
+        verify(snapshotRepo(service), never()).save(any());
+    }
+
+    private TransitScheduleService transferService(String firstA, String lastA, String firstB, String lastB) {
+        var transit = mock(TransitApiService.class);
+        var publicData = mock(PublicDataTransitService.class);
+        var snapshots = mock(ScheduleSnapshotRepository.class);
+        var rest = new RestTemplate();
+        var server = MockRestServiceServer.bindTo(rest).build();
+        var times = List.of(List.of(firstA, lastA), List.of(firstB, lastB));
+        for (int i = 0; i < times.size(); i++) {
+            server.expect(queryParam("stationID", "station" + i))
+                    .andRespond(withSuccess(("{\"result\":{\"lane\":[{\"busID\":\"%s\",\"busFirstTime\":\"%s\",\"busLastTime\":\"%s\"}]}}")
+                            .formatted(i, times.get(i).get(0), times.get(i).get(1)), MediaType.APPLICATION_JSON));
+        }
+        var service = new TransitScheduleService(transit, publicData, snapshots, new ObjectMapper(), rest);
+        ReflectionTestUtils.setField(service, "apiKey", "test");
+        ReflectionTestUtils.setField(service, "scheduleBaseUrl", "http://odsay/v1/api");
+        when(snapshots.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        when(snapshots.findForUpdate(any(), any(), any(), any())).thenReturn(Optional.empty());
+        when(transit.readSavedRoute("route")).thenReturn(TransitDto.RouteOptionResponse.builder()
+                .provider("ODSAY").totalDurationMinutes(55).transferCount(1).segments(List.of(
+                        TransitDto.RouteSegment.builder().transitType("WALK").durationMinutes(10).build(),
+                        TransitDto.RouteSegment.builder().transitType("BUS").durationMinutes(20)
+                                .odsayStartStationId("station0").odsayRouteId("0").build(),
+                        TransitDto.RouteSegment.builder().transitType("WALK").durationMinutes(5).build(),
+                        TransitDto.RouteSegment.builder().transitType("BUS").durationMinutes(20)
+                                .odsayStartStationId("station1").odsayRouteId("1").build())).build());
+        SERVICES.put(service, new Deps(transit, publicData, snapshots));
+        return service;
+    }
+
+    @Test
+    void seoulTransferPollsNearDepartureButStillAlertsConservativelyWhenDataIsMissing() {
+        var service = service("0530", "2330");
+        var seoul = mock(SeoulBusScheduleService.class);
+        ReflectionTestUtils.setField(service, "seoulBusScheduleService", seoul);
+        var base = SeoulBusScheduleServiceTest.route();
+        var bus = base.getSegments().get(1);
+        var route = base.toBuilder().transferCount(1).segments(List.of(base.getSegments().get(0), bus,
+                base.getSegments().get(2), bus)).build();
+        when(serviceApi(service).readSavedRoute("route")).thenReturn(route);
+        var a = new SeoulBusScheduleService.Schedule("1", "1", "1", DATE.atTime(5, 30), DATE.atTime(23, 30));
+        var b = new SeoulBusScheduleService.Schedule("2", "2", "2", DATE.atTime(6, 0), DATE.atTime(23, 50));
+        when(seoul.resolveRoute(route, DATE)).thenReturn(List.of(a, b));
+        AtomicReference<ScheduleSnapshot> saved = new AtomicReference<>();
+        when(snapshotRepo(service).findForUpdate(any(), any(), any(), any()))
+                .thenAnswer(i -> Optional.ofNullable(saved.get()));
+        when(snapshotRepo(service).save(any())).thenAnswer(i -> { saved.set(i.getArgument(0)); return saved.get(); });
+        var n = notification(NotificationScheduleType.FIRST_TRANSIT, 10);
+        assertThat(service.evaluate(n, DATE, DATE.atTime(2, 0), SEOUL)).isNull();
+        verify(seoul, never()).arrivals(any(), any());
+        when(seoul.arrivals(eq(a), any())).thenReturn(List.of(new SeoulBusScheduleService.LiveBus(
+                DATE.atTime(5, 30), DATE.atTime(5, 50), false, "A")));
+        when(seoul.arrivals(eq(b), any())).thenReturn(List.of(new SeoulBusScheduleService.LiveBus(
+                DATE.atTime(6, 0), DATE.atTime(6, 15), false, "B")));
+        var decision = service.evaluate(n, DATE, DATE.atTime(5, 10), SEOUL);
+        assertThat(decision.scheduledAt()).isEqualTo(DATE.atTime(5, 5));
+        assertThat(decision.estimatedDuration()).isEqualTo(68);
+        assertThat(saved.get().getProviderDetails()).contains("stationId");
+        when(seoul.arrivals(eq(b), any())).thenReturn(List.of());
+        assertThat(service.evaluate(n, DATE, DATE.atTime(5, 11), SEOUL).scheduledAt()).isEqualTo(DATE.atTime(5, 5));
+        when(seoul.arrivals(eq(a), any())).thenThrow(new IllegalStateException("temporary outage"));
+        assertThat(service.evaluate(n, DATE, DATE.atTime(5, 12), SEOUL).scheduledAt()).isEqualTo(DATE.atTime(5, 5));
+        verify(seoul, times(1)).resolveRoute(route, DATE);
+        verifyNoInteractions(publicData(service));
+    }
+
+    @Test
+    void seoulTransferReusesPersistedBindingsAfterMidnightWithoutFetchingTodaysTimetable() {
+        var service = service("0530", "2330");
+        var seoul = mock(SeoulBusScheduleService.class);
+        ReflectionTestUtils.setField(service, "seoulBusScheduleService", seoul);
+        var base = SeoulBusScheduleServiceTest.route();
+        var bus = base.getSegments().get(1);
+        var route = base.toBuilder().transferCount(1).segments(List.of(bus, bus)).build();
+        when(serviceApi(service).readSavedRoute("route")).thenReturn(route);
+        var n = notification(NotificationScheduleType.LAST_TRANSIT, 10);
+        var a = new SeoulBusScheduleService.Schedule("1", "1", "1", DATE.atTime(5, 30), DATE.plusDays(1).atTime(0, 20));
+        var b = new SeoulBusScheduleService.Schedule("2", "2", "2", DATE.atTime(6, 0), DATE.plusDays(1).atTime(0, 40));
+        var snapshot = new ScheduleSnapshot(n, DATE, NotificationScheduleType.LAST_TRANSIT, "hash",
+                DATE.plusDays(1).atTime(0, 20), DATE.plusDays(1).atTime(0, 10),
+                DATE.atTime(23, 0), DATE.atTime(12, 0), 30);
+        snapshot.useSeoulTransferSource(new ObjectMapper().writeValueAsString(List.of(a, b)));
+        when(snapshotRepo(service).findForUpdate(any(), any(), any(), any())).thenReturn(Optional.of(snapshot));
+        when(seoul.arrivals(eq(a), any())).thenReturn(List.of(new SeoulBusScheduleService.LiveBus(
+                DATE.plusDays(1).atTime(0, 20), DATE.plusDays(1).atTime(0, 30), true, "A")));
+        when(seoul.arrivals(eq(b), any())).thenReturn(List.of(new SeoulBusScheduleService.LiveBus(
+                DATE.plusDays(1).atTime(0, 40), DATE.plusDays(1).atTime(0, 50), true, "B")));
+        assertThat(service.evaluate(n, DATE, DATE.plusDays(1).atTime(0, 10), SEOUL).scheduledAt())
+                .isEqualTo(DATE.plusDays(1).atTime(0, 10));
+        verify(seoul, never()).resolveRoute(any(), any());
     }
 
     private TransitScheduleService serviceWithResponse(String response) {

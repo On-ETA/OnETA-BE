@@ -32,9 +32,11 @@ public enum ErrorCode {
     TRANSIT_ROUTE_UNSUPPORTED(HttpStatus.UNPROCESSABLE_ENTITY, "T002", "현재 지원하지 않는 교통수단 또는 경로 형식입니다."),
     TRANSIT_API_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "T003", "경로 검색 서비스를 일시적으로 사용할 수 없습니다. 잠시 후 다시 시도해주세요."),
     TRANSIT_INVALID_RESPONSE(HttpStatus.BAD_GATEWAY, "T004", "경로 검색 서비스에서 올바르지 않은 응답을 받았습니다."),
-    TRANSIT_SCHEDULE_UNSUPPORTED(HttpStatus.UNPROCESSABLE_ENTITY, "T005", "첫차·막차 시간표를 확인할 수 없는 경로입니다. 카카오 경로는 서울 버스 단일 탑승 경로만 지원합니다."),
-    TRANSIT_SCHEDULE_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "T006", "서울 버스 시간표 조회에 실패했습니다. 잠시 후 다시 시도해주세요."),
+    TRANSIT_SCHEDULE_UNSUPPORTED(HttpStatus.UNPROCESSABLE_ENTITY, "T005", "첫차·막차 시간표를 확인할 수 없는 경로입니다. 서울 버스·지하철 지원 범위를 확인해주세요."),
+    TRANSIT_SCHEDULE_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "T006", "대중교통 시간표 조회에 실패했습니다. 잠시 후 다시 시도해주세요."),
+    TRANSIT_CONNECTION_UNVERIFIED(HttpStatus.UNPROCESSABLE_ENTITY, "T007", "첫차·막차 시각만으로 환승 연결을 확인할 수 없습니다. 중간 운행편 시간표가 필요한 경로입니다."),
     DEVICE_TOKEN_CONFLICT(HttpStatus.CONFLICT, "N003", "이미 다른 사용자에게 등록된 디바이스 토큰입니다."),
+    PUSH_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "N004", "푸시 발송에 실패했습니다. 서버 설정과 디바이스 토큰을 확인해주세요."),
 
     // Notification
     NOTICE_NOT_FOUND(HttpStatus.NOT_FOUND, "N001", "공지사항을 찾을 수 없습니다."),

@@ -9,6 +9,8 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
+import org.springframework.web.client.RestClientResponseException;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.util.UriComponentsBuilder;
 import org.w3c.dom.Element;
 
@@ -23,6 +25,7 @@ import java.util.*;
 
 /** Seoul station-specific, current-service-day schedules for one bus ride only. */
 @Service
+@Slf4j
 public class SeoulBusScheduleService {
     private final RestTemplate http;
     private final String key;
@@ -30,6 +33,11 @@ public class SeoulBusScheduleService {
     private final Clock clock;
     private Instant retryAfter = Instant.EPOCH;
     private final Map<String, Cached> cache = new HashMap<>();
+    private final Map<String, LiveCache> liveCache = new HashMap<>();
+    private TagoSubwayScheduleService subway;
+
+    @Autowired
+    void setSubway(TagoSubwayScheduleService subway) { this.subway = subway; }
 
     @Autowired
     public SeoulBusScheduleService(@Value("${publicdata.seoul.schedule-key:${publicdata.api.key:}}") String key,
@@ -58,6 +66,27 @@ public class SeoulBusScheduleService {
     }
 
     public LocalDate today() { return LocalDate.now(clock); }
+
+    public List<Schedule> resolveRoute(TransitDto.RouteOptionResponse route, LocalDate day) {
+        validateRoute(route);
+        return route.getSegments().stream().filter(s -> !"WALK".equals(s.getTransitType()))
+                .map(s -> "SUBWAY".equals(s.getTransitType()) ? subway.resolve(s, day)
+                        : resolve(route.toBuilder().transferCount(0).segments(List.of(s)).build(), day)).toList();
+    }
+
+    private void validateRoute(TransitDto.RouteOptionResponse route) {
+        if (!isKakao(route) || route.getSegments() == null || route.getSegments().isEmpty()
+                || route.getSegments().size() > 30 || route.getTotalDurationMinutes() == null
+                || route.getTotalDurationMinutes() <= 0) throw unsupported();
+        int buses = 0;
+        for (var s : route.getSegments()) {
+            if (s == null || s.getDurationMinutes() == null || s.getDurationMinutes() < 0
+                    || s.getDurationMinutes() > 1440) throw unsupported();
+            if ("BUS".equals(s.getTransitType()) || "SUBWAY".equals(s.getTransitType())) buses++;
+            else if (!"WALK".equals(s.getTransitType())) throw unsupported();
+        }
+        if (buses < 1 || buses > 5) throw unsupported();
+    }
 
     public synchronized Schedule resolve(TransitDto.RouteOptionResponse route, LocalDate day) {
         var bus = singleBus(route);
@@ -95,7 +124,8 @@ public class SeoulBusScheduleService {
                                     || (j > i && sequence(stops.get(j)) != sequence(stops.get(j - 1)) + 1)
                                     || (j > i && j < last && "Y".equals(text(stops.get(j), "transYn")))) same = false;
                         }
-                        if (same) matches.add(new Binding(text(start, "stationId"), ars, routeId));
+                        if (same) matches.add(new Binding(text(start, "stationId"), ars, routeId,
+                                sequence(stops.get(i)), text(end, "stationId"), sequence(stops.get(last))));
                     }
                 }
             }
@@ -112,10 +142,63 @@ public class SeoulBusScheduleService {
         if (last.isBefore(first) && last.toLocalDate().equals(day)) last = last.plusDays(1);
         if (!first.toLocalDate().equals(day) || !last.isAfter(first)
                 || last.isAfter(day.plusDays(1).atTime(12, 0))) throw unsupported();
-        Schedule schedule = new Schedule(binding.stationId(), binding.arsId(), binding.routeId(), first, last);
+        Schedule schedule = new Schedule(binding.stationId(), binding.arsId(), binding.routeId(), first, last,
+                binding.order(), binding.endStationId(), binding.endOrder());
         if (cache.size() >= 1000) cache.clear();
         cache.put(cacheKey, new Cached(schedule, clock.instant().plus(Duration.ofMinutes(30))));
         return schedule;
+    }
+
+    /** Route-wide arrivals include vehicle IDs, current sections and predictions at both stops. */
+    public synchronized List<LiveBus> arrivals(Schedule schedule, LocalDateTime now) {
+        if (schedule.order() <= 0) return List.of();
+        LiveCache cached = liveCache.get(schedule.routeId());
+        if (cached == null || !cached.expires().isAfter(clock.instant())) {
+            if (key.isBlank() || retryAfter.isAfter(clock.instant())) throw unavailable();
+            List<Element> items = request("/arrive/getArrInfoByRouteAll",
+                    Map.of("busRouteId", schedule.routeId()), "arrival");
+            cached = new LiveCache(items, clock.instant().plusSeconds(20));
+            if (liveCache.size() >= 1000) liveCache.clear();
+            liveCache.put(schedule.routeId(), cached);
+        }
+        List<LiveBus> result = new ArrayList<>();
+        for (Element item : cached.items()) {
+            if (!schedule.stationId().equals(text(item, "stId"))
+                    || !Integer.toString(schedule.order()).equals(text(item, "staOrd"))) continue;
+            LocalDateTime observed;
+            try { observed = LocalDateTime.parse(text(item, "mkTm").replace(' ', 'T')); }
+            catch (RuntimeException e) { continue; }
+            if (observed.isBefore(now.minusSeconds(90)) || observed.isAfter(now.plusSeconds(30))) continue;
+            for (int n = 1; n <= 2; n++) {
+                String vehicle = text(item, "vehId" + n);
+                int seconds = positive(text(item, "exps" + n));
+                if (vehicle.isBlank() || "0".equals(vehicle) || seconds <= 0
+                        || "1".equals(text(item, "full" + n))) continue;
+                LocalDateTime boarding = observed.plusSeconds(seconds);
+                if (!boarding.isAfter(now)) continue;
+                LocalDateTime alighting = null;
+                for (Element end : cached.items()) {
+                    if (!schedule.endStationId().equals(text(end, "stId"))
+                            || !Integer.toString(schedule.endOrder()).equals(text(end, "staOrd"))) continue;
+                    for (int m = 1; m <= 2; m++) {
+                        if (!vehicle.equals(text(end, "vehId" + m))) continue;
+                        try {
+                            LocalDateTime endObserved = LocalDateTime.parse(text(end, "mkTm").replace(' ', 'T'));
+                            int endSeconds = positive(text(end, "exps" + m));
+                            LocalDateTime predicted = endObserved.plusSeconds(endSeconds);
+                            if (endSeconds > 0 && !endObserved.isBefore(now.minusSeconds(90))
+                                    && !endObserved.isAfter(now.plusSeconds(30)) && predicted.isAfter(boarding)) alighting = predicted;
+                        } catch (RuntimeException ignored) { }
+                    }
+                }
+                result.add(new LiveBus(boarding, alighting, "1".equals(text(item, "isLast" + n)), vehicle));
+            }
+        }
+        return result.stream().sorted(Comparator.comparing(LiveBus::boarding)).toList();
+    }
+
+    private static int positive(String value) {
+        try { return Math.max(0, Integer.parseInt(value)); } catch (RuntimeException e) { return 0; }
     }
 
     private TransitDto.RouteSegment singleBus(TransitDto.RouteOptionResponse route) {
@@ -162,12 +245,19 @@ public class SeoulBusScheduleService {
             var document = factory.newDocumentBuilder().parse(new ByteArrayInputStream(body));
             String code = text(document.getDocumentElement(), "headerCd");
             if ("4".equals(code)) return new ArrayList<>();
-            if (!"0".equals(code)) throw unavailable();
+            if (!"0".equals(code)) {
+                log.warn("Seoul API rejected request: endpoint={}, headerCode={}", path,
+                        code.matches("[0-9]{1,4}") ? code : "unknown");
+                throw unavailable();
+            }
             var nodes = document.getElementsByTagName("itemList");
             List<Element> items = new ArrayList<>();
             for (int i = 0; i < nodes.getLength(); i++) items.add((Element) nodes.item(i));
             return items;
         } catch (Exception e) {
+            log.warn("Seoul API lookup failed: endpoint={}, failureType={}, httpStatus={}", path,
+                    e.getClass().getSimpleName(), e instanceof RestClientResponseException response
+                            ? response.getStatusCode().value() : null);
             retryAfter = clock.instant().plusSeconds(60);
             throw unavailable(); // Never expose URI containing the service key.
         }
@@ -198,7 +288,9 @@ public class SeoulBusScheduleService {
             return value;
         } catch (NumberFormatException ex) { throw unsupported(); }
     }
-    private static String normalize(String s) { return s == null ? "" : s.replaceAll("[\\s.·]", ""); }
+    private static String normalize(String s) {
+        return s == null ? "" : s.replaceAll("\\((?:[0-9]+번승강장|중)\\)", "").replaceAll("[\\s.·]", "");
+    }
     private static double distance(double x, double y, String sx, String sy) {
         try {
             double lon = Double.parseDouble(sx), lat = Double.parseDouble(sy);
@@ -210,7 +302,14 @@ public class SeoulBusScheduleService {
     }
     private static GlobalException unsupported() { return new GlobalException(ErrorCode.TRANSIT_SCHEDULE_UNSUPPORTED); }
     private static GlobalException unavailable() { return new GlobalException(ErrorCode.TRANSIT_SCHEDULE_UNAVAILABLE); }
-    private record Binding(String stationId, String arsId, String routeId) { }
+    private record Binding(String stationId, String arsId, String routeId, int order, String endStationId, int endOrder) { }
     private record Cached(Schedule schedule, Instant expires) { }
-    public record Schedule(String stationId, String arsId, String routeId, LocalDateTime first, LocalDateTime last) { }
+    private record LiveCache(List<Element> items, Instant expires) { }
+    public record LiveBus(LocalDateTime boarding, LocalDateTime alighting, boolean last, String vehicleId) { }
+    public record Schedule(String stationId, String arsId, String routeId, LocalDateTime first, LocalDateTime last,
+                           int order, String endStationId, int endOrder) {
+        public Schedule(String stationId, String arsId, String routeId, LocalDateTime first, LocalDateTime last) {
+            this(stationId, arsId, routeId, first, last, 0, "", 0);
+        }
+    }
 }

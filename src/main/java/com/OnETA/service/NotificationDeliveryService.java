@@ -109,10 +109,10 @@ public class NotificationDeliveryService {
 
     private String notificationBody(ArrivalNotification notification, int estimatedDuration) {
         if (notification.getScheduleType() == com.OnETA.entity.NotificationScheduleType.FIRST_TRANSIT) {
-            return "첫차 이용을 위한 출발 시간입니다. 정류장 또는 역으로 이동해주세요.";
+            return "첫차 이용을 위한 예상 출발 알림입니다. 여유 있게 정류장 또는 역으로 이동해주세요.";
         }
         if (notification.getScheduleType() == com.OnETA.entity.NotificationScheduleType.LAST_TRANSIT) {
-            return "막차 이용을 위한 출발 시간입니다. 정류장 또는 역으로 이동해주세요.";
+            return "막차 이용을 위한 예상 출발 알림입니다. 환승 여유를 두고 정류장 또는 역으로 이동해주세요.";
         }
         return String.format("지금 출발하시면 목표 시간(%s)에 도착할 수 있습니다. (예상 소요 시간: %d분)",
                 notification.getTargetArrivalTime(), estimatedDuration);
