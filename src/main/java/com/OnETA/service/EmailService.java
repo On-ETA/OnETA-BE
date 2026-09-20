@@ -4,6 +4,7 @@ import com.OnETA.common.error.ErrorCode;
 import com.OnETA.common.exception.GlobalException;
 import com.OnETA.entity.EmailVerification;
 import com.OnETA.repository.EmailVerificationRepository;
+import com.OnETA.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.mail.SimpleMailMessage;
 import org.springframework.mail.javamail.JavaMailSender;
@@ -21,6 +22,7 @@ import java.util.concurrent.ThreadLocalRandom;
 public class EmailService {
 
     private final JavaMailSender javaMailSender;
+    private final UserRepository userRepository;
     private final EmailVerificationRepository emailVerificationRepository;
 
     private static final int MAX_DAILY_SEND_COUNT = 100; // 하루 최대 발송 가능 횟수
@@ -29,6 +31,10 @@ public class EmailService {
 
     // 인증번호 발송 및 DB 저장 로직
     public void sendVerificationCode(String toEmail) {
+
+        if (userRepository.findByEmail(toEmail).isPresent()) {
+            throw new GlobalException(ErrorCode.INVALID_INPUT_VALUE, "이미 가입된 이메일입니다.");
+        }
 
         LocalDateTime now = LocalDateTime.now();
         String verificationCode = generateRandomCode(); // 6자리 난수 생성
