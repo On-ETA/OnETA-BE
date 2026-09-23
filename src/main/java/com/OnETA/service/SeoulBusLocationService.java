@@ -36,7 +36,6 @@ public class SeoulBusLocationService {
     // 해당 객체 리스트(BusLocationResponseDto.BusPosition) 중 각 객체의 메소드(isDepotDeparted, isTurnaroundDeparted)를 통해 필터링 한 뒤
     // 필터링 한 객체 나열(BusLocationResponseDto.BusPosition)들 속 각각에서 차량번호만 빼낸 String 타입 나열을 만든 뒤
     // 가장 첫 번째 String 데이터를 지역변수에 저장
-    @Transactional(readOnly = true)
     public BusLocationResponseDto getRealTimeBusLocations(String routeId) {
 
         // 서울버스DB 노선 정보(turnaroundSeq) 가져오기
