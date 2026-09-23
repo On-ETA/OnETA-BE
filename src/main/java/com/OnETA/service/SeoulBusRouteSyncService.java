@@ -48,15 +48,9 @@ public class SeoulBusRouteSyncService {
             "0", "1", "2", "3", "4", "5", "6", "7", "8", "9"
     };
 
-//    // 디버깅 전용 배열, 배포 시 수정 예정
-//    private static final String[] TEST_SEARCH_KEYWORDS = {
-//            "0", "1"
-//    };
-
     // 애플리케이션 실행 완료 직후 1회 즉시 실행 + 이후 매주 일요일 오전 2시 실행
     // @EventListener(ApplicationReadyEvent.class)
     @Scheduled(cron = "0 0 2 ? * SUN", zone = "Asia/Seoul")
-    @Transactional
     public void syncSeoulBusRoutes() {
         com.OnETA.common.ExternalApiCallCounter.runScheduler("서울 버스 노선 동기화", this::syncSeoulBusRoutesRun);
     }
