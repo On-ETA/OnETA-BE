@@ -4,6 +4,7 @@ import com.OnETA.common.error.ErrorCode;
 import com.OnETA.common.response.ApiResponse;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.ServletException;
+import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.extern.slf4j.Slf4j;
@@ -13,6 +14,8 @@ import org.springframework.security.web.authentication.AuthenticationFailureHand
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 
 @Slf4j
 @Component
@@ -33,11 +36,21 @@ public class OAuth2FailureHandler implements AuthenticationFailureHandler {
             errorMessage = oauth2Exception.getError().getDescription();
         }
 
-        // 공통 응답 객체 생성
-        ApiResponse<Void> apiResponse = ApiResponse.error(ErrorCode.INVALID_INPUT_VALUE.getCode(), errorMessage);
+        // 한글 에러 메시지 인코딩
+        String encodedErrorMessage = URLEncoder.encode(errorMessage, StandardCharsets.UTF_8);
 
-        // JSON 변환 후 클라이언트로 출력
-        ObjectMapper objectMapper = new ObjectMapper();
-        response.getWriter().write(objectMapper.writeValueAsString(apiResponse));
+        // 에러 메시지 담을 쿠키 생성 (이름: "oauth2_auth_error")
+        Cookie errorCookie = new Cookie("oauth2_auth_error", encodedErrorMessage);
+        errorCookie.setPath("/"); // 모든 경로에서 쿠키 접근 가능
+        errorCookie.setMaxAge(60); // 60초 후 자동 삭제
+
+        errorCookie.setSecure(true);
+
+        // Response에 쿠키 추가
+        response.addCookie(errorCookie);
+
+        // 리디렉션할 메인 로그인 화면 URL 설정 및 클라이언트를 해당 URL로 강제 이동
+        String targetUrl = "https://on-eta.com";
+        response.sendRedirect(targetUrl);
     }
 }
