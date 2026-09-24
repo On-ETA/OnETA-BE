@@ -29,8 +29,10 @@ public class NotificationService {
     @Transactional
     public Long createArrivalNotification(String email, NotificationDto.CreateArrivalRequest request) {
         validateCreateRequest(request);
-        User user = userRepository.findByEmail(email)
+        User user = userRepository.findForNotificationByEmail(email)
                 .orElseThrow(() -> new com.OnETA.common.exception.GlobalException(com.OnETA.common.error.ErrorCode.USER_NOT_FOUND));
+
+        validateUniqueRoute(user.getId(), null, request.getRouteDetails());
 
         String routeName = request.getRouteName();
         if (routeName == null || routeName.trim().isEmpty()) {
@@ -96,8 +98,13 @@ public class NotificationService {
                     com.OnETA.common.error.ErrorCode.INVALID_INPUT_VALUE, "수정할 값이 하나도 없습니다.");
         }
 
+        userRepository.findForNotificationByEmail(email)
+                .orElseThrow(() -> new com.OnETA.common.exception.GlobalException(com.OnETA.common.error.ErrorCode.USER_NOT_FOUND));
         ArrivalNotification notification = getArrivalNotificationByEmailAndId(email, id);
 
+        if (request.getRouteDetails() != null) {
+            validateUniqueRoute(notification.getUser().getId(), id, request.getRouteDetails());
+        }
         validateReminderOffsets(request.getReminderOffsetMinutes(), false);
         NotificationScheduleType effectiveType = request.getScheduleType() == null
                 ? notification.getScheduleType() : request.getScheduleType();
@@ -137,6 +144,21 @@ public class NotificationService {
         }
         ArrivalNotification notification = getArrivalNotificationByEmailAndId(email, id);
         notification.toggleActive(request.getIsActive());
+    }
+
+    private void validateUniqueRoute(Long userId, Long excludedId, String details) {
+        var existing = arrivalNotificationRepository.findAllForDuplicateCheckByUserId(userId).stream()
+                .filter(n -> excludedId == null || !excludedId.equals(n.getId())).toList();
+        if (existing.isEmpty()) return;
+        var identity = NotificationRouteIdentity.of(transitApiService.readSavedRoute(details));
+        for (var notification : existing) {
+            var savedIdentity = NotificationRouteIdentity.of(
+                    transitApiService.readSavedRoute(notification.getRouteDetails()));
+            if (identity.equals(savedIdentity)) {
+                throw new com.OnETA.common.exception.GlobalException(
+                        com.OnETA.common.error.ErrorCode.NOTIFICATION_ALREADY_EXISTS);
+            }
+        }
     }
 
     private void validateCreateRequest(NotificationDto.CreateArrivalRequest request) {

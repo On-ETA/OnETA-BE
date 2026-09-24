@@ -40,7 +40,8 @@ public enum ErrorCode {
 
     // Notification
     NOTICE_NOT_FOUND(HttpStatus.NOT_FOUND, "N001", "공지사항을 찾을 수 없습니다."),
-    NOTIFICATION_NOT_FOUND(HttpStatus.NOT_FOUND, "N002", "알림을 찾을 수 없습니다.");
+    NOTIFICATION_NOT_FOUND(HttpStatus.NOT_FOUND, "N002", "알림을 찾을 수 없습니다."),
+    NOTIFICATION_ALREADY_EXISTS(HttpStatus.CONFLICT, "N005", "이미 등록된 경로의 알림입니다.");
 
     private final HttpStatus status;
     private final String code;
