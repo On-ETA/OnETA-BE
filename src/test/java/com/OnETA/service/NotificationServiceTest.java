@@ -17,6 +17,12 @@ import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 class NotificationServiceTest {
+    @org.junit.jupiter.api.BeforeEach
+    void lockLookup() {
+        when(users.findForNotificationByEmail(anyString()))
+                .thenAnswer(invocation -> users.findByEmail(invocation.getArgument(0)));
+    }
+
     private final ArrivalNotificationRepository arrivals = mock(ArrivalNotificationRepository.class);
     private final UserRepository users = mock(UserRepository.class);
     private final User user = mock(User.class);

@@ -22,8 +22,10 @@ public class AuthService {
     private final RefreshTokenRepository refreshTokenRepository;
     private final EmailVerificationRepository emailVerificationRepository;
 
+    private final PendingSignupStore pendingSignupStore;
+
     // 일반 회원가입
-    public TokenResponseDto signup(SignupRequestDto request) {
+    public SignupResponseDto signup(SignupRequestDto request) {
 
         // 비밀번호와 비밀번호 확인 일치 검사
         if(!request.getPassword().equals(request.getPasswordConfirm())){
@@ -31,13 +33,17 @@ public class AuthService {
         }
 
         // 이미 가입된 이메일 여부 확인
-        if (userRepository.findByEmail(request.getEmail()).isPresent()) {
+        if (userRepository.findByEmail(request.getEmail()).filter(user -> user.getRole() == Role.USER).isPresent()) {
             throw new GlobalException(ErrorCode.INVALID_INPUT_VALUE, "이미 사용 중인 이메일입니다.");
         }
 
         // 이메일 인증 여부 검사
         EmailVerification verification = emailVerificationRepository.findByEmail(request.getEmail())
                 .orElseThrow(() -> new GlobalException(ErrorCode.INVALID_INPUT_VALUE, "이메일 인증 내역이 없습니다. 이메일 인증을 먼저 진행해주세요."));
+
+        if (!java.time.LocalDateTime.now().isBefore(verification.getExpirationTime())) {
+            throw new GlobalException(ErrorCode.INVALID_INPUT_VALUE, "이메일 인증 유효 시간이 만료되었습니다. 다시 인증해 주세요.");
+        }
 
         if(!verification.isVerified()){
             throw new GlobalException(ErrorCode.INVALID_INPUT_VALUE, "이메일 인증이 완료되지 않았습니다. 인증번호를 확인해 주세요.");
@@ -52,55 +58,89 @@ public class AuthService {
             nickname = com.OnETA.util.NicknameGenerator.generate();
         }
 
-        // 새로운 유저 객체 생성 및 DB 저장
-        User newUser = User.builder()
-                .email(request.getEmail())
-                .password(encodedPassword)
-                .nickname(nickname)
-                .role(Role.GUEST)
-                .build();
+        SignupResponseDto response = pendingSignupStore.create(request.getEmail(), encodedPassword, nickname);
+        emailVerificationRepository.delete(verification);
+        return response;
+    }
 
-        userRepository.save(newUser);
-        emailVerificationRepository.delete(verification); // 가입 성공 시, 사용이 끝난 임시 인증 데이터 DB에서 삭제
+    // 약관 동의 전에는 회원 DB와 JWT를 생성하지 않는다.
+    public TokenResponseDto processConsent(ConsentRequestDto consentDto) {
+        if (!consentDto.isServiceTermsAgreement()
+                || !consentDto.isPersonalInfoAgreement()) {
+            throw new GlobalException(
+                    ErrorCode.INVALID_INPUT_VALUE,
+                    "필수 약관에 모두 동의해야 서비스 이용이 가능합니다."
+            );
+        }
 
-        // /signup/consent 진입을 위한 임시 토큰 발급
-        String accessToken = jwtProvider.createAccessToken(newUser.getEmail(), Role.GUEST.getKey());
-        String refreshToken = jwtProvider.createRefreshToken(newUser.getEmail());
+        PendingSignupStore.PendingSignup pending =
+                pendingSignupStore.consume(consentDto.getTempId());
 
-        saveOrUpdateRefreshToken(newUser.getEmail(), refreshToken);
+        User user = userRepository.findForSignupByEmail(pending.email())
+                .orElse(null);
 
+        // 신규 가입은 허용하고, 기존 계정은 GUEST만 가입 완료 가능
+        if (user != null && user.getRole() != Role.GUEST) {
+            throw new GlobalException(
+                    ErrorCode.INVALID_INPUT_VALUE,
+                    "약관 동의 대상자가 아닙니다. 이미 가입이 완료되었거나 권한이 없습니다."
+            );
+        }
+
+        if (user == null) {
+            user = User.builder()
+                    .email(pending.email())
+                    .password(pending.passwordHash())
+                    .nickname(pending.nickname())
+                    .role(Role.USER)
+                    .build();
+        } else {
+            // 기존 GUEST의 ID와 연관 데이터 유지
+            user.updatePassword(pending.passwordHash());
+            user.updateNickname(pending.nickname());
+            user.upgradeToUser();
+        }
+
+        try {
+            userRepository.saveAndFlush(user);
+        } catch (org.springframework.dao.DataIntegrityViolationException e) {
+            throw new GlobalException(
+                    ErrorCode.INVALID_INPUT_VALUE,
+                    "가입 정보를 저장할 수 없습니다. 이미 가입한 이메일인지 확인해 주세요."
+            );
+        }
+
+        return issueUserTokens(user);
+    }
+
+    // 소셜 신규 가입도 약관 동의 전에는 임시 정보만 저장한다.
+    public SignupResponseDto startSocialSignup(String email) {
+        return pendingSignupStore.create(
+                email,
+                null,
+                com.OnETA.util.NicknameGenerator.generate()
+        );
+    }
+
+    public TokenResponseDto loginSocialUser(String email) {
+        User user = userRepository.findByEmail(email)
+                .orElseThrow(() -> new GlobalException(ErrorCode.INVALID_INPUT_VALUE, "가입되지 않은 이메일입니다."));
+        return issueUserTokens(user);
+    }
+
+    private TokenResponseDto issueUserTokens(User user) {
+        requireUser(user);
+        String accessToken = jwtProvider.createAccessToken(user.getEmail(), Role.USER.getKey());
+        String refreshToken = jwtProvider.createRefreshToken(user.getEmail());
+        saveOrUpdateRefreshToken(user.getEmail(), refreshToken);
         return new TokenResponseDto(accessToken, refreshToken);
     }
 
-    // 약관 동의 및 Role 승급 로직
-    public TokenResponseDto processConsent(String email, ConsentRequestDto consentDto){
-
-        // 사용자 email이 DB에 존재하지 않을 경우 예외 처리
-        User user = userRepository.findByEmail(email)
-                .orElseThrow(() -> new GlobalException(ErrorCode.INVALID_INPUT_VALUE, "사용자를 찾을 수 없습니다."));
-
-        // 약관 동의 예외 처리
-        if(!consentDto.isServiceTermsAgreement() || !consentDto.isPersonalInfoAgreement()){
-            throw new GlobalException(ErrorCode.INVALID_INPUT_VALUE, "필수 약관에 모두 동의해야 서비스 이용이 가능합니다.");
+    private void requireUser(User user) {
+        if (user.getRole() != Role.USER) {
+            throw new GlobalException(ErrorCode.HANDLE_ACCESS_DENIED,
+                    "약관 동의가 완료되지 않은 계정입니다. 회원가입을 다시 진행해 주세요.");
         }
-
-        // 사용자가 GUEST role 이 아닌 모든 상태 접근 차단
-        if(user.getRole() != Role.GUEST){
-            throw new GlobalException(ErrorCode.INVALID_INPUT_VALUE, "약관 동의 대상자가 아닙니다. 이미 가입이 완료되었거나 권한이 없습니다.");
-        }
-
-        // GUEST -> USER role 변경 후 DB 저장
-        user.upgradeToUser();
-        userRepository.save(user);
-
-        // USER 권한이 들어간 새로운 인증 토큰 발급
-        String newAccessToken = jwtProvider.createAccessToken(user.getEmail(), Role.USER.getKey());
-        String newRefreshToken = jwtProvider.createRefreshToken(user.getEmail());
-
-        // 리프레시 토큰 DB 갱신
-        saveOrUpdateRefreshToken(user.getEmail(), newRefreshToken);
-
-        return new TokenResponseDto(newAccessToken, newRefreshToken);
     }
 
     // 일반 로그인
@@ -109,8 +149,10 @@ public class AuthService {
         User user = userRepository.findByEmail(request.getEmail())
                 .orElseThrow(() -> new GlobalException(ErrorCode.INVALID_INPUT_VALUE, "가입되지 않은 이메일입니다."));
 
+        requireUser(user);
+
         // 비밀번호 일치 여부 확인 (입력받은 원문과 DB의 암호화된 문자열 비교)
-        if (!passwordEncoder.matches(request.getPassword(), user.getPassword())) {
+        if (user.getPassword() == null || !passwordEncoder.matches(request.getPassword(), user.getPassword())) {
             throw new GlobalException(ErrorCode.INVALID_INPUT_VALUE, "비밀번호가 일치하지 않습니다.");
         }
 
@@ -153,6 +195,8 @@ public class AuthService {
         // 3. 유저 권한 확인
         User user = userRepository.findByEmail(email)
                 .orElseThrow(() -> new GlobalException(ErrorCode.INVALID_INPUT_VALUE, "사용자를 찾을 수 없습니다."));
+
+        requireUser(user);
 
         // 4. 새로운 토큰들 발급 및 DB 업데이트 (토큰 로테이션)
         String newAccessToken = jwtProvider.createAccessToken(email, user.getRole().getKey());

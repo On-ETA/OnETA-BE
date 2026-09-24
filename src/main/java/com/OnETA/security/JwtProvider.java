@@ -63,6 +63,15 @@ public class JwtProvider {
                 .parseClaimsJws(token).getBody().getSubject();
     }
 
+    public boolean isUserAccessToken(String token) {
+        try {
+            Claims claims = Jwts.parserBuilder().setSigningKey(secretKey).build()
+                    .parseClaimsJws(token).getBody();
+            return com.OnETA.entity.Role.USER.getKey().equals(claims.get("role", String.class));
+        } catch (Exception e) {
+            return false;
+        }
+    }
     // JWT 토큰에서 "role" 값을 추출
     public String getRoleFromToken(String token) {
         return Jwts.parserBuilder().setSigningKey(secretKey).build()

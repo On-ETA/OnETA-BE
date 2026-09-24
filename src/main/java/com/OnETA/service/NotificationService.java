@@ -29,8 +29,11 @@ public class NotificationService {
     @Transactional
     public Long createArrivalNotification(String email, NotificationDto.CreateArrivalRequest request) {
         validateCreateRequest(request);
-        User user = userRepository.findByEmail(email)
+        User user = userRepository.findForNotificationByEmail(email)
                 .orElseThrow(() -> new com.OnETA.common.exception.GlobalException(com.OnETA.common.error.ErrorCode.USER_NOT_FOUND));
+
+        validateCategoryLimit(user.getId(), request.getScheduleType());
+        validateUniqueRoute(user.getId(), null, request.getRouteDetails());
 
         String routeName = request.getRouteName();
         if (routeName == null || routeName.trim().isEmpty()) {
@@ -96,11 +99,20 @@ public class NotificationService {
                     com.OnETA.common.error.ErrorCode.INVALID_INPUT_VALUE, "수정할 값이 하나도 없습니다.");
         }
 
+        userRepository.findForNotificationByEmail(email)
+                .orElseThrow(() -> new com.OnETA.common.exception.GlobalException(com.OnETA.common.error.ErrorCode.USER_NOT_FOUND));
         ArrivalNotification notification = getArrivalNotificationByEmailAndId(email, id);
 
+        if (request.getRouteDetails() != null) {
+            validateUniqueRoute(notification.getUser().getId(), id, request.getRouteDetails());
+        }
         validateReminderOffsets(request.getReminderOffsetMinutes(), false);
         NotificationScheduleType effectiveType = request.getScheduleType() == null
                 ? notification.getScheduleType() : request.getScheduleType();
+        if (com.OnETA.entity.NotificationCategory.of(effectiveType)
+                != com.OnETA.entity.NotificationCategory.of(notification.getScheduleType())) {
+            validateCategoryLimit(notification.getUser().getId(), effectiveType);
+        }
         validateTargetArrivalTime(effectiveType, request.getTargetArrivalTime() == null
                 ? notification.getTargetArrivalTime() : request.getTargetArrivalTime());
         validateRouteSchedule(effectiveType, request.getRouteDetails() == null
@@ -137,6 +149,34 @@ public class NotificationService {
         }
         ArrivalNotification notification = getArrivalNotificationByEmailAndId(email, id);
         notification.toggleActive(request.getIsActive());
+    }
+
+    private void validateCategoryLimit(Long userId, NotificationScheduleType type) {
+        var category = com.OnETA.entity.NotificationCategory.of(type);
+        long count = arrivalNotificationRepository.findAllForDuplicateCheckByUserId(userId).stream()
+                .filter(n -> com.OnETA.entity.NotificationCategory.of(n.getScheduleType()) == category)
+                .count();
+        if (count >= 5) {
+            String label = category == com.OnETA.entity.NotificationCategory.SCHEDULE ? "일반" : "첫차·막차";
+            throw new com.OnETA.common.exception.GlobalException(
+                    com.OnETA.common.error.ErrorCode.NOTIFICATION_LIMIT_EXCEEDED,
+                    label + " 알림은 최대 5개까지 등록할 수 있습니다.");
+        }
+    }
+
+    private void validateUniqueRoute(Long userId, Long excludedId, String details) {
+        var existing = arrivalNotificationRepository.findAllForDuplicateCheckByUserId(userId).stream()
+                .filter(n -> excludedId == null || !excludedId.equals(n.getId())).toList();
+        if (existing.isEmpty()) return;
+        var identity = NotificationRouteIdentity.of(transitApiService.readSavedRoute(details));
+        for (var notification : existing) {
+            var savedIdentity = NotificationRouteIdentity.of(
+                    transitApiService.readSavedRoute(notification.getRouteDetails()));
+            if (identity.equals(savedIdentity)) {
+                throw new com.OnETA.common.exception.GlobalException(
+                        com.OnETA.common.error.ErrorCode.NOTIFICATION_ALREADY_EXISTS);
+            }
+        }
     }
 
     private void validateCreateRequest(NotificationDto.CreateArrivalRequest request) {

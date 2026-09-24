@@ -14,6 +14,11 @@ public interface DepotNotificationRepository extends JpaRepository<DepotNotifica
     // 조인을 통해 특정 사용자의 알림 목록만 가져오기
     List<DepotNotification> findAllByUserBus_User(User user);
 
+    @org.springframework.data.jpa.repository.Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
+    @Query("select d from DepotNotification d where d.userBus.user = :user")
+    List<DepotNotification> findAllForRegistrationByUser(
+            @org.springframework.data.repository.query.Param("user") User user);
+
     // 특정 BusDirection의 UserBus의 DepotNotification 엔티티 검색 메서드
     Optional<DepotNotification> findByUserBus(UserBus userBus);
 
