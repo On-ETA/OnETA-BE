@@ -71,6 +71,7 @@ public class JwtProvider {
         } catch (Exception e) {
             return false;
         }
+    }
     // JWT 토큰에서 "role" 값을 추출
     public String getRoleFromToken(String token) {
         return Jwts.parserBuilder().setSigningKey(secretKey).build()
