@@ -71,6 +71,10 @@ public class JwtProvider {
         } catch (Exception e) {
             return false;
         }
+    // JWT 토큰에서 "role" 값을 추출
+    public String getRoleFromToken(String token) {
+        return Jwts.parserBuilder().setSigningKey(secretKey).build()
+                .parseClaimsJws(token).getBody().get("role", String.class);
     }
 
     // 토큰의 유효성 및 만료일자 확인

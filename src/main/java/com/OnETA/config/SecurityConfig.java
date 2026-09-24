@@ -8,6 +8,9 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
+import org.springframework.security.oauth2.client.registration.ClientRegistrationRepository;
+import org.springframework.security.oauth2.client.web.DefaultOAuth2AuthorizationRequestResolver;
+import org.springframework.security.oauth2.client.web.OAuth2AuthorizationRequestResolver;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
@@ -25,6 +28,7 @@ public class SecurityConfig {
 
     private final CustomOAuth2UserService customOAuth2UserService;
     private final OAuth2SuccessHandler oAuth2SuccessHandler;
+    private final OAuth2FailureHandler oAuth2FailureHandler;
     private final JwtProvider jwtProvider;
     private final CustomAuthenticationEntryPoint customAuthenticationEntryPoint;
     private final CustomAccessDeniedHandler customAccessDeniedHandler;
@@ -35,7 +39,7 @@ public class SecurityConfig {
     }
 
     @Bean
-    public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+    public SecurityFilterChain filterChain(HttpSecurity http, ClientRegistrationRepository clientRegistrationRepository) throws Exception {
         http
                 // 시큐리티 세팅에 CORS 설정을 적용
                 .cors(cors -> cors.configurationSource(corsConfigurationSource()))
@@ -49,26 +53,32 @@ public class SecurityConfig {
                         .requestMatchers(
                                 "/",
                                 "/login**",
-                                "/api/token-test",
                                 "/api/auth/**",
-                                "/api-docs/**",
-                                "/v3/api-docs/**",     // Swagger 기본 설정 (혹시 모를 대비)
-                                "/api-docs/**",        // Custom Swagger 데이터 경로
-                                "/swagger-ui/**",      // Swagger UI 화면
-                                "/swagger-ui.html",    // Swagger UI 진입점
-                                "/test/sync-bus/**",    // 테스트용 임시
-                                "/swagger-ui.html",    // Swagger UI 진입점
-                                "/h2-console/**"       // H2 Console (enabled only in local profile)
-                        ).permitAll() // 토큰 테스트 URL은 통과시켜 줍니다.
-                        .anyRequest().authenticated()
+                                "/v3/api-docs/**",      // Swagger 기본 설정 (혹시 모를 대비)
+                                "/api-docs/**",         // Custom Swagger 데이터 경로
+                                "/swagger-ui/**",       // Swagger UI 화면
+                                "/swagger-ui.html",     // Swagger UI 진입점
+                                "/h2-console/**",       // H2 Console (enabled only in local profile)
+                                "/oauth2/**",
+                                "/login/oauth2/code/**", // 구글 로그인 진입점 및 리다이렉트 주소 허용
+                                "/error",                // 내부 에러 발생 시 시큐리티가 막지 않도록 허용
+                                "/favicon.ico"          // 브라우저 기본 파비콘 요청 허용하여 불필요한 에러 로그 방지
+                        ).permitAll() // 토큰 테스트 URL은 통과
+
+                        // 명시되지 않은 API는 ROLE_USER 권한이 있어야 통과
+                        .anyRequest().hasAuthority("ROLE_USER")
                 )
 
                 .oauth2Login(oauth2 -> oauth2
+                        .authorizationEndpoint(authorization -> authorization
+                                .authorizationRequestResolver(customAuthorizationRequestResolver(clientRegistrationRepository))
+                        )
                         .userInfoEndpoint(userInfo -> userInfo
                                 .userService(customOAuth2UserService)
                         )
                         // 💡 중요: 로그인 성공 시 기본 URL로 가는 대신, 우리가 만든 핸들러가 작동하도록 설정합니다.
                         .successHandler(oAuth2SuccessHandler)
+                        .failureHandler(oAuth2FailureHandler)// 실패 핸들러 추가
                 )
 
                 // 💡 인증 인가 실패 시 처리 핸들러 등록
@@ -85,6 +95,18 @@ public class SecurityConfig {
                 .addFilterBefore(new JwtFilter(jwtProvider), UsernamePasswordAuthenticationFilter.class);
 
         return http.build();
+    }
+
+    private OAuth2AuthorizationRequestResolver customAuthorizationRequestResolver(ClientRegistrationRepository clientRegistrationRepository) {
+        // 기본 스프링 시큐리티의 OAuth2 요청 생성기를 가져옴 ("/oauth2/authorization" 경로 기준)
+        DefaultOAuth2AuthorizationRequestResolver resolver =
+                new DefaultOAuth2AuthorizationRequestResolver(clientRegistrationRepository, "/oauth2/authorization");
+
+        // 생성된 요청 객체(Builder)에 추가 파라미터(prompt=select_account)를 덮어씌움
+        resolver.setAuthorizationRequestCustomizer(customizer -> customizer
+                .additionalParameters(params -> params.put("prompt", "select_account")));
+
+        return resolver;
     }
 
     // 구체적인 CORS 허용 규칙을 정의하는 메서드

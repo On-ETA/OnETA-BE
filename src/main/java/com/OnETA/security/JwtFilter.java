@@ -6,11 +6,14 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.GrantedAuthority;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
 import java.util.Collections;
+import java.util.List;
 
 @RequiredArgsConstructor
 public class JwtFilter extends OncePerRequestFilter {
@@ -32,10 +35,14 @@ public class JwtFilter extends OncePerRequestFilter {
         if (token != null && jwtProvider.validateToken(token) && jwtProvider.isUserAccessToken(token)) {
             // 토큰에서 이메일을 꺼냅니다.
             String email = jwtProvider.getEmailFromToken(token);
+            String role = jwtProvider.getRoleFromToken(token);
+
+            // String 형태의 권한 문자열을 스프링 시큐리티가 이해할 수 있는 GrantedAuthority 객체로 변환
+            List<GrantedAuthority> authorities = Collections.singletonList(new SimpleGrantedAuthority(role));
 
             // 이 사용자가 인증되었다는 증명서를 Spring Security Context에 강제로 집어넣습니다.
             UsernamePasswordAuthenticationToken authentication =
-                    new UsernamePasswordAuthenticationToken(email, null, Collections.emptyList());
+                    new UsernamePasswordAuthenticationToken(email, null, authorities);
 
             SecurityContextHolder.getContext().setAuthentication(authentication);
         }

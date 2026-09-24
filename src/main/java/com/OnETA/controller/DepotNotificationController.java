@@ -5,6 +5,7 @@ import com.OnETA.common.exception.GlobalException;
 import com.OnETA.common.response.ApiResponse;
 import com.OnETA.dto.bus.DepotNotificationRequestDto;
 import com.OnETA.dto.bus.DepotNotificationResponseDto;
+import com.OnETA.dto.bus.DepotNotificationUpdateRequestDto;
 import com.OnETA.entity.BusDirection;
 import com.OnETA.service.DepotNotificationService;
 import jakarta.validation.Valid;
@@ -47,6 +48,21 @@ public class DepotNotificationController {
 
         // UserBus 등록 및 Depot알림 활성화 동시 처리
         depotNotificationService.setDepotNotification(principal.getName(), request);
+
+        return ResponseEntity.ok(ApiResponse.success());
+    }
+
+    @PatchMapping("/depot/{userBusId}")
+    public ResponseEntity<ApiResponse<Void>> updateDepotNotificationDirection(
+            @PathVariable("userBusId") Long userBusId,
+            @Valid @RequestBody DepotNotificationUpdateRequestDto request,
+            Principal principal) {
+
+        if (principal == null) {
+            throw new GlobalException(ErrorCode.HANDLE_ACCESS_DENIED, "로그인이 필요합니다.");
+        }
+
+        depotNotificationService.updateDepotNotificationDirection(principal.getName(), userBusId, request);
 
         return ResponseEntity.ok(ApiResponse.success());
     }

@@ -9,9 +9,11 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
+import org.springframework.http.converter.HttpMessageConversionException;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.client.HttpStatusCodeException;
 import org.springframework.web.client.RestTemplate;
 import org.springframework.web.util.UriComponentsBuilder;
 
@@ -46,15 +48,9 @@ public class SeoulBusRouteSyncService {
             "0", "1", "2", "3", "4", "5", "6", "7", "8", "9"
     };
 
-//    // 디버깅 전용 배열, 배포 시 수정 예정
-//    private static final String[] TEST_SEARCH_KEYWORDS = {
-//            "0", "1"
-//    };
-
     // 애플리케이션 실행 완료 직후 1회 즉시 실행 + 이후 매주 일요일 오전 2시 실행
     // @EventListener(ApplicationReadyEvent.class)
     @Scheduled(cron = "0 0 2 ? * SUN", zone = "Asia/Seoul")
-    @Transactional
     public void syncSeoulBusRoutes() {
         com.OnETA.common.ExternalApiCallCounter.runScheduler("서울 버스 노선 동기화", this::syncSeoulBusRoutesRun);
     }
@@ -76,6 +72,11 @@ public class SeoulBusRouteSyncService {
                         .queryParam("resultType", "json")
                         .build(true) // true: 파라미터들이 이미 인코딩되어 있으니 추가 인코딩 X
                         .toUri();
+
+                log.info("[API 호출 시도] URI: {}", uri);
+
+                // String rawResponse = restTemplate.getForObject(uri, String.class);
+                // log.info("[API 응답 본문] 키워드 '{}' 응답: {}", keyword, rawResponse);
 
                 // ** [서울특별시_노선정보조회 서비스] API 호출 **
                 com.OnETA.common.ExternalApiCallCounter.record("SEOUL_BUS", "routes");
@@ -101,6 +102,12 @@ public class SeoulBusRouteSyncService {
                 // 공공 API 호출 제한 방지(Rate Limit)를 위한 딜레이
                 Thread.sleep(100);
 
+            } catch(HttpStatusCodeException e) {
+                log.error("[HTTP 통신 에러] 키워드: {}, 상태코드: {}", keyword, e.getStatusCode());
+                log.error("[공공데이터 에러 원문]: {}", e.getResponseBodyAsString());
+            } catch(HttpMessageConversionException e) {
+                log.error("[파싱 에러] 키워드: {} - JSON이 아닌 형태(아마도 XML 에러)가 반환되었습니다.", keyword);
+                log.error("[상세 원인]: {}", e.getMessage());
             } catch (Exception e) {
                 log.error("키워드 '{}' 검색 중 오류 발생: {}", keyword, e.getMessage());
             }

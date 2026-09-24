@@ -21,8 +21,8 @@ public class BusLocationPollingService {
     // API(getBusPosByRtid) 정보 파싱을 SeoulBusLocationService::getRealTimeBusLocations 에서 진행
     private final SeoulBusLocationService seoulBusLocationService;
 
-    // 1분마다 실행, 차고지 및 회차지 출발을 감지
-    @Scheduled(fixedDelay = 60000)
+    // 30초마다 실행, 차고지 및 회차지 출발을 감지
+    @Scheduled(fixedDelay = 30000)
     public void pollBusLocations() {
         com.OnETA.common.ExternalApiCallCounter.runScheduler("버스 위치 확인", this::pollBusLocationsRun);
     }
