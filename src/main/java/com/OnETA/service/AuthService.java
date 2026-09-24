@@ -65,53 +65,62 @@ public class AuthService {
 
     // 약관 동의 전에는 회원 DB와 JWT를 생성하지 않는다.
     public TokenResponseDto processConsent(ConsentRequestDto consentDto) {
-      if (!consentDto.isServiceTermsAgreement()
-              || !consentDto.isPersonalInfoAgreement()) {
-          throw new GlobalException(
-                  ErrorCode.INVALID_INPUT_VALUE,
-                  "필수 약관에 모두 동의해야 서비스 이용이 가능합니다."
-          );
-      }
+        if (!consentDto.isServiceTermsAgreement()
+                || !consentDto.isPersonalInfoAgreement()) {
+            throw new GlobalException(
+                    ErrorCode.INVALID_INPUT_VALUE,
+                    "필수 약관에 모두 동의해야 서비스 이용이 가능합니다."
+            );
+        }
 
-      PendingSignupStore.PendingSignup pending =
-              pendingSignupStore.consume(consentDto.getTempId());
+        PendingSignupStore.PendingSignup pending =
+                pendingSignupStore.consume(consentDto.getTempId());
 
-      User user = userRepository.findForSignupByEmail(pending.email())
-              .orElse(null);
+        User user = userRepository.findForSignupByEmail(pending.email())
+                .orElse(null);
 
-      // 신규 가입은 허용하고, 기존 계정은 GUEST만 가입 완료 가능
-      if (user != null && user.getRole() != Role.GUEST) {
-          throw new GlobalException(
-                  ErrorCode.INVALID_INPUT_VALUE,
-                  "약관 동의 대상자가 아닙니다. 이미 가입이 완료되었거나 권한이 없습니다."
-          );
-      }
+        // 신규 가입은 허용하고, 기존 계정은 GUEST만 가입 완료 가능
+        if (user != null && user.getRole() != Role.GUEST) {
+            throw new GlobalException(
+                    ErrorCode.INVALID_INPUT_VALUE,
+                    "약관 동의 대상자가 아닙니다. 이미 가입이 완료되었거나 권한이 없습니다."
+            );
+        }
 
-      if (user == null) {
-          user = User.builder()
-                  .email(pending.email())
-                  .password(pending.passwordHash())
-                  .nickname(pending.nickname())
-                  .role(Role.USER)
-                  .build();
-      } else {
-          // 기존 GUEST의 ID와 연관 데이터 유지
-          user.updatePassword(pending.passwordHash());
-          user.updateNickname(pending.nickname());
-          user.upgradeToUser();
-      }
+        if (user == null) {
+            user = User.builder()
+                    .email(pending.email())
+                    .password(pending.passwordHash())
+                    .nickname(pending.nickname())
+                    .role(Role.USER)
+                    .build();
+        } else {
+            // 기존 GUEST의 ID와 연관 데이터 유지
+            user.updatePassword(pending.passwordHash());
+            user.updateNickname(pending.nickname());
+            user.upgradeToUser();
+        }
 
-      try {
-          userRepository.saveAndFlush(user);
-      } catch (org.springframework.dao.DataIntegrityViolationException e) {
-          throw new GlobalException(
-                  ErrorCode.INVALID_INPUT_VALUE,
-                  "가입 정보를 저장할 수 없습니다. 이미 가입한 이메일인지 확인해 주세요."
-          );
-      }
+        try {
+            userRepository.saveAndFlush(user);
+        } catch (org.springframework.dao.DataIntegrityViolationException e) {
+            throw new GlobalException(
+                    ErrorCode.INVALID_INPUT_VALUE,
+                    "가입 정보를 저장할 수 없습니다. 이미 가입한 이메일인지 확인해 주세요."
+            );
+        }
 
-      return issueUserTokens(user);
-  } 
+        return issueUserTokens(user);
+    }
+
+    // 소셜 신규 가입도 약관 동의 전에는 임시 정보만 저장한다.
+    public SignupResponseDto startSocialSignup(String email) {
+        return pendingSignupStore.create(
+                email,
+                null,
+                com.OnETA.util.NicknameGenerator.generate()
+        );
+    }
 
     public TokenResponseDto loginSocialUser(String email) {
         User user = userRepository.findByEmail(email)
