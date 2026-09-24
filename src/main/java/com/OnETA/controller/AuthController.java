@@ -23,9 +23,9 @@ public class AuthController {
 
     // POST /api/auth/signup (회원가입)
     @PostMapping("/signup")
-    public ResponseEntity<ApiResponse<TokenResponseDto>> signup(@Valid @RequestBody SignupRequestDto request) {
+    public ResponseEntity<ApiResponse<SignupResponseDto>> signup(@Valid @RequestBody SignupRequestDto request) {
 
-        TokenResponseDto tokenResponse = authService.signup(request);
+        SignupResponseDto tokenResponse = authService.signup(request);
 
         return ResponseEntity
                 .status(HttpStatus.CREATED) // 201 Created
@@ -35,15 +35,8 @@ public class AuthController {
 
     // POST /api/auth/signup/consent
     @PostMapping("/signup/consent")
-    public ResponseEntity<ApiResponse<TokenResponseDto>> processConsent(@RequestBody ConsentRequestDto request, Principal principal) {
-
-        // 토큰 없이 접근했거나, 잘못된 토큰인 경우
-        if (principal == null) {
-            throw new GlobalException(ErrorCode.HANDLE_ACCESS_DENIED, "인증되지 않은 사용자입니다.");
-        }
-
-        String email = principal.getName();
-        TokenResponseDto tokenResponse = authService.processConsent(email, request);
+    public ResponseEntity<ApiResponse<TokenResponseDto>> processConsent(@Valid @RequestBody ConsentRequestDto request) {
+        TokenResponseDto tokenResponse = authService.processConsent(request);
 
         return ResponseEntity.ok(ApiResponse.success(tokenResponse));
 

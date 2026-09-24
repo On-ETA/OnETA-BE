@@ -29,7 +29,7 @@ public class JwtFilter extends OncePerRequestFilter {
         }
 
         // 2. 토큰이 존재하고, 유효성 검사를 통과한다면
-        if (token != null && jwtProvider.validateToken(token)) {
+        if (token != null && jwtProvider.validateToken(token) && jwtProvider.isUserAccessToken(token)) {
             // 토큰에서 이메일을 꺼냅니다.
             String email = jwtProvider.getEmailFromToken(token);
 

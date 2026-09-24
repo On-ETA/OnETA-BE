@@ -63,6 +63,16 @@ public class JwtProvider {
                 .parseClaimsJws(token).getBody().getSubject();
     }
 
+    public boolean isUserAccessToken(String token) {
+        try {
+            Claims claims = Jwts.parserBuilder().setSigningKey(secretKey).build()
+                    .parseClaimsJws(token).getBody();
+            return com.OnETA.entity.Role.USER.getKey().equals(claims.get("role", String.class));
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
     // 토큰의 유효성 및 만료일자 확인
     public boolean validateToken(String token) {
         try {
