@@ -32,6 +32,7 @@ public class NotificationService {
         User user = userRepository.findForNotificationByEmail(email)
                 .orElseThrow(() -> new com.OnETA.common.exception.GlobalException(com.OnETA.common.error.ErrorCode.USER_NOT_FOUND));
 
+        validateCategoryLimit(user.getId(), request.getScheduleType());
         validateUniqueRoute(user.getId(), null, request.getRouteDetails());
 
         String routeName = request.getRouteName();
@@ -108,6 +109,10 @@ public class NotificationService {
         validateReminderOffsets(request.getReminderOffsetMinutes(), false);
         NotificationScheduleType effectiveType = request.getScheduleType() == null
                 ? notification.getScheduleType() : request.getScheduleType();
+        if (com.OnETA.entity.NotificationCategory.of(effectiveType)
+                != com.OnETA.entity.NotificationCategory.of(notification.getScheduleType())) {
+            validateCategoryLimit(notification.getUser().getId(), effectiveType);
+        }
         validateTargetArrivalTime(effectiveType, request.getTargetArrivalTime() == null
                 ? notification.getTargetArrivalTime() : request.getTargetArrivalTime());
         validateRouteSchedule(effectiveType, request.getRouteDetails() == null
@@ -144,6 +149,19 @@ public class NotificationService {
         }
         ArrivalNotification notification = getArrivalNotificationByEmailAndId(email, id);
         notification.toggleActive(request.getIsActive());
+    }
+
+    private void validateCategoryLimit(Long userId, NotificationScheduleType type) {
+        var category = com.OnETA.entity.NotificationCategory.of(type);
+        long count = arrivalNotificationRepository.findAllForDuplicateCheckByUserId(userId).stream()
+                .filter(n -> com.OnETA.entity.NotificationCategory.of(n.getScheduleType()) == category)
+                .count();
+        if (count >= 5) {
+            String label = category == com.OnETA.entity.NotificationCategory.SCHEDULE ? "일반" : "첫차·막차";
+            throw new com.OnETA.common.exception.GlobalException(
+                    com.OnETA.common.error.ErrorCode.NOTIFICATION_LIMIT_EXCEEDED,
+                    label + " 알림은 최대 5개까지 등록할 수 있습니다.");
+        }
     }
 
     private void validateUniqueRoute(Long userId, Long excludedId, String details) {

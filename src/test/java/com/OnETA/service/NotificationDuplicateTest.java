@@ -67,7 +67,7 @@ class NotificationDuplicateTest {
     @Test
     void comparesOnlyCurrentUsersNotifications() {
         service.createArrivalNotification("me", request());
-        verify(arrivals).findAllForDuplicateCheckByUserId(1L);
+        verify(arrivals, times(2)).findAllForDuplicateCheckByUserId(1L);
         verify(arrivals, never()).findAll();
         verify(arrivals).save(any());
     }

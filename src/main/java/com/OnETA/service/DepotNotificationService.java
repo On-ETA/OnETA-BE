@@ -48,7 +48,7 @@ public class DepotNotificationService {
     @Transactional
     public void setDepotNotification(String email, DepotNotificationRequestDto request){
 
-        User user = userRepository.findByEmail(email)
+        User user = userRepository.findForNotificationByEmail(email)
                 .orElseThrow(() -> new GlobalException(ErrorCode.INVALID_INPUT_VALUE, "사용자를 찾을 수 없습니다."));
 
         if (!seoulBusRouteRepository.existsById(request.getRouteId())) {
@@ -60,12 +60,13 @@ public class DepotNotificationService {
                 user, request.getRouteId(), request.getDirection()
         );
 
-        // 새로 등록하는 UserBus 인 경우, 5개 등록 제한 검사
-        if (existingUserBus.isEmpty()) {
-            List<UserBus> currentBuses = userBusRepository.findAllByUser(user);
-            if (currentBuses.size() >= 5) {
-                throw new GlobalException(ErrorCode.INVALID_INPUT_VALUE, "차고지 알림은 최대 5개까지만 등록 가능합니다.");
-            }
+        // Count notifications, including disabled ones; re-enabling an existing one adds no slot.
+        var registered = depotNotificationRepository.findAllForRegistrationByUser(user);
+        var existingNotification = existingUserBus.flatMap(bus -> registered.stream()
+                .filter(n -> n.getUserBus().getId().equals(bus.getId())).findFirst());
+        if (existingNotification.isEmpty() && registered.size() >= 5) {
+            throw new GlobalException(ErrorCode.NOTIFICATION_LIMIT_EXCEEDED,
+                    "차고지 알림은 최대 5개까지 등록할 수 있습니다.");
         }
 
         // 없으면 새로 저장, 있으면 기존 객체 사용
@@ -81,7 +82,7 @@ public class DepotNotificationService {
         });
 
         // 해당 버스의 출고지 알림 설정 찾기 또는 새로 만들기
-        DepotNotification notification = depotNotificationRepository.findByUserBus(targetBus)
+        DepotNotification notification = existingNotification
                 .orElseGet(() -> {
                     DepotNotification newNotification = DepotNotification.builder()
                             .userBus(targetBus)
