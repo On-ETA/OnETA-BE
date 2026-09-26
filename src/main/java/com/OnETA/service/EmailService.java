@@ -3,6 +3,8 @@ package com.OnETA.service;
 import com.OnETA.common.error.ErrorCode;
 import com.OnETA.common.exception.GlobalException;
 import com.OnETA.entity.EmailVerification;
+import com.OnETA.entity.User;
+import com.OnETA.entity.VerificationType;
 import com.OnETA.repository.EmailVerificationRepository;
 import com.OnETA.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
@@ -30,10 +32,16 @@ public class EmailService {
     private static final int MAX_ATTEMPT_COUNT = 5;    // 인증번호 최대 입력 시도 횟수
 
     // 인증번호 발송 및 DB 저장 로직
-    public void sendVerificationCode(String toEmail) {
+    public void sendVerificationCode(String toEmail, VerificationType type) {
 
-        if (userRepository.findByEmail(toEmail).isPresent()) {
+        Optional<User> userOpt = userRepository.findByEmail(toEmail);
+
+        if (type == VerificationType.SIGNUP && userOpt.isPresent()) {
             throw new GlobalException(ErrorCode.INVALID_INPUT_VALUE, "이미 가입된 이메일입니다.");
+        }
+
+        if (type == VerificationType.PASSWORD_RESET && userOpt.isEmpty()) {
+            throw new GlobalException(ErrorCode.INVALID_INPUT_VALUE, "가입되지 않은 이메일입니다.");
         }
 
         LocalDateTime now = LocalDateTime.now();
@@ -71,7 +79,7 @@ public class EmailService {
         }
 
         // 실제 이메일 전송
-        sendEmail(toEmail, verificationCode);
+        sendEmail(toEmail, verificationCode, type);
     }
 
     // 인증번호 검증 로직
@@ -108,11 +116,14 @@ public class EmailService {
     }
 
     // 스프링 메일 발송 유틸리티 메서드
-    private void sendEmail(String to, String code) {
+    private void sendEmail(String to, String code, VerificationType type) {
         SimpleMailMessage message = new SimpleMailMessage();
         message.setTo(to);
-        message.setSubject("[온에타] 이메일 인증번호 안내");
-        message.setText("안녕하세요.\n온에타 앱 이용을 위한 인증번호입니다.\n\n"
+
+        String subjectContext = (type == VerificationType.SIGNUP) ? "회원가입" : "비밀번호 재설정";
+        message.setSubject("[온에타] " + subjectContext + " 이메일 인증번호 안내");
+
+        message.setText("안녕하세요.\n온에타 앱 " + subjectContext + "을(를) 위한 인증번호입니다.\n\n"
                 + "인증번호: " + code + "\n\n"
                 + "해당 인증번호는 5분간 유효합니다.");
 
