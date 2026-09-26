@@ -82,7 +82,7 @@ public class AuthController {
     @PostMapping("/email/send")
     public ResponseEntity<ApiResponse<Void>> sendVerificationEmail(@Valid @RequestBody EmailSendRequestDto request) {
 
-        emailService.sendVerificationCode(request.getEmail());
+        emailService.sendVerificationCode(request.getEmail(), request.getType());
 
         return ResponseEntity.ok(ApiResponse.success());
     }
