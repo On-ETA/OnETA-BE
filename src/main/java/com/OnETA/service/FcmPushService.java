@@ -13,6 +13,11 @@ import com.google.firebase.messaging.ApnsConfig;
 import com.google.firebase.messaging.Message;
 import com.google.firebase.messaging.WebpushConfig;
 import com.google.firebase.messaging.Notification;
+import com.google.firebase.messaging.MulticastMessage;
+import com.OnETA.entity.User;
+import com.OnETA.entity.UserDeviceToken;
+import com.OnETA.repository.UserRepository;
+import com.OnETA.repository.UserDeviceTokenRepository;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -36,6 +41,8 @@ import org.springframework.core.io.ResourceLoader;
 public class FcmPushService {
 
     private final ResourceLoader resourceLoader;
+    private final UserRepository userRepository;
+    private final UserDeviceTokenRepository userDeviceTokenRepository;
 
     @Value("${firebase.service-account:}")
     private String serviceAccount;
@@ -45,8 +52,10 @@ public class FcmPushService {
 
     private Clock clock = Clock.systemUTC();
 
-    public FcmPushService(ResourceLoader resourceLoader) {
+    public FcmPushService(ResourceLoader resourceLoader, UserRepository userRepository, UserDeviceTokenRepository userDeviceTokenRepository) {
         this.resourceLoader = resourceLoader;
+        this.userRepository = userRepository;
+        this.userDeviceTokenRepository = userDeviceTokenRepository;
     }
 
     @PostConstruct
@@ -63,6 +72,69 @@ public class FcmPushService {
             }
         } catch (Exception e) {
             throw new IllegalStateException("Firebase 서비스 계정을 초기화할 수 없습니다.", e);
+        }
+    }
+
+    public void sendPush(String targetEmail, String title, String body) {
+        if (!firebaseEnabled) {
+            log.debug("Firebase is disabled; skipping FCM push. Email: {}", targetEmail);
+            return;
+        }
+
+        if (FirebaseApp.getApps().isEmpty()) {
+            log.warn("[FCM 발송 실패] Firebase 서비스 계정이 설정되지 않았습니다.");
+            return;
+        }
+
+        User user = userRepository.findByEmail(targetEmail).orElse(null);
+
+        if (user == null || user.getDeviceTokens() == null || user.getDeviceTokens().isEmpty()) {
+            log.warn("[FCM 발송 실패] 타겟 유저가 없거나 등록된 기기(토큰)가 없습니다. Email: {}", targetEmail);
+            return;
+        }
+
+        java.util.List<UserDeviceToken> deviceTokens = user.getDeviceTokens();
+        java.util.List<String> tokens = deviceTokens.stream()
+                .map(UserDeviceToken::getDeviceToken)
+                .toList();
+
+        Notification notification = Notification.builder()
+                .setTitle(title)
+                .setBody(body)
+                .build();
+
+        MulticastMessage message = MulticastMessage.builder()
+                .addAllTokens(tokens)
+                .setNotification(notification)
+                .build();
+
+        try {
+            com.google.firebase.messaging.BatchResponse response = FirebaseMessaging.getInstance().sendMulticast(message);
+
+            log.info("[FCM 다중 발송 완료] Email: {}, 총 시도: {}, 성공: {}, 실패: {}",
+                    targetEmail, tokens.size(), response.getSuccessCount(), response.getFailureCount());
+
+            if (response.getFailureCount() > 0) {
+                log.warn("[FCM 발송 실패 기기 존재] 일부 기기로의 발송이 실패했습니다.");
+                java.util.List<com.google.firebase.messaging.SendResponse> responses = response.getResponses();
+                java.util.List<UserDeviceToken> invalidTokens = new java.util.ArrayList<>();
+                
+                for (int i = 0; i < responses.size(); i++) {
+                    if (!responses.get(i).isSuccessful()) {
+                        MessagingErrorCode errorCode = responses.get(i).getException().getMessagingErrorCode();
+                        if (errorCode == MessagingErrorCode.UNREGISTERED || errorCode == MessagingErrorCode.INVALID_ARGUMENT) {
+                            invalidTokens.add(deviceTokens.get(i));
+                        }
+                    }
+                }
+                
+                if (!invalidTokens.isEmpty()) {
+                    userDeviceTokenRepository.deleteAll(invalidTokens);
+                    log.info("[FCM 유효하지 않은 토큰 삭제] Email: {}, 삭제된 토큰 수: {}", targetEmail, invalidTokens.size());
+                }
+            }
+        } catch (Exception e) {
+            log.error("[FCM 다중 발송 에러] Email: {}, Reason: {}", targetEmail, e.getMessage());
         }
     }
 

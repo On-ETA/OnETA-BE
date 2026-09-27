@@ -1,7 +1,7 @@
 package com.OnETA.controller;
 
 import com.OnETA.common.response.ApiResponse;
-import com.OnETA.service.FcmService;
+import com.OnETA.service.FcmPushService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -13,7 +13,7 @@ import java.security.Principal;
 @RequiredArgsConstructor
 public class TestFcmController {
 
-    private final FcmService fcmService;
+    private final FcmPushService fcmPushService;
 
     @PostMapping("/fcm")
     public ResponseEntity<ApiResponse<Void>> sendTestPush(
@@ -22,7 +22,7 @@ public class TestFcmController {
             Principal principal) {
 
         // 로그인된 내 계정(이메일)으로 즉시 푸시 발송
-        fcmService.sendPush(principal.getName(), title, body);
+        fcmPushService.sendPush(principal.getName(), title, body);
 
         return ResponseEntity.ok(ApiResponse.success());
     }

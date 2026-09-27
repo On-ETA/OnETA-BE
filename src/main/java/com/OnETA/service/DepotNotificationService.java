@@ -27,7 +27,7 @@ import java.util.Optional;
 @RequiredArgsConstructor
 public class DepotNotificationService {
 
-    private final FcmService fcmService;
+    private final FcmPushService fcmPushService;
     private final UserRepository userRepository;
     private final UserBusRepository userBusRepository;
     private final DepotNotificationRepository depotNotificationRepository;
@@ -191,7 +191,7 @@ public class DepotNotificationService {
             String pushBody = String.format("[%s 방면] %s번 버스가 방금 %s했어요!", directionName, routeBusNumber, pushTitle);
 
             // 실제 푸시 발송
-            fcmService.sendPush(targetEmail, pushTitle, pushBody);
+            fcmPushService.sendPush(targetEmail, pushTitle, pushBody);
 
             log.info("[푸시 발송 완료 처리] 사용자: {}, 내용: {} (감지된 차량번호: {})", targetEmail, pushBody, plainNo);
 

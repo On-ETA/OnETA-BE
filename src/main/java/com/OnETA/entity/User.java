@@ -5,6 +5,9 @@ import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 
+import java.util.ArrayList;
+import java.util.List;
+
 @Entity
 @Getter
 @NoArgsConstructor // 롬복: 기본 생성자를 자동으로 만들어줌
@@ -28,8 +31,10 @@ public class User {
     @Column(nullable = false)
     private Role role;
 
-    @Column
-    private String fcmToken; // 프론트엔드에서 로그인 시 전달받아 갱신
+    // UserDeviceToken 의 1:N 양방향 연관관계
+    // cascade = ALL, orphanRemoval = true 로 설정하여 User 삭제 시 토큰들도 함께 삭제
+    @OneToMany(mappedBy = "user", cascade = CascadeType.ALL, orphanRemoval = true)
+    private List<UserDeviceToken> deviceTokens = new ArrayList<>();
 
     @Builder
     public User(String email, String password, String nickname, Role role) {
@@ -51,7 +56,7 @@ public class User {
         this.nickname = newNickname;
     }
 
-    public void updateFcmToken(String fcmToken) {
-        this.fcmToken = fcmToken;
+    public void addDeviceToken(UserDeviceToken token) {
+        this.deviceTokens.add(token);
     }
 }
