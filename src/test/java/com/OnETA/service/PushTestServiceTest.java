@@ -25,7 +25,7 @@ class PushTestServiceTest {
         verifyNoMoreInteractions(push);
     }
     @Test void disabledFirebaseCannotBeRecordedAsSuccessfulSend() {
-        var push = new FcmPushService(new DefaultResourceLoader());
+        var push = new FcmPushService(new DefaultResourceLoader(), mock(UserRepository.class), mock(UserDeviceTokenRepository.class));
         ReflectionTestUtils.setField(push, "firebaseEnabled", false);
         assertThatThrownBy(() -> push.sendPushMessage("token", "test", "body"))
                 .isInstanceOfSatisfying(FcmPushException.class,
