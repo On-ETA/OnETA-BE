@@ -10,6 +10,7 @@ import com.google.firebase.messaging.FirebaseMessagingException;
 import com.google.firebase.messaging.MessagingErrorCode;
 import com.google.firebase.messaging.AndroidConfig;
 import com.google.firebase.messaging.ApnsConfig;
+import com.google.firebase.messaging.Aps;
 import com.google.firebase.messaging.Message;
 import com.google.firebase.messaging.WebpushConfig;
 import com.google.firebase.messaging.Notification;
@@ -101,6 +102,7 @@ public class FcmPushService {
                 messageBuilder.setApnsConfig(ApnsConfig.builder()
                         .putHeader("apns-expiration",
                                 String.valueOf(hardDeadlineAt.toInstant(ZoneOffset.UTC).getEpochSecond()))
+                        .setAps(Aps.builder().build())
                         .build());
             }
 
