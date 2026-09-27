@@ -188,7 +188,7 @@ public class DepotNotificationService {
             String directionName = notification.getUserBus().getDirectionName();    // 예: "강남역 방면"
 
             String pushTitle = (busDirection == BusDirection.TURNAROUND) ? "차고지를 출발" : "회차지를 출발";
-            String pushBody = String.format("[%s 방면] %s번 버스가 방금 %s했어요!", directionName, routeBusNumber, pushTitle);
+            String pushBody = String.format("[%s] %s번 버스가 방금 %s했어요!", directionName, routeBusNumber, pushTitle);
 
             // 실제 푸시 발송
             fcmPushService.sendPush(targetEmail, pushTitle, pushBody);
