@@ -95,47 +95,25 @@ public class FcmPushService {
         }
 
         java.util.List<UserDeviceToken> deviceTokens = user.getDeviceTokens();
-        java.util.List<String> tokens = deviceTokens.stream()
-                .map(UserDeviceToken::getDeviceToken)
-                .toList();
 
-        Notification notification = Notification.builder()
-                .setTitle(title)
-                .setBody(body)
-                .build();
+        // 다른 기능(첫/막차 등)과 완벽히 동일한 페이로드(AndroidConfig, TTL 등)를 생성하기 위해
+        // 기존에 검증된 sendPushMessage를 재사용하여 루프를 돕니다.
+        // 차고지 출발 알림은 시간 민감도가 높으므로 30분의 TTL(유효시간)을 부여합니다.
+        java.time.LocalDateTime deadline = java.time.LocalDateTime.now(ZoneOffset.UTC).plusMinutes(30);
 
-        MulticastMessage message = MulticastMessage.builder()
-                .addAllTokens(tokens)
-                .setNotification(notification)
-                .build();
-
-        try {
-            com.google.firebase.messaging.BatchResponse response = FirebaseMessaging.getInstance().sendMulticast(message);
-
-            log.info("[FCM 다중 발송 완료] Email: {}, 총 시도: {}, 성공: {}, 실패: {}",
-                    targetEmail, tokens.size(), response.getSuccessCount(), response.getFailureCount());
-
-            if (response.getFailureCount() > 0) {
-                log.warn("[FCM 발송 실패 기기 존재] 일부 기기로의 발송이 실패했습니다.");
-                java.util.List<com.google.firebase.messaging.SendResponse> responses = response.getResponses();
-                java.util.List<UserDeviceToken> invalidTokens = new java.util.ArrayList<>();
-                
-                for (int i = 0; i < responses.size(); i++) {
-                    if (!responses.get(i).isSuccessful()) {
-                        MessagingErrorCode errorCode = responses.get(i).getException().getMessagingErrorCode();
-                        if (errorCode == MessagingErrorCode.UNREGISTERED || errorCode == MessagingErrorCode.INVALID_ARGUMENT) {
-                            invalidTokens.add(deviceTokens.get(i));
-                        }
-                    }
+        for (UserDeviceToken token : deviceTokens) {
+            try {
+                sendPushMessage(token.getDeviceToken(), title, body, deadline);
+            } catch (FcmPushException e) {
+                if (e.isPermanent()) {
+                    userDeviceTokenRepository.delete(token);
+                    log.info("[FCM 유효하지 않은 토큰 삭제] Email: {}, 삭제된 토큰: {}", targetEmail, token.getDeviceToken());
+                } else {
+                    log.error("[FCM 발송 에러] Email: {}, Reason: {}", targetEmail, e.getMessage());
                 }
-                
-                if (!invalidTokens.isEmpty()) {
-                    userDeviceTokenRepository.deleteAll(invalidTokens);
-                    log.info("[FCM 유효하지 않은 토큰 삭제] Email: {}, 삭제된 토큰 수: {}", targetEmail, invalidTokens.size());
-                }
+            } catch (Exception e) {
+                log.error("[FCM 발송 에러] Email: {}, Reason: {}", targetEmail, e.getMessage());
             }
-        } catch (Exception e) {
-            log.error("[FCM 다중 발송 에러] Email: {}, Reason: {}", targetEmail, e.getMessage());
         }
     }
 
