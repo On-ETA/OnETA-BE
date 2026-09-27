@@ -4,6 +4,7 @@ import com.OnETA.common.error.ErrorCode;
 import com.OnETA.common.exception.GlobalException;
 import com.OnETA.dto.bus.DepotNotificationRequestDto;
 import com.OnETA.dto.bus.DepotNotificationResponseDto;
+import com.OnETA.dto.bus.DepotNotificationStatusRequestDto;
 import com.OnETA.dto.bus.DepotNotificationUpdateRequestDto;
 import com.OnETA.entity.BusDirection;
 import com.OnETA.entity.DepotNotification;
@@ -94,6 +95,31 @@ public class DepotNotificationService {
         // 기존 엔티티가 존재했는데 false 인 경우에만 변경 (덮어씌우기)
         if (!notification.isActive()) {
             notification.enableNotification();
+        }
+    }
+
+    // 등록된 출고지 알림의 활성화/비활성화 (On/Off) 상태 변경
+    @Transactional
+    public void updateDepotNotificationStatus(String email, Long userBusId, DepotNotificationStatusRequestDto request) {
+
+        // 대상 버스 알림 내역 조회
+        UserBus userBus = userBusRepository.findById(userBusId)
+                .orElseThrow(() -> new GlobalException(ErrorCode.INVALID_INPUT_VALUE, "등록된 버스 정보를 찾을 수 없습니다."));
+
+        // 본인의 버스인지 권한 확인
+        if (!userBus.getUser().getEmail().equals(email)) {
+            throw new GlobalException(ErrorCode.HANDLE_ACCESS_DENIED, "수정 권한이 없습니다.");
+        }
+
+        // 해당 버스와 1:1로 연결된 알림 상태(DepotNotification) 조회
+        DepotNotification notification = depotNotificationRepository.findByUserBus(userBus)
+                .orElseThrow(() -> new GlobalException(ErrorCode.INTERNAL_SERVER_ERROR, "알림 설정 정보를 찾을 수 없습니다."));
+
+        // 요청된 상태(true/false)에 따라 알림 상태 업데이트 (JPA 더티 체킹)
+        if (request.getActive()) {
+            notification.enableNotification();
+        } else {
+            notification.disableNotification();
         }
     }
 
