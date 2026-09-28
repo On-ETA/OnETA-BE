@@ -32,7 +32,8 @@ class KakaoTransitClientTest {
                 "vehicles":[{"name":"8543","type":"시외"}]},
                "path":{"points":[[127.1,35.9],[127.2,37.2]]}},
               {"properties":{"type":"SUBWAY","time":243,"stops":[{"name":"강남"},{"name":"역삼"}],
-                "vehicles":[{"name":"2호선"}]}}]}
+                "vehicles":[{"name":"2호선"}]},
+               "path":{"points":[[127.2,37.2],[127.2,37.2]]}}]}
             """;
     private static final String BODY = "{\"status\":\"OK\",\"routes\":[" + ROUTE + "]}";
 

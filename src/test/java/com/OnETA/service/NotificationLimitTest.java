@@ -24,7 +24,7 @@ class NotificationLimitTest {
     private final ArrivalNotificationRepository arrivals = mock(ArrivalNotificationRepository.class);
     private final TransitApiService transit = mock(TransitApiService.class);
     private final NotificationService service = new NotificationService(arrivals,
-            mock(NotificationRepository.class), users, new RepeatDaysService(), transit);
+            mock(NotificationRepository.class), users, new RepeatDaysService(), transit, mock(NotificationDeliveryRepository.class));
     private final UserBusRepository buses = mock(UserBusRepository.class);
     private final DepotNotificationRepository depots = mock(DepotNotificationRepository.class);
     private final SeoulBusRouteRepository routes = mock(SeoulBusRouteRepository.class);
@@ -46,7 +46,7 @@ class NotificationLimitTest {
     }
 
     @ParameterizedTest
-    @EnumSource(NotificationScheduleType.class)
+    @EnumSource(value = NotificationScheduleType.class, names = {"NORMAL"})
     void fifthAllowedSixthRejectedIncludingDisabled(NotificationScheduleType type) {
         var saved = new ArrayList<>(notifications(type, 4));
         saved.get(0).toggleActive(false);
@@ -60,12 +60,16 @@ class NotificationLimitTest {
 
     @ParameterizedTest
     @EnumSource(value = NotificationScheduleType.class, names = {"FIRST_TRANSIT", "LAST_TRANSIT"})
-    void firstAndLastShareFiveSlots(NotificationScheduleType type) {
+    void firstAndLastShareOneReplaceableSlot(NotificationScheduleType type) {
         var saved = new ArrayList<>(notifications(NotificationScheduleType.FIRST_TRANSIT, 3));
         saved.addAll(notifications(NotificationScheduleType.LAST_TRANSIT, 2));
         when(arrivals.findAllForDuplicateCheckByUserId(1L)).thenReturn(saved);
-        assertLimit(() -> service.createArrivalNotification("me", request(type)));
-        verify(arrivals, never()).save(any());
+        service.createArrivalNotification("me", request(type));
+        assertThat(saved).allSatisfy(n -> {
+            assertThat(n.isTransitArchived()).isTrue();
+            assertThat(n.getIsActive()).isFalse();
+        });
+        verify(arrivals).save(argThat(n -> n.getScheduleType() == type && !n.isTransitArchived()));
     }
 
     @ParameterizedTest
@@ -85,29 +89,30 @@ class NotificationLimitTest {
                 ? NotificationScheduleType.FIRST_TRANSIT : NotificationScheduleType.NORMAL;
         var own = notification(source, 100);
         when(arrivals.findById(100L)).thenReturn(Optional.of(own));
-        when(arrivals.findAllForDuplicateCheckByUserId(1L)).thenReturn(notifications(target, 5));
+        int limit = target == NotificationScheduleType.NORMAL ? 5 : 1;
+        when(arrivals.findAllForDuplicateCheckByUserId(1L)).thenReturn(notifications(target, limit));
         var update = new NotificationDto.UpdateArrivalRequest();
         update.setScheduleType(target);
         update.setTargetArrivalTime(LocalTime.NOON);
         assertLimit(() -> service.updateArrivalNotification("me", 100L, update));
         assertThat(own.getScheduleType()).isEqualTo(source);
-        when(arrivals.findAllForDuplicateCheckByUserId(1L)).thenReturn(notifications(target, 4));
+        when(arrivals.findAllForDuplicateCheckByUserId(1L)).thenReturn(notifications(target, limit - 1));
         service.updateArrivalNotification("me", 100L, update);
         assertThat(own.getScheduleType()).isEqualTo(target);
     }
 
     @Test
-    void firstToLastAndRenamingAtLimitRemainAllowed() {
+    void firstToLastKeepsOneSlotAndIgnoresCustomName() {
         var own = notification(NotificationScheduleType.FIRST_TRANSIT, 100);
         when(arrivals.findById(100L)).thenReturn(Optional.of(own));
         when(arrivals.findAllForDuplicateCheckByUserId(1L))
-                .thenReturn(notifications(NotificationScheduleType.FIRST_TRANSIT, 5));
+                .thenReturn(List.of(own));
         var update = new NotificationDto.UpdateArrivalRequest();
         update.setScheduleType(NotificationScheduleType.LAST_TRANSIT);
         update.setRouteName("renamed");
         service.updateArrivalNotification("me", 100L, update);
         assertThat(own.getScheduleType()).isEqualTo(NotificationScheduleType.LAST_TRANSIT);
-        assertThat(own.getName()).isEqualTo("renamed");
+        assertThat(own.getName()).isEqualTo("막차 알림");
     }
 
     @Test

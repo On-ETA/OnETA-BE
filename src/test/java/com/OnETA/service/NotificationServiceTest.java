@@ -21,6 +21,9 @@ class NotificationServiceTest {
     void lockLookup() {
         when(users.findForNotificationByEmail(anyString()))
                 .thenAnswer(invocation -> users.findByEmail(invocation.getArgument(0)));
+        when(transit.readSavedRoute("{}")).thenReturn(com.OnETA.dto.TransitDto.RouteOptionResponse.builder()
+                .segments(List.of(com.OnETA.dto.TransitDto.RouteSegment.builder()
+                        .transitType("BUS").transitName("603").build())).build());
     }
 
     private final ArrivalNotificationRepository arrivals = mock(ArrivalNotificationRepository.class);
@@ -28,7 +31,7 @@ class NotificationServiceTest {
     private final User user = mock(User.class);
     private final TransitApiService transit = mock(TransitApiService.class);
     private final NotificationService service = new NotificationService(arrivals,
-            mock(NotificationRepository.class), users, new RepeatDaysService(), transit);
+            mock(NotificationRepository.class), users, new RepeatDaysService(), transit, mock(NotificationDeliveryRepository.class));
 
     @ParameterizedTest
     @EnumSource(value = NotificationScheduleType.class, names = {"FIRST_TRANSIT", "LAST_TRANSIT"})
@@ -80,11 +83,14 @@ class NotificationServiceTest {
     void createsScheduledTransitWithoutTargetArrivalTime(NotificationScheduleType type) {
         when(users.findByEmail("test@example.com")).thenReturn(Optional.of(user));
         when(arrivals.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
-        service.createArrivalNotification("test@example.com", request(type));
+        var request = request(type);
+        request.setRepeatDays(List.of("MON", "FRI"));
+        service.createArrivalNotification("test@example.com", request);
         ArgumentCaptor<ArrivalNotification> saved = ArgumentCaptor.forClass(ArrivalNotification.class);
         verify(arrivals).save(saved.capture());
         assertThat(saved.getValue().getTargetArrivalTime()).isNull();
         assertThat(saved.getValue().getScheduleType()).isEqualTo(type);
+        assertThat(saved.getValue().getRepeatDays()).isZero();
     }
 
     @Test
@@ -102,24 +108,31 @@ class NotificationServiceTest {
         when(arrivals.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
         var request = request(null);
         request.setTargetArrivalTime(LocalTime.of(9, 0));
+        request.setRepeatDays(List.of("MON", "FRI"));
         service.createArrivalNotification("test@example.com", request);
         ArgumentCaptor<ArrivalNotification> saved = ArgumentCaptor.forClass(ArrivalNotification.class);
         verify(arrivals).save(saved.capture());
         assertThat(saved.getValue().getScheduleType()).isEqualTo(NotificationScheduleType.NORMAL);
         assertThat(saved.getValue().getTargetArrivalTime()).isEqualTo(LocalTime.of(9, 0));
+        assertThat(saved.getValue().getRepeatDays()).isEqualTo(17);
     }
 
     @Test
     void switchingTypesClearsUnusedTimeAndRequiresTimeWhenReturningToNormal() {
         when(user.getId()).thenReturn(1L);
         when(users.findByEmail("test@example.com")).thenReturn(Optional.of(user));
-        ArrivalNotification notification = new ArrivalNotification(user, "경로", List.of(10), 0,
+        ArrivalNotification notification = new ArrivalNotification(user, "경로", List.of(10), 31,
                 LocalTime.of(9, 0), "{}", NotificationScheduleType.NORMAL);
         when(arrivals.findById(1L)).thenReturn(Optional.of(notification));
         var update = new NotificationDto.UpdateArrivalRequest();
         update.setScheduleType(NotificationScheduleType.FIRST_TRANSIT);
         service.updateArrivalNotification("test@example.com", 1L, update);
         assertThat(notification.getTargetArrivalTime()).isNull();
+        assertThat(notification.getRepeatDays()).isZero();
+
+        update.setRepeatDays(List.of("MON", "FRI"));
+        service.updateArrivalNotification("test@example.com", 1L, update);
+        assertThat(notification.getRepeatDays()).isZero();
 
         update.setScheduleType(NotificationScheduleType.NORMAL);
         assertThatThrownBy(() -> service.updateArrivalNotification("test@example.com", 1L, update))
@@ -129,5 +142,6 @@ class NotificationServiceTest {
         service.updateArrivalNotification("test@example.com", 1L, update);
         assertThat(notification.getTargetArrivalTime()).isEqualTo(LocalTime.of(10, 0));
         assertThat(notification.getScheduleType()).isEqualTo(NotificationScheduleType.NORMAL);
+        assertThat(notification.getRepeatDays()).isEqualTo(17);
     }
 }

@@ -11,6 +11,8 @@ import java.time.LocalDate;
 import java.util.Optional;
 
 public interface ScheduleSnapshotRepository extends JpaRepository<ScheduleSnapshot, Long> {
+    Optional<ScheduleSnapshot> findFirstByNotificationIdAndScheduleTypeAndRouteHashOrderByServiceDateDesc(
+            Long notificationId, NotificationScheduleType type, String routeHash);
     Optional<ScheduleSnapshot> findByNotificationIdAndServiceDateAndScheduleTypeAndRouteHash(
             Long notificationId, LocalDate serviceDate, NotificationScheduleType type, String routeHash);
     @Lock(LockModeType.PESSIMISTIC_WRITE)

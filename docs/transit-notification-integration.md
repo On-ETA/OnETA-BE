@@ -21,6 +21,9 @@ ODsay 도시 간 응답은 단순한 도시 내 `result.path`와 달라 카카�
 - 기존 `KAKAO_REST_API_KEY`를 재사용한다. 키가 없거나 `kakao.transit.fallback-enabled=false`이면 기존 ODsay 오류를 반환한다. 기본값은 true이며 유료 API 설정을 변경하지 않는다.
 - `GET https://dapi.kakao.com/v2/routing/publictraffic`에 좌표를 전달한다. 두 공급자 모두 연결 3초, 읽기 10초 제한을 적용한다. 별도 자동 재시도는 없다.
 - 최대 3개 후보를 반환한다. 초 단위 소요시간은 분 단위로 올림하고, `WALKING`은 `WALK`로 변환한다. 버스·지하철의 정류장 이름 목록과 구간 양 끝 좌표를 보존한다. 복수 노선 대안은 기존 모델에 맞춰 첫 노선 이름을 사용한다.
+- 카카오 원본 `steps`에는 출발·도착 도보가 없을 수 있다. 첫 구간이 대중교통이면 검색 출발 좌표→첫 승차 좌표, 마지막 구간이 대중교통이면 마지막 하차 좌표→검색 도착 좌표를 `/v2/routing/walk`로 조회해 `WALK`를 보완한다. 기존 시작·끝 도보와 환승 도보는 유지하며, 같은 지점의 좌표 오차(5m 이하)에는 추가 조회하지 않는다.
+- 보완한 도보는 `segments`에 저장하되 공급자의 `totalDurationMinutes`와 `realTimeDurationMinutes`에 다시 더하지 않는다. 전체 시간과 구간 합계는 각각 분 단위로 올림하므로 차이가 있을 수 있다. 동일 검색의 후보 간 같은 좌표 쌍은 조회 결과를 재사용한다(최대 3개 후보, 도보 API 최대 6회 추가 호출).
+- 도보 API 통신 실패는 `T003`, 도보 경로를 얻지 못하거나 필수 좌표·시간이 누락된 경우는 `T004`로 처리한다. 불완전한 경로를 도보 0분으로 반환하지 않는다. 기존 저장 경로는 자동 보정하지 않으므로, 도보 없이 저장했던 경로는 재검색한 전체 응답으로 갱신해야 한다.
 - 요금은 `fare.value`, 없으면 `fare.min`을 사용하고, 요금 정보 자체가 없으면 `totalCost=null`이다. 프론트는 null을 무료로 표시하지 않고 '요금 정보 없음'으로 처리해야 한다.
 - `routeId`는 `KAKAO_` 접두사, `provider`는 `KAKAO`다. `routeDetails`에는 이 필드를 포함한 경로 객체 전체를 저장한다. ODsay·BIS 식별자는 만들어 넣지 않는다.
 - 카카오 경로의 `realTimeDurationMinutes`는 예상 소요시간과 같다. 저장 후 NORMAL 알림 재계산에도 실시간 BIS 조회를 시도하지 않는다. 첫차·막차는 [서울 버스 단일 탑승 경로](seoul-bus-first-last.md)에 한해 정류장·방향·금일 시간표 검증 후 등록/수정을 허용한다. 나머지는 422 `T005`, 서울 시간표 API 조회 실패는 503 `T006`이다.
@@ -34,6 +37,8 @@ ODsay 도시 간 응답은 단순한 도시 내 `result.path`와 달라 카카�
 2026-09-18 첨부 좌표(127.05593797036339, 35.99330835090628 → 127.060175955621, 37.2042695838843)로 실제 호출 시 `error: [{code: "429", message: "Daily quota exceeded"}]`가 반환되었다. 사진 당시의 경로 응답은 재현하지 못했으므로 당시 원인을 도시 간 응답으로 확정하지 않는다. 호출 한도 회복 후 동일 좌표를 다시 확인해야 한다.
 
 ## 경로 등록 및 수정
+
+첫차·막차는 사용자당 합쳐 하나인 일회성 설정이다. 전용 `/api/notifications/transit` API는 POST로 기존 설정을 교체하고 GET으로 단일 객체를 조회하며 DELETE로 제거한다. 이름·반복 요일·목표 도착 시간 입력은 없으며, 예상 출발 시각과 남은 시간을 조회할 수 있다. 최신 계약은 [notification-api.md](notification-api.md)를 따른다. 아래 `/arrival` 호환 API도 첫차·막차의 반복 요일을 0으로 저장한다.
 
 `POST /api/notifications/arrival`, `PATCH /api/notifications/arrival/{id}`
 
@@ -52,10 +57,8 @@ ODsay 도시 간 응답은 단순한 도시 내 `result.path`와 달라 카카�
 
 ```json
 {
-  "routeName": "첫차 출근",
   "scheduleType": "FIRST_TRANSIT",
   "reminderOffsetMinutes": [10],
-  "repeatDays": ["MON", "TUE", "WED", "THU", "FRI"],
   "routeDetails": "<경로 후보 객체를 JSON.stringify한 문자열>"
 }
 ```

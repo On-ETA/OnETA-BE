@@ -297,6 +297,16 @@ class NotificationDeliveryServiceTest {
                 LocalDateTime.of(2026, 8, 10, 9, 10));
     }
 
+    @Test
+    void replacedTransitOutboxIsExpiredBeforeCallingFcm() {
+        TestFixture fixture = fixture();
+        when(fixture.notification.isTransitArchived()).thenReturn(true);
+        fixture.service.processPending();
+        assertThat(fixture.delivery.getStatus()).isEqualTo(NotificationDeliveryStatus.EXPIRED);
+        assertThat(fixture.delivery.getLastErrorCode()).isEqualTo("TRANSIT_REPLACED");
+        verifyNoInteractions(fixture.fcm);
+    }
+
     private TestFixture fixture() {
         NotificationDeliveryRepository deliveries = mock(NotificationDeliveryRepository.class);
         ArrivalNotificationRepository notifications = mock(ArrivalNotificationRepository.class);

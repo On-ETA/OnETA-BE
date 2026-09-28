@@ -20,6 +20,8 @@ import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.HashMap;
+import java.util.Map;
 
 @Service
 @Slf4j
@@ -29,6 +31,7 @@ public class KakaoTransitClient {
     private final String key;
     private final boolean enabled;
     private static final String URL = "https://dapi.kakao.com/v2/routing/publictraffic";
+    private static final String WALK_URL = "https://dapi.kakao.com/v2/routing/walk";
 
     @Autowired
     public KakaoTransitClient(ObjectMapper mapper,
@@ -63,12 +66,81 @@ public class KakaoTransitClient {
         try {
             ExternalApiCallCounter.record("KAKAO", "publictraffic");
             var response = restTemplate.exchange(uri, HttpMethod.GET, new HttpEntity<>(headers), String.class);
-            return parse(response.getBody());
+            // Different alternatives often share the same access or egress walk.
+            Map<WalkLeg, Integer> walkingTimes = new HashMap<>();
+            return parse(response.getBody()).stream()
+                    .map(route -> completeEndpointWalks(route, sx, sy, ex, ey, headers, walkingTimes))
+                    .toList();
         } catch (GlobalException e) {
             throw e;
         } catch (Exception e) {
             log.warn("Kakao transit request failed: {}", e.getClass().getSimpleName());
             throw new GlobalException(ErrorCode.TRANSIT_API_UNAVAILABLE);
+        }
+    }
+
+    private TransitDto.RouteOptionResponse completeEndpointWalks(TransitDto.RouteOptionResponse route,
+            double sx, double sy, double ex, double ey, HttpHeaders headers, Map<WalkLeg, Integer> walkingTimes) {
+        var original = route.getSegments();
+        var first = original.get(0);
+        var last = original.get(original.size() - 1);
+        List<TransitDto.RouteSegment> segments = new ArrayList<>();
+        if (!"WALK".equals(first.getTransitType())) {
+            addEndpointWalk(segments, new WalkLeg(sx, sy, first.getStartX(), first.getStartY()),
+                    "", first.getStartStation(), headers, walkingTimes);
+        }
+        segments.addAll(original);
+        if (!"WALK".equals(last.getTransitType())) {
+            addEndpointWalk(segments, new WalkLeg(last.getEndX(), last.getEndY(), ex, ey),
+                    last.getEndStation(), "", headers, walkingTimes);
+        }
+        // Provider totalTime already accounts for more than the vehicle steps.
+        // Preserve it; adding the new walk times again would double-count them.
+        return route.toBuilder().segments(segments).build();
+    }
+
+    private void addEndpointWalk(List<TransitDto.RouteSegment> segments, WalkLeg leg,
+            String startName, String endName, HttpHeaders headers, Map<WalkLeg, Integer> walkingTimes) {
+        if (!leg.hasValidCoordinates()) throw invalid();
+        // Allow a small coordinate precision/snap difference at the same stop.
+        if (leg.distanceMeters() <= 5) return;
+        int duration = walkingTimes.computeIfAbsent(leg, key -> fetchWalkingMinutes(key, headers));
+        segments.add(TransitDto.RouteSegment.builder().transitType("WALK").transitName("")
+                .startStation(startName).endStation(endName).durationMinutes(duration)
+                .startX(leg.sx()).startY(leg.sy()).endX(leg.ex()).endY(leg.ey())
+                .stations(List.of()).build());
+    }
+
+    private int fetchWalkingMinutes(WalkLeg leg, HttpHeaders headers) {
+        var uri = UriComponentsBuilder.fromUriString(WALK_URL)
+                .queryParam("start_x", leg.sx()).queryParam("start_y", leg.sy())
+                .queryParam("end_x", leg.ex()).queryParam("end_y", leg.ey()).build().toUri();
+        ExternalApiCallCounter.record("KAKAO", "walk");
+        var response = restTemplate.exchange(uri, HttpMethod.GET, new HttpEntity<>(headers), String.class);
+        try {
+            var root = mapper.readTree(response.getBody());
+            if (root == null || !root.isObject()) throw invalid();
+            if ("SAME_POINT".equals(root.path("status").asText())) return 0;
+            if (!"OK".equals(root.path("status").asText())) throw invalid();
+            return minutes(root.path("route").path("properties"), "totalTime");
+        } catch (Exception e) {
+            throw invalid();
+        }
+    }
+
+    private record WalkLeg(Double sx, Double sy, Double ex, Double ey) {
+        boolean hasValidCoordinates() {
+            return valid(sx, 180) && valid(ex, 180) && valid(sy, 90) && valid(ey, 90);
+        }
+        private static boolean valid(Double value, int bound) {
+            return value != null && Double.isFinite(value) && Math.abs(value) <= bound;
+        }
+        double distanceMeters() {
+            double dLat = Math.toRadians(ey - sy), dLon = Math.toRadians(ex - sx);
+            double a = Math.pow(Math.sin(dLat / 2), 2)
+                    + Math.cos(Math.toRadians(sy)) * Math.cos(Math.toRadians(ey))
+                    * Math.pow(Math.sin(dLon / 2), 2);
+            return 6371000 * 2 * Math.asin(Math.sqrt(Math.min(1, a)));
         }
     }
 

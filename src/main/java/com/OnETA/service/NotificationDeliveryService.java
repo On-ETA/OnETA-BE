@@ -141,7 +141,7 @@ public class NotificationDeliveryService {
             if (!Boolean.TRUE.equals(claimed)) return;
 
             NotificationDelivery delivery = deliveryRepository.findById(deliveryId).orElse(null);
-            if (delivery == null) return;
+            if (delivery == null || delivery.getStatus() != NotificationDeliveryStatus.SENDING) return;
             fcmPushService.sendPushMessage(
                     delivery.getDeviceToken(), delivery.getTitle(), delivery.getBody(),
                     delivery.getHardDeadlineAt());
@@ -163,6 +163,12 @@ public class NotificationDeliveryService {
         if (delivery == null || delivery.getStatus() == NotificationDeliveryStatus.SENT
                 || delivery.getStatus() == NotificationDeliveryStatus.FAILED
                 || delivery.getStatus() == NotificationDeliveryStatus.EXPIRED) return false;
+        if (org.hibernate.Hibernate.unproxy(delivery.getNotification()) instanceof ArrivalNotification arrival
+                && arrival.isTransitArchived()) {
+            delivery.markExpired("TRANSIT_REPLACED", "첫차·막차 알림이 교체 또는 삭제되었습니다.");
+            deliveryRepository.save(delivery);
+            return false;
+        }
         LocalDateTime now = nowUtc();
         if (delivery.getHardDeadlineAt() == null || !now.isBefore(delivery.getHardDeadlineAt())) {
             delivery.markExpired("DEADLINE", "알림 발송 유효 시간이 지났습니다.");

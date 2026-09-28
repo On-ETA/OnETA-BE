@@ -16,6 +16,17 @@ import java.util.List;
 import java.util.Optional;
 
 public interface NotificationDeliveryRepository extends JpaRepository<NotificationDelivery, Long> {
+    @org.springframework.data.jpa.repository.Modifying(flushAutomatically = true)
+    @Query("""
+            update NotificationDelivery d set d.status = com.OnETA.entity.NotificationDeliveryStatus.EXPIRED,
+                d.nextAttemptAt = null, d.lastErrorCode = 'TRANSIT_REPLACED',
+                d.lastErrorMessage = '첫차·막차 알림이 교체 또는 삭제되었습니다.'
+            where d.notification.id in :ids and d.status in (
+                com.OnETA.entity.NotificationDeliveryStatus.PENDING,
+                com.OnETA.entity.NotificationDeliveryStatus.SENDING)
+            """)
+    int expireReplacedTransitDeliveries(@Param("ids") List<Long> notificationIds);
+
     Optional<NotificationDelivery> findByNotificationIdAndDeliveryDate(Long notificationId, LocalDate deliveryDate);
     Optional<NotificationDelivery> findByNotificationIdAndDeliveryDateAndReminderOffsetMinutes(
             Long notificationId, LocalDate deliveryDate, int reminderOffsetMinutes);

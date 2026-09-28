@@ -25,6 +25,34 @@ import static org.springframework.test.web.client.match.MockRestRequestMatchers.
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 
 class TransitScheduleServiceTest {
+    @Test
+    void displayEstimateWorksBeforePollingWindowWithoutSavingOrLookingUpRealtime() {
+        var service = service("0530", "2330");
+        var n = notification(NotificationScheduleType.FIRST_TRANSIT, 10);
+        when(serviceApi(service).readSavedRoute("route")).thenReturn(route(10, 20, "1"));
+        assertThat(service.estimateDeparture(n, DATE.atTime(2, 0), SEOUL)).isEqualTo(DATE.atTime(5, 20));
+        verify(snapshotRepo(service), never()).save(any());
+        verifyNoInteractions(publicData(service));
+    }
+
+    @Test
+    void displayUsesPersistedEffectiveDepartureForOvernightTripAndCompletedTrip() {
+        var service = service("0530", "2330");
+        var n = notification(NotificationScheduleType.LAST_TRANSIT, 10);
+        when(n.getIsActive()).thenReturn(true);
+        var snapshot = new ScheduleSnapshot(n, DATE, NotificationScheduleType.LAST_TRANSIT, "hash",
+                DATE.plusDays(1).atTime(0, 20), DATE.plusDays(1).atTime(0, 10), DATE.atTime(23, 0), DATE.atTime(12, 0), 30);
+        snapshot.updateConnection(DATE.plusDays(1).atTime(0, 15), DATE.plusDays(1).atTime(0, 5), 30, DATE.atTime(23, 50));
+        when(snapshotRepo(service).findFirstByNotificationIdAndScheduleTypeAndRouteHashOrderByServiceDateDesc(any(), any(), any()))
+                .thenReturn(Optional.of(snapshot));
+        assertThat(service.estimateDeparture(n, DATE.plusDays(1).atTime(0, 16), SEOUL))
+                .isEqualTo(DATE.plusDays(1).atTime(0, 15));
+        when(n.getIsActive()).thenReturn(false);
+        assertThat(service.estimateDeparture(n, DATE.plusDays(2).atTime(10, 0), SEOUL))
+                .isEqualTo(DATE.plusDays(1).atTime(0, 15));
+        verifyNoInteractions(serviceApi(service), publicData(service));
+        verify(snapshotRepo(service), never()).save(any());
+    }
     private static final LocalDate DATE = LocalDate.of(2026, 8, 27);
     private static final ZoneId SEOUL = ZoneId.of("Asia/Seoul");
 
