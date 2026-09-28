@@ -21,7 +21,7 @@ class NotificationDuplicateTest {
     private final TransitApiService transit = mock(TransitApiService.class);
     private final User user = mock(User.class);
     private final NotificationService service = new NotificationService(arrivals,
-            mock(NotificationRepository.class), users, new RepeatDaysService(), transit);
+            mock(NotificationRepository.class), users, new RepeatDaysService(), transit, mock(NotificationDeliveryRepository.class));
 
     @BeforeEach
     void setup() {
@@ -29,6 +29,8 @@ class NotificationDuplicateTest {
         when(users.findForNotificationByEmail("me")).thenReturn(Optional.of(user));
         when(users.findByEmail("me")).thenReturn(Optional.of(user));
         when(arrivals.save(any())).thenAnswer(i -> i.getArgument(0));
+        when(transit.readSavedRoute("new")).thenReturn(route("200"));
+        when(transit.readSavedRoute("old")).thenReturn(route("100"));
     }
 
     @Test

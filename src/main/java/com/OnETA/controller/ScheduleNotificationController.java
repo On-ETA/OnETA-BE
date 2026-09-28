@@ -4,20 +4,23 @@ import com.OnETA.common.error.ErrorCode;
 import com.OnETA.common.exception.GlobalException;
 import com.OnETA.common.response.ApiResponse;
 import com.OnETA.dto.NotificationDto;
+import com.OnETA.dto.TransitNotificationDto;
 import com.OnETA.entity.NotificationCategory;
 import com.OnETA.entity.NotificationScheduleType;
 import com.OnETA.service.NotificationService;
+import com.OnETA.service.TransitNotificationQueryService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 import java.security.Principal;
 import java.util.List;
 
-/** Explicit registration/list APIs; existing /arrival endpoints remain compatible. */
+/** Schedule lists and a single replaceable first/last transit setting per user. */
 @RestController
 @RequestMapping("/api/notifications")
 @RequiredArgsConstructor
 public class ScheduleNotificationController {
     private final NotificationService service;
+    private final TransitNotificationQueryService transitQueries;
 
     @PostMapping("/schedules")
     public ApiResponse<Long> createSchedule(Principal principal, @RequestBody NotificationDto.CreateArrivalRequest request) {
@@ -29,13 +32,12 @@ public class ScheduleNotificationController {
     }
 
     @PostMapping("/transit")
-    public ApiResponse<Long> createTransit(Principal principal, @RequestBody NotificationDto.CreateArrivalRequest request) {
+    public ApiResponse<Long> createTransit(Principal principal, @RequestBody TransitNotificationDto.CreateRequest request) {
         String email = email(principal);
         if (request.getScheduleType() != NotificationScheduleType.FIRST_TRANSIT
                 && request.getScheduleType() != NotificationScheduleType.LAST_TRANSIT)
             throw new GlobalException(ErrorCode.INVALID_INPUT_VALUE, "FIRST_TRANSIT 또는 LAST_TRANSIT을 지정해주세요.");
-        request.setTargetArrivalTime(null);
-        return ApiResponse.success(service.createArrivalNotification(email, request));
+        return ApiResponse.success(service.createArrivalNotification(email, request.toArrivalRequest()));
     }
 
     @GetMapping("/schedules")
@@ -44,8 +46,19 @@ public class ScheduleNotificationController {
     }
 
     @GetMapping("/transit")
-    public ApiResponse<List<NotificationDto.ArrivalResponse>> transit(Principal principal) {
-        return ApiResponse.success(service.getArrivalNotifications(email(principal), NotificationCategory.TRANSIT));
+    public ApiResponse<TransitNotificationDto.Response> transit(Principal principal) {
+        return ApiResponse.success(transitQueries.getCurrentNotification(email(principal)));
+    }
+
+    @DeleteMapping("/transit")
+    public ApiResponse<Void> deleteTransit(Principal principal) {
+        service.deleteCurrentTransitNotification(email(principal));
+        return ApiResponse.success();
+    }
+
+    @GetMapping("/transit/{id}")
+    public ApiResponse<TransitNotificationDto.Response> transitDetail(Principal principal, @PathVariable Long id) {
+        return ApiResponse.success(transitQueries.getNotification(email(principal), id));
     }
 
     private String email(Principal principal) {

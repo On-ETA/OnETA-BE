@@ -37,6 +37,17 @@ public class ArrivalNotification extends com.OnETA.entity.Notification {
     @Column(name = "schedule_type", nullable = false, length = 20)
     private NotificationScheduleType scheduleType = NotificationScheduleType.NORMAL;
 
+    @Column(name = "transit_archived", nullable = false)
+    private boolean transitArchived;
+
+    public void archiveTransit() {
+        if (scheduleType == NotificationScheduleType.NORMAL) {
+            throw new IllegalStateException("일반 일정은 첫차·막차 보관 처리할 수 없습니다.");
+        }
+        transitArchived = true;
+        toggleActive(false);
+    }
+
     public ArrivalNotification(User user, String name, Integer reminderOffsetMinutes, Integer repeatDays,
                                LocalTime targetArrivalTime, String routeDetails) {
         super(user, name, reminderOffsetMinutes, repeatDays);

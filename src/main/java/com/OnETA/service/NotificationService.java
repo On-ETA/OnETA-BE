@@ -17,6 +17,7 @@ import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
+@lombok.extern.slf4j.Slf4j
 @Transactional(readOnly = true)
 public class NotificationService {
 
@@ -25,6 +26,7 @@ public class NotificationService {
     private final UserRepository userRepository;
     private final RepeatDaysService repeatDaysService;
     private final TransitApiService transitApiService;
+    private final com.OnETA.repository.NotificationDeliveryRepository deliveryRepository;
 
     @Transactional
     public Long createArrivalNotification(String email, NotificationDto.CreateArrivalRequest request) {
@@ -32,16 +34,20 @@ public class NotificationService {
         User user = userRepository.findForNotificationByEmail(email)
                 .orElseThrow(() -> new com.OnETA.common.exception.GlobalException(com.OnETA.common.error.ErrorCode.USER_NOT_FOUND));
 
-        validateCategoryLimit(user.getId(), request.getScheduleType());
-        validateUniqueRoute(user.getId(), null, request.getRouteDetails());
+        boolean transit = isTransit(request.getScheduleType());
+        if (!transit) validateCategoryLimit(user.getId(), request.getScheduleType());
+        validateUniqueRoute(user.getId(), null, request.getRouteDetails(), transit);
+        // The user lock serializes concurrent replacements, including the legacy /arrival API.
+        if (transit) archiveCurrentTransit(user.getId());
 
-        String routeName = request.getRouteName();
+        String routeName = transit ? transitName(request.getScheduleType()) : request.getRouteName();
         if (routeName == null || routeName.trim().isEmpty()) {
             int currentCount = notificationRepository.findAllByUserId(user.getId()).size();
             routeName = "경로" + (currentCount + 1);
         }
 
-        int repeatDays = repeatDaysService.toMask(request.getRepeatDays());
+        int repeatDays = isTransit(request.getScheduleType()) ? 0
+                : repeatDaysService.toMask(request.getRepeatDays());
         ArrivalNotification notification = new ArrivalNotification(
                 user,
                 routeName,
@@ -61,6 +67,7 @@ public class NotificationService {
 
         return arrivalNotificationRepository.findAllByUserId(user.getId())
                 .stream()
+                .filter(n -> !n.isTransitArchived())
                 .map(notification -> NotificationDto.ArrivalResponse.fromEntity(notification, repeatDaysService))
                 .collect(Collectors.toList());
     }
@@ -104,7 +111,7 @@ public class NotificationService {
         ArrivalNotification notification = getArrivalNotificationByEmailAndId(email, id);
 
         if (request.getRouteDetails() != null) {
-            validateUniqueRoute(notification.getUser().getId(), id, request.getRouteDetails());
+            validateUniqueRoute(notification.getUser().getId(), id, request.getRouteDetails(), false);
         }
         validateReminderOffsets(request.getReminderOffsetMinutes(), false);
         NotificationScheduleType effectiveType = request.getScheduleType() == null
@@ -118,13 +125,34 @@ public class NotificationService {
         validateRouteSchedule(effectiveType, request.getRouteDetails() == null
                 ? notification.getRouteDetails() : request.getRouteDetails());
 
-        Integer requestedRepeatDays = request.getRepeatDays() == null
-                ? null
-                : repeatDaysService.toMask(request.getRepeatDays());
-        notification.updateCommonInfo(request.getRouteName(), request.getReminderOffsetMinutes());
+        Integer requestedRepeatDays = isTransit(effectiveType) ? Integer.valueOf(0)
+                : request.getRepeatDays() == null ? null : repeatDaysService.toMask(request.getRepeatDays());
+        notification.updateCommonInfo(isTransit(effectiveType) ? transitName(effectiveType) : request.getRouteName(),
+                request.getReminderOffsetMinutes());
         if (requestedRepeatDays != null) notification.updateRepeatDays(requestedRepeatDays);
         notification.updateArrivalInfo(request.getTargetArrivalTime(), request.getRouteDetails());
         notification.updateScheduleType(request.getScheduleType());
+    }
+
+    @Transactional
+    public void deleteCurrentTransitNotification(String email) {
+        User user = userRepository.findForNotificationByEmail(email)
+                .orElseThrow(() -> new com.OnETA.common.exception.GlobalException(com.OnETA.common.error.ErrorCode.USER_NOT_FOUND));
+        archiveCurrentTransit(user.getId());
+    }
+
+    private void archiveCurrentTransit(Long userId) {
+        var current = arrivalNotificationRepository.findAllForDuplicateCheckByUserId(userId).stream()
+                .filter(n -> !n.isTransitArchived() && isTransit(n.getScheduleType())).toList();
+        current.forEach(ArrivalNotification::archiveTransit);
+        if (!current.isEmpty()) {
+            // Flush the archive flags before cancelling the old outbox, preserving delivery history.
+            deliveryRepository.expireReplacedTransitDeliveries(current.stream().map(ArrivalNotification::getId).toList());
+        }
+    }
+
+    private String transitName(NotificationScheduleType type) {
+        return type == NotificationScheduleType.FIRST_TRANSIT ? "첫차 알림" : "막차 알림";
     }
 
     @Transactional
@@ -147,6 +175,8 @@ public class NotificationService {
             throw new com.OnETA.common.exception.GlobalException(
                     com.OnETA.common.error.ErrorCode.INVALID_INPUT_VALUE, "isActive는 필수입니다.");
         }
+        userRepository.findForNotificationByEmail(email)
+                .orElseThrow(() -> new com.OnETA.common.exception.GlobalException(com.OnETA.common.error.ErrorCode.USER_NOT_FOUND));
         ArrivalNotification notification = getArrivalNotificationByEmailAndId(email, id);
         notification.toggleActive(request.getIsActive());
     }
@@ -154,24 +184,37 @@ public class NotificationService {
     private void validateCategoryLimit(Long userId, NotificationScheduleType type) {
         var category = com.OnETA.entity.NotificationCategory.of(type);
         long count = arrivalNotificationRepository.findAllForDuplicateCheckByUserId(userId).stream()
+                .filter(n -> !n.isTransitArchived())
                 .filter(n -> com.OnETA.entity.NotificationCategory.of(n.getScheduleType()) == category)
                 .count();
-        if (count >= 5) {
+        int limit = isTransit(type) ? 1 : 5;
+        if (count >= limit) {
             String label = category == com.OnETA.entity.NotificationCategory.SCHEDULE ? "일반" : "첫차·막차";
             throw new com.OnETA.common.exception.GlobalException(
                     com.OnETA.common.error.ErrorCode.NOTIFICATION_LIMIT_EXCEEDED,
-                    label + " 알림은 최대 5개까지 등록할 수 있습니다.");
+                    label + " 알림은 최대 " + limit + "개까지 등록할 수 있습니다.");
         }
     }
 
-    private void validateUniqueRoute(Long userId, Long excludedId, String details) {
-        var existing = arrivalNotificationRepository.findAllForDuplicateCheckByUserId(userId).stream()
-                .filter(n -> excludedId == null || !excludedId.equals(n.getId())).toList();
-        if (existing.isEmpty()) return;
+    private void validateUniqueRoute(Long userId, Long excludedId, String details, boolean replacingTransit) {
+        // Validate incoming data even when this is the user's first saved route.
         var identity = NotificationRouteIdentity.of(transitApiService.readSavedRoute(details));
+        var existing = arrivalNotificationRepository.findAllForDuplicateCheckByUserId(userId).stream()
+                .filter(n -> !n.isTransitArchived())
+                .filter(n -> !replacingTransit || !isTransit(n.getScheduleType()))
+                .filter(n -> excludedId == null || !excludedId.equals(n.getId())).toList();
         for (var notification : existing) {
-            var savedIdentity = NotificationRouteIdentity.of(
-                    transitApiService.readSavedRoute(notification.getRouteDetails()));
+            NotificationRouteIdentity savedIdentity;
+            try {
+                savedIdentity = NotificationRouteIdentity.of(
+                        transitApiService.readSavedRoute(notification.getRouteDetails()));
+            } catch (com.OnETA.common.exception.GlobalException e) {
+                if (e.getErrorCode() != com.OnETA.common.error.ErrorCode.INVALID_INPUT_VALUE) throw e;
+                // Legacy records without a usable route cannot participate in route comparison.
+                log.warn("Skipping invalid saved route during duplicate check: notificationId={}",
+                        notification.getId());
+                continue;
+            }
             if (identity.equals(savedIdentity)) {
                 throw new com.OnETA.common.exception.GlobalException(
                         com.OnETA.common.error.ErrorCode.NOTIFICATION_ALREADY_EXISTS);
@@ -208,6 +251,10 @@ public class NotificationService {
         }
     }
 
+    private boolean isTransit(NotificationScheduleType type) {
+        return type == NotificationScheduleType.FIRST_TRANSIT || type == NotificationScheduleType.LAST_TRANSIT;
+    }
+
     private void validateReminderOffsets(List<Integer> offsets, boolean required) {
         if (offsets == null && !required) return;
         if (offsets == null || offsets.isEmpty()
@@ -228,6 +275,9 @@ public class NotificationService {
 
         if (!notification.getUser().getId().equals(user.getId())) {
             throw new com.OnETA.common.exception.GlobalException(com.OnETA.common.error.ErrorCode.HANDLE_ACCESS_DENIED);
+        }
+        if (notification.isTransitArchived()) {
+            throw new com.OnETA.common.exception.GlobalException(com.OnETA.common.error.ErrorCode.NOTIFICATION_NOT_FOUND);
         }
         return notification;
     }

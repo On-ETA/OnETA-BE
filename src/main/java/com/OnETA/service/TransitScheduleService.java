@@ -32,6 +32,13 @@ public class TransitScheduleService {
     private final ObjectMapper objectMapper;
     private final RestTemplate restTemplate;
     private SeoulBusScheduleService seoulBusScheduleService;
+    private TagoSubwayScheduleService tagoSubwayScheduleService;
+
+    @Autowired
+    void setTagoSubwayScheduleService(TagoSubwayScheduleService service) {
+        this.tagoSubwayScheduleService = service;
+    }
+
 
     @Value("${odsay.api.key:}") private String apiKey;
     @Value("${odsay.schedule.url:https://api.odsay.com/v1/api}") private String scheduleBaseUrl;
@@ -141,6 +148,11 @@ public class TransitScheduleService {
 
     private ScheduleSnapshot createSnapshot(ArrivalNotification n, LocalDate date,
                                              NotificationScheduleType type, String hash, ZoneId zone) {
+        return snapshotRepository.save(buildSnapshot(n, date, type, hash, zone));
+    }
+
+    private ScheduleSnapshot buildSnapshot(ArrivalNotification n, LocalDate date,
+                                             NotificationScheduleType type, String hash, ZoneId zone) {
         TransitDto.RouteOptionResponse route = transitApiService.readSavedRoute(n.getRouteDetails());
         if (SeoulBusScheduleService.isKakao(route)) return createSeoulSnapshot(n, route, date, type, hash);
         List<TransitDto.RouteSegment> segments = route.getSegments() == null ? List.of() : route.getSegments();
@@ -170,8 +182,8 @@ public class TransitScheduleService {
         LocalDateTime scheduled = departure.minusMinutes(offset);
         int duration = plan.durationMinutes();
         LocalDateTime start = scheduled.minusMinutes(Math.max(15, Math.min(60, duration)));
-        return snapshotRepository.save(new ScheduleSnapshot(n, date, type, hash, departure, scheduled, start,
-                LocalDateTime.now(ZoneOffset.UTC), duration));
+        return new ScheduleSnapshot(n, date, type, hash, departure, scheduled, start,
+                LocalDateTime.now(ZoneOffset.UTC), duration);
     }
 
     private ScheduleSnapshot createSeoulSnapshot(ArrivalNotification n, TransitDto.RouteOptionResponse route,
@@ -197,7 +209,7 @@ public class TransitScheduleService {
             var snapshot = new ScheduleSnapshot(n, date, type, hash, departure, scheduled,
                     scheduled.minusMinutes(Math.max(60, prefix)), LocalDateTime.now(ZoneOffset.UTC), fallback.durationMinutes());
             snapshot.useSeoulTransferSource(objectMapper.writeValueAsString(times));
-            return snapshotRepository.save(snapshot);
+            return snapshot;
         }
         var times = seoulBusScheduleService.resolve(route, date);
         LocalDateTime boarding = type == NotificationScheduleType.FIRST_TRANSIT ? times.first() : times.last();
@@ -210,7 +222,35 @@ public class TransitScheduleService {
         ScheduleSnapshot snapshot = new ScheduleSnapshot(n, date, type, hash, departure, scheduled,
                 scheduled, LocalDateTime.now(ZoneOffset.UTC), plan.durationMinutes());
         snapshot.useSeoulBusSource();
-        return snapshotRepository.save(snapshot);
+        return snapshot;
+    }
+
+    /** Read-only display estimate: never runs realtime polling, recovery, or delivery creation. */
+    public LocalDateTime estimateDeparture(ArrivalNotification notification, LocalDateTime now, ZoneId zone) {
+        String routeHash = hash(notification.getRouteDetails());
+        var type = notification.getScheduleType();
+        // A service day can end after midnight. Check yesterday's saved service first,
+        // then calculate each new service day instead of shifting an expired departure.
+        LocalDate today = now.toLocalDate();
+        for (LocalDate day = today.minusDays(1); !day.isAfter(today.plusDays(1)); day = day.plusDays(1)) {
+            var saved = snapshotRepository.findByNotificationIdAndServiceDateAndScheduleTypeAndRouteHash(
+                    notification.getId(), day, type, routeHash);
+            ScheduleSnapshot snapshot;
+            if (saved.isPresent()) {
+                snapshot = saved.get();
+            } else {
+                // Past service is usable only when captured in a saved snapshot.
+                // Re-querying an API for yesterday can fail before today's valid LAST is evaluated.
+                if (day.isBefore(today)) continue;
+                snapshot = buildSnapshot(notification, day, type, routeHash, zone);
+            }
+            LocalDateTime departure = snapshot.getEffectiveDepartureAt();
+            if (snapshot.getEvaluationMode() != ScheduleEvaluationMode.FINISHED && departure.isAfter(now)) {
+                return departure;
+            }
+        }
+        throw new com.OnETA.common.exception.GlobalException(
+                com.OnETA.common.error.ErrorCode.TRANSIT_SCHEDULE_UNAVAILABLE);
     }
 
     private Decision evaluateSeoulTransfer(ScheduleSnapshot snapshot, ArrivalNotification n,
@@ -325,6 +365,13 @@ public class TransitScheduleService {
                     matched = true;
                     String field = type == NotificationScheduleType.FIRST_TRANSIT ? "busFirstTime" : "busLastTime";
                     serviceTime = parseTime(lane.path(field).asText(null), serviceDate);
+                    if (type == NotificationScheduleType.LAST_TRANSIT && serviceTime != null) {
+                        LocalDateTime first = parseTime(lane.path("busFirstTime").asText(null), serviceDate);
+                        // 00:xx belongs to the end of this service day, just like 24:xx.
+                        if (first == null) throw new com.OnETA.common.exception.GlobalException(
+                                com.OnETA.common.error.ErrorCode.TRANSIT_SCHEDULE_UNAVAILABLE);
+                        if (serviceTime.isBefore(first)) serviceTime = serviceTime.plusDays(1);
+                    }
                     break;
                 }
             }
@@ -333,11 +380,23 @@ public class TransitScheduleService {
             return serviceTime;
         }
         if ("SUBWAY".equals(s.getTransitType())) {
-            JsonNode root = request("/subwayPathSchedule", Map.of(
-                    "SID", s.getOdsayStartStationId(), "EID", s.getOdsayEndStationId(),
-                    "MODE", type == NotificationScheduleType.FIRST_TRANSIT ? "3" : "4", "DAY", "1"));
-            ensureNoOdsayError(root);
-            return findTime(root, type == NotificationScheduleType.FIRST_TRANSIT, serviceDate);
+            try {
+                JsonNode root = request("/subwayPathSchedule", Map.of(
+                        "SID", s.getOdsayStartStationId(), "EID", s.getOdsayEndStationId(),
+                        "MODE", type == NotificationScheduleType.FIRST_TRANSIT ? "3" : "4", "DAY", "1"));
+                ensureNoOdsayError(root);
+                return findTime(root, type == NotificationScheduleType.FIRST_TRANSIT, serviceDate);
+            } catch (OdsayQuotaExceededException quota) {
+                log.warn("ODsay subway quota exceeded; using TAGO timetable: scheduleType={}, serviceDate={}",
+                        type, serviceDate);
+                try {
+                    var schedule = tagoSubwayScheduleService.resolve(s, serviceDate);
+                    return type == NotificationScheduleType.FIRST_TRANSIT ? schedule.first() : schedule.last();
+                } catch (RuntimeException fallbackFailure) {
+                    fallbackFailure.addSuppressed(quota);
+                    throw fallbackFailure;
+                }
+            }
         }
         return null;
     }
@@ -410,9 +469,14 @@ public class TransitScheduleService {
 
         String code = textOrNull(errorEntry.path("code"));
         String message = textOrNull(errorEntry.path("message"));
-        throw new IllegalStateException("ODsay schedule API error: code="
+        String detail = "ODsay schedule API error: code="
                 + (code == null ? "unknown" : code)
-                + ", message=" + (message == null ? "unknown" : message));
+                + ", message=" + (message == null ? "unknown" : message);
+        if ("429".equals(code) || (message != null
+                && message.toLowerCase(Locale.ROOT).contains("daily quota exceeded"))) {
+            throw new OdsayQuotaExceededException(detail, null);
+        }
+        throw new IllegalStateException(detail);
     }
 
     boolean isApiKeyConfigured() {
@@ -436,7 +500,18 @@ public class TransitScheduleService {
             ResponseEntity<String> response = restTemplate.exchange(
                     uri, HttpMethod.GET, new HttpEntity<>(headers), String.class);
             return objectMapper.readTree(response.getBody());
+        } catch (org.springframework.web.client.HttpStatusCodeException e) {
+            if (e.getStatusCode().value() == 429) {
+                throw new OdsayQuotaExceededException("ODsay schedule API HTTP 429", e);
+            }
+            throw new IllegalStateException("운행정보 조회 실패", e);
         } catch (Exception e) { throw new IllegalStateException("운행정보 조회 실패", e); }
+    }
+
+    private static final class OdsayQuotaExceededException extends IllegalStateException {
+        private OdsayQuotaExceededException(String message, Throwable cause) {
+            super(message, cause);
+        }
     }
 
     private static String normalizeReferer(String referer) {
@@ -469,7 +544,7 @@ public class TransitScheduleService {
         } catch (Exception e) { return null; }
     }
     private boolean same(JsonNode n, String value) { return value != null && !n.isMissingNode() && value.equals(n.asText()); }
-    private String hash(String v) { try { return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(("schedule-v3:" + (v==null?"":v)).getBytes(StandardCharsets.UTF_8))); } catch(Exception e){throw new IllegalStateException(e);} }
+    private String hash(String v) { try { return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(((SeoulBusScheduleService.isKakao(transitApiService.readSavedRoute(v)) ? "schedule-v3:" : "schedule-v4:") + (v==null?"":v)).getBytes(StandardCharsets.UTF_8))); } catch(Exception e){throw new IllegalStateException(e);} }
     public record Decision(LocalDateTime scheduledAt, LocalDateTime hardDeadlineAt, DeliveryPhase phase, LocalDateTime baseDepartureAt, LocalDateTime effectiveDepartureAt, boolean recovery, int estimatedDuration) {}
     private record RecoveryCandidate(LocalDateTime boardingAt, LocalDateTime scheduledAt) {}
 }

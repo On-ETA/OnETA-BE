@@ -45,6 +45,8 @@ public class TagoSubwayScheduleService {
     }
 
     public SeoulBusScheduleService.Schedule resolve(TransitDto.RouteSegment segment, LocalDate day) {
+        log.info("TAGO resolve: line={}, start={}, end={}, serviceDate={}",
+                segment.getTransitName(), segment.getStartStation(), segment.getEndStation(), day);
         if (segment.getStations() == null || segment.getStations().size() < 2
                 || segment.getDurationMinutes() == null || segment.getDurationMinutes() <= 0) throw unsupported();
         checkSeoul(segment.getStartX(), segment.getStartY()); checkSeoul(segment.getEndX(), segment.getEndY());
@@ -68,28 +70,51 @@ public class TagoSubwayScheduleService {
                 var starts = timetable(start, dayType, direction);
                 var nexts = timetable(next, dayType, direction);
                 var ends = next.equals(end) ? nexts : timetable(end, dayType, direction);
+                int invalidDeparture = 0, missingTerminal = 0, terminalIsStart = 0;
+                int nextRejected = 0, endRejected = 0;
                 for (JsonNode row : starts) {
                     LocalDateTime departure = time(field(row, "depTime"), day);
                     String terminal = field(row, "endSubwayStationId");
-                    if (departure == null || terminal.isBlank() || terminal.equals(start)) continue;
+                    if (departure == null) { invalidDeparture++; continue; }
+                    if (terminal.isBlank()) { missingTerminal++; continue; }
+                    if (terminal.equals(start)) { terminalIsStart++; continue; }
                     // Match direction against the next stop and destination schedules.
                     // No numerical station-ID ordering or fabricated train ID is used.
                     boolean nextReachable = connects(nexts, terminal, departure, day, 10);
                     boolean endReachable = terminal.equals(end) || connects(ends, terminal, departure, day,
                             Math.max(10, segment.getDurationMinutes() * 2));
+                    if (!nextReachable) nextRejected++;
+                    if (!endReachable) endRejected++;
                     if (nextReachable && endReachable) valid.add(departure);
                 }
+                log.info("TAGO timetable filter: line={}, start={}, next={}, end={}, serviceDate={}, dayType={}, direction={}, "
+                                + "startRows={}, nextRows={}, endRows={}, invalidDeparture={}, missingTerminal={}, terminalIsStart={}, "
+                                + "nextParsedArrivals={}, endParsedArrivals={}, nextRejected={}, endRejected={}, valid={}",
+                        line, start, next, end, day, dayType, direction, starts.size(), nexts.size(), ends.size(),
+                        invalidDeparture, missingTerminal, terminalIsStart,
+                        nexts.stream().filter(r -> time(field(r, "arrTime"), day) != null).count(),
+                        ends.stream().filter(r -> time(field(r, "arrTime"), day) != null).count(),
+                        nextRejected, endRejected, valid.size());
                 if (!valid.isEmpty()) {
                     firsts.add(Collections.min(valid)); lasts.add(Collections.max(valid));
                 }
             }
-            if (firsts.isEmpty()) throw unsupported();
+            if (firsts.isEmpty()) {
+                log.info("TAGO dayType skipped: line={}, startName={}, endName={}, serviceDate={}, dayType={}; no valid direction",
+                        line, segment.getStartStation(), segment.getEndStation(), day, dayType);
+                continue;
+            }
             // Without train IDs, ambiguous directions use the earlier boundary,
             // never the latest departure from the opposite direction.
             var f = Collections.min(firsts);
             var l = Collections.min(lasts);
             if (first == null || f.isBefore(first)) first = f;
             if (last == null || l.isBefore(last)) last = l;
+        }
+        if (first == null || last == null) {
+            log.error("TAGO T005: stage=TIMETABLE_FILTER, line={}, startName={}, endName={}, startId={}, nextId={}, endId={}, serviceDate={}, dayTypes={}; no valid direction in any dayType",
+                    line, segment.getStartStation(), segment.getEndStation(), start, next, end, day, days);
+            throw unsupported();
         }
         return new SeoulBusScheduleService.Schedule(start, "", "TAGO_SUBWAY:" + line, first, last, 0, end, 0);
     }
@@ -105,7 +130,13 @@ public class TagoSubwayScheduleService {
         var rows = request("/GetKwrdFndSubwaySttnList", Map.of("subwayStationName", normalizeName(name)));
         var matches = rows.stream().filter(r -> normalizeName(field(r, "subwayStationName")).equals(normalizeName(name))
                 && normalizeLine(field(r, "subwayRouteName")).equals(line)).toList();
-        if (matches.size() != 1 || field(matches.get(0), "subwayStationId").isBlank()) throw unsupported();
+        if (matches.size() != 1 || field(matches.get(0), "subwayStationId").isBlank()) {
+            log.error("TAGO T005: stage=STATION_LINE_MAPPING, stationName={}, line={}, responseRows={}, nameMatches={}, lineMatches={}, matchedId={}",
+                    name, line, rows.size(),
+                    rows.stream().filter(r -> normalizeName(field(r, "subwayStationName")).equals(normalizeName(name))).count(),
+                    matches.size(), matches.size() == 1 ? field(matches.get(0), "subwayStationId") : "");
+            throw unsupported();
+        }
         return field(matches.get(0), "subwayStationId");
     }
     private List<JsonNode> timetable(String station, String day, String direction) {

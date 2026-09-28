@@ -2,6 +2,7 @@ package com.OnETA.service;
 
 import com.OnETA.controller.ScheduleNotificationController;
 import com.OnETA.dto.NotificationDto;
+import com.OnETA.dto.TransitNotificationDto;
 import com.OnETA.entity.*;
 import com.OnETA.repository.*;
 import com.OnETA.common.exception.GlobalException;
@@ -21,7 +22,7 @@ class NotificationCategoryTest {
                 "test", List.of(10), 0, LocalTime.of(9, 0), "{}", type)).toList();
         when(arrivals.findAllByUserId(1L)).thenReturn(records);
         var service = new NotificationService(arrivals, mock(NotificationRepository.class), users,
-                new RepeatDaysService(), mock(TransitApiService.class));
+                new RepeatDaysService(), mock(TransitApiService.class), mock(NotificationDeliveryRepository.class));
         assertThat(service.getArrivalNotifications("me", NotificationCategory.SCHEDULE))
                 .extracting(NotificationDto.ArrivalResponse::getScheduleType).containsExactly(NotificationScheduleType.NORMAL);
         assertThat(service.getArrivalNotifications("me", NotificationCategory.TRANSIT))
@@ -35,19 +36,33 @@ class NotificationCategoryTest {
 
     @Test void splitEndpointsEnforceTypesAndDoNotRequireArrivalTimeForTransit() {
         var service = mock(NotificationService.class);
-        var controller = new ScheduleNotificationController(service);
+        var queries = mock(TransitNotificationQueryService.class);
+        var controller = new ScheduleNotificationController(service, queries);
         for (var type : List.of(NotificationScheduleType.FIRST_TRANSIT, NotificationScheduleType.LAST_TRANSIT)) {
-            var request = new NotificationDto.CreateArrivalRequest(); request.setScheduleType(type);
+            var request = new TransitNotificationDto.CreateRequest(); request.setScheduleType(type);
             controller.createTransit(() -> "me", request);
-            verify(service).createArrivalNotification("me", request);
-            assertThat(request.getTargetArrivalTime()).isNull();
-            assertThatThrownBy(() -> controller.createSchedule(() -> "me", request)).isInstanceOf(GlobalException.class);
+            verify(service).createArrivalNotification(eq("me"), argThat(r -> r.getScheduleType() == type
+                    && r.getTargetArrivalTime() == null && r.getRepeatDays() == null));
+            assertThatThrownBy(() -> controller.createSchedule(() -> "me", request.toArrivalRequest()))
+                    .isInstanceOf(GlobalException.class);
         }
-        var missing = new NotificationDto.CreateArrivalRequest();
+        var missing = new TransitNotificationDto.CreateRequest();
         assertThatThrownBy(() -> controller.createTransit(() -> "me", missing)).isInstanceOf(GlobalException.class);
         assertThatThrownBy(() -> controller.transit(null)).isInstanceOf(GlobalException.class);
         controller.schedules(() -> "me"); controller.transit(() -> "me");
         verify(service).getArrivalNotifications("me", NotificationCategory.SCHEDULE);
-        verify(service).getArrivalNotifications("me", NotificationCategory.TRANSIT);
+        verify(queries).getCurrentNotification("me");
+    }
+
+    @Test void oldTransitClientCannotReintroduceRepeatDaysOrArrivalTime() {
+        var mapper = new tools.jackson.databind.ObjectMapper();
+        var request = mapper.readValue("""
+                {"scheduleType":"LAST_TRANSIT","repeatDays":["MON"],"targetArrivalTime":"09:00:00",
+                 "routeName":"last","reminderOffsetMinutes":[10],"routeDetails":"{}"}
+                """, TransitNotificationDto.CreateRequest.class);
+        assertThat(request.toArrivalRequest().getRouteName()).isNull();
+        assertThat(request.toArrivalRequest().getRepeatDays()).isNull();
+        assertThat(request.toArrivalRequest().getTargetArrivalTime()).isNull();
+        assertThat(mapper.writeValueAsString(request)).doesNotContain("routeName", "repeatDays", "targetArrivalTime");
     }
 }
