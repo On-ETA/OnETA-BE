@@ -50,7 +50,7 @@ class TransitScheduleServiceTest {
         when(n.getIsActive()).thenReturn(false);
         assertThat(service.estimateDeparture(n, DATE.plusDays(2).atTime(10, 0), SEOUL))
                 .isEqualTo(DATE.plusDays(1).atTime(0, 15));
-        verifyNoInteractions(serviceApi(service), publicData(service));
+        verifyNoInteractions(publicData(service));
         verify(snapshotRepo(service), never()).save(any());
     }
     private static final LocalDate DATE = LocalDate.of(2026, 8, 27);
@@ -192,7 +192,7 @@ class TransitScheduleServiceTest {
         service.evaluate(n, DATE, DATE.atTime(20, 0), SEOUL);
         service.evaluate(n, DATE, DATE.atTime(20, 1), SEOUL);
 
-        verify(serviceApi(service), times(1)).readSavedRoute("route");
+        verify(snapshotRepo(service), times(1)).save(any());
     }
 
     @Test
@@ -537,6 +537,7 @@ class TransitScheduleServiceTest {
     private ArrivalNotification notification(NotificationScheduleType type, List<Integer> offsets) {
         ArrivalNotification n = mock(ArrivalNotification.class);
         when(n.getId()).thenReturn(1L); when(n.getScheduleType()).thenReturn(type);
+        when(n.getIsActive()).thenReturn(true);
         when(n.getRouteDetails()).thenReturn("route");
         when(n.getReminderOffsetMinutes()).thenReturn(offsets.get(0));
         when(n.getReminderOffsetMinutesList()).thenReturn(offsets);

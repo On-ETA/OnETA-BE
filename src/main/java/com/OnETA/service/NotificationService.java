@@ -2,7 +2,6 @@ package com.OnETA.service;
 
 import com.OnETA.dto.NotificationDto;
 import com.OnETA.entity.ArrivalNotification;
-import com.OnETA.entity.Notification;
 import com.OnETA.entity.User;
 import com.OnETA.entity.NotificationScheduleType;
 import com.OnETA.repository.ArrivalNotificationRepository;
@@ -157,16 +156,40 @@ public class NotificationService {
 
     @Transactional
     public void deleteArrivalNotifications(String email, List<Long> ids) {
-        User user = userRepository.findByEmail(email)
-                .orElseThrow(() -> new com.OnETA.common.exception.GlobalException(com.OnETA.common.error.ErrorCode.USER_NOT_FOUND));
+        if (ids == null || ids.isEmpty()) {
+            throw new com.OnETA.common.exception.GlobalException(
+                    com.OnETA.common.error.ErrorCode.INVALID_INPUT_VALUE,
+                    "삭제할 알림 ID가 없습니다.");
+        }
 
-        List<Notification> notifications = notificationRepository.findAllById(ids);
-        for (Notification noti : notifications) {
-            if (!noti.getUser().getId().equals(user.getId())) {
-                throw new com.OnETA.common.exception.GlobalException(com.OnETA.common.error.ErrorCode.HANDLE_ACCESS_DENIED);
+        User user = userRepository.findByEmail(email)
+                .orElseThrow(() -> new com.OnETA.common.exception.GlobalException(
+                        com.OnETA.common.error.ErrorCode.USER_NOT_FOUND));
+
+        List<ArrivalNotification> notifications = arrivalNotificationRepository.findAllById(ids);
+        long distinctIdCount = ids.stream().distinct().count();
+        if (notifications.size() != distinctIdCount) {
+            throw new com.OnETA.common.exception.GlobalException(
+                    com.OnETA.common.error.ErrorCode.NOTIFICATION_NOT_FOUND);
+        }
+
+        for (ArrivalNotification notification : notifications) {
+            if (!notification.getUser().getId().equals(user.getId())) {
+                throw new com.OnETA.common.exception.GlobalException(
+                        com.OnETA.common.error.ErrorCode.HANDLE_ACCESS_DENIED);
             }
         }
-        notificationRepository.deleteAll(notifications);
+
+        List<Long> targetIds = notifications.stream()
+                .map(ArrivalNotification::getId)
+                .toList();
+
+        // FK 자식 테이블부터 정리한 뒤 JOINED 상속의 부모 notifications를 삭제한다.
+        notificationRepository.deleteScheduleSnapshotsByIds(targetIds);
+        notificationRepository.deleteDeliveriesByIds(targetIds);
+        notificationRepository.deleteReminderOffsetsByIds(targetIds);
+        notificationRepository.deleteArrivalRowsByIds(targetIds);
+        notificationRepository.deleteRowsByIds(targetIds);
     }
 
     @Transactional

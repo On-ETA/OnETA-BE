@@ -57,7 +57,8 @@ class SignupSecurityTest {
         when(auth.startSocialSignup("test@example.com")).thenReturn(new SignupResponseDto("temporary", 900));
         MockHttpServletResponse response = new MockHttpServletResponse();
         new OAuth2SuccessHandler(auth, users).onAuthenticationSuccess(new MockHttpServletRequest(), response, authentication);
-        assertThat(response.getRedirectedUrl()).isEqualTo("/api/token-test?tempId=temporary&expiresInSeconds=900");
+        assertThat(response.getRedirectedUrl()).isEqualTo(
+                "https://on-eta.com/signup/consent?tempId=temporary&expiresInSeconds=900");
         verify(auth, never()).loginSocialUser(anyString());
         verify(users, never()).save(any());
     }
