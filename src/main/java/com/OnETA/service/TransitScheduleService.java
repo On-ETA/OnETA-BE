@@ -229,26 +229,33 @@ public class TransitScheduleService {
     public LocalDateTime estimateDeparture(ArrivalNotification notification, LocalDateTime now, ZoneId zone) {
         String routeHash = hash(notification.getRouteDetails());
         var type = notification.getScheduleType();
-        // A service day can end after midnight. Check yesterday's saved service first,
-        // then calculate each new service day instead of shifting an expired departure.
+
+        // First/last notifications are one-time settings. Once a snapshot exists, keep showing
+        // that service day's latest effective departure even after it has passed or completed.
+        var saved = snapshotRepository
+                .findFirstByNotificationIdAndScheduleTypeAndRouteHashOrderByServiceDateDesc(
+                        notification.getId(), type, routeHash);
+        if (saved.isPresent()) {
+            return saved.get().getEffectiveDepartureAt();
+        }
+
+        // An inactive one-time notification without a persisted calculation must not be shifted
+        // to a future service day and presented as a new estimate.
+        if (Boolean.FALSE.equals(notification.getIsActive())) {
+            throw new com.OnETA.common.exception.GlobalException(
+                    com.OnETA.common.error.ErrorCode.TRANSIT_SCHEDULE_UNAVAILABLE);
+        }
+
+        // Before the scheduler has persisted a snapshot, preview today or the next service day.
         LocalDate today = now.toLocalDate();
-        for (LocalDate day = today.minusDays(1); !day.isAfter(today.plusDays(1)); day = day.plusDays(1)) {
-            var saved = snapshotRepository.findByNotificationIdAndServiceDateAndScheduleTypeAndRouteHash(
-                    notification.getId(), day, type, routeHash);
-            ScheduleSnapshot snapshot;
-            if (saved.isPresent()) {
-                snapshot = saved.get();
-            } else {
-                // Past service is usable only when captured in a saved snapshot.
-                // Re-querying an API for yesterday can fail before today's valid LAST is evaluated.
-                if (day.isBefore(today)) continue;
-                snapshot = buildSnapshot(notification, day, type, routeHash, zone);
-            }
+        for (LocalDate day = today; !day.isAfter(today.plusDays(1)); day = day.plusDays(1)) {
+            ScheduleSnapshot snapshot = buildSnapshot(notification, day, type, routeHash, zone);
             LocalDateTime departure = snapshot.getEffectiveDepartureAt();
-            if (snapshot.getEvaluationMode() != ScheduleEvaluationMode.FINISHED && departure.isAfter(now)) {
+            if (departure.isAfter(now)) {
                 return departure;
             }
         }
+
         throw new com.OnETA.common.exception.GlobalException(
                 com.OnETA.common.error.ErrorCode.TRANSIT_SCHEDULE_UNAVAILABLE);
     }
