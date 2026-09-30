@@ -10,15 +10,20 @@ import com.OnETA.entity.BusDirection;
 import com.OnETA.entity.DepotNotification;
 import com.OnETA.entity.User;
 import com.OnETA.entity.UserBus;
+import com.OnETA.entity.UserDeviceToken;
 import com.OnETA.repository.DepotNotificationRepository;
 import com.OnETA.repository.SeoulBusRouteRepository;
 import com.OnETA.repository.UserBusRepository;
+import com.OnETA.repository.UserDeviceTokenRepository;
 import com.OnETA.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Optional;
 
@@ -32,6 +37,7 @@ public class DepotNotificationService {
     private final UserBusRepository userBusRepository;
     private final DepotNotificationRepository depotNotificationRepository;
     private final SeoulBusRouteRepository seoulBusRouteRepository;
+    private final UserDeviceTokenRepository userDeviceTokenRepository;
 
     // 맞춤 알림 페이지::차고지 출발 알림 리스트 조회
     @Transactional(readOnly = true)
@@ -190,10 +196,47 @@ public class DepotNotificationService {
             String pushTitle = (busDirection == BusDirection.TURNAROUND) ? "차고지를 출발" : "회차지를 출발";
             String pushBody = String.format("[%s] %s번 버스가 방금 %s했어요!", directionName, routeBusNumber, pushTitle);
 
-            // 실제 푸시 발송
-            fcmPushService.sendPush(targetEmail, pushTitle, pushBody);
+            notification.markSending(LocalDateTime.now(ZoneId.of("Asia/Seoul")));
 
-            log.info("[푸시 발송 완료 처리] 사용자: {}, 내용: {} (감지된 차량번호: {})", targetEmail, pushBody, plainNo);
+            User user = notification.getUserBus().getUser();
+            List<UserDeviceToken> tokens = user.getDeviceTokens();
+
+            if (tokens == null || tokens.isEmpty()) {
+                notification.markFailed("NO_DEVICE_TOKEN", "등록된 기기가 없습니다.");
+                notification.disableNotification();
+                continue;
+            }
+
+            boolean anySuccess = false;
+            String lastErrorCode = null;
+            String lastErrorMessage = null;
+
+            LocalDateTime deadline = LocalDateTime.now(ZoneOffset.UTC).plusMinutes(30);
+
+            for (UserDeviceToken token : tokens) {
+                try {
+                    fcmPushService.sendPushMessage(token.getDeviceToken(), pushTitle, pushBody, deadline);
+                    anySuccess = true;
+                } catch (FcmPushException e) {
+                    if (e.isPermanent()) {
+                        userDeviceTokenRepository.delete(token);
+                        log.info("[FCM 유효하지 않은 토큰 삭제] Email: {}, 삭제된 토큰: {}", targetEmail, token.getDeviceToken());
+                    }
+                    lastErrorCode = e.getErrorCode();
+                    lastErrorMessage = e.getMessage();
+                } catch (Exception e) {
+                    lastErrorCode = "FCM_ERROR";
+                    lastErrorMessage = e.getMessage();
+                }
+            }
+
+            if (anySuccess) {
+                notification.markSent();
+                log.info("[푸시 발송 완료 처리] 사용자: {}, 내용: {} (감지된 차량번호: {})", targetEmail, pushBody, plainNo);
+            } else {
+                notification.markFailed(lastErrorCode, lastErrorMessage);
+                log.warn("[푸시 발송 실패 처리] 사용자: {}, 내용: {}, 에러: {}", targetEmail, pushBody, lastErrorMessage);
+            }
 
             // 알림 1회 발송 후 자동 false 업데이트
             notification.disableNotification();
