@@ -119,7 +119,7 @@ class TransitScheduleServiceTest {
         var route = kakaoSubwayRoute();
         assertThat(service.previewDepartureForServiceDate(
                 route, NotificationScheduleType.FIRST_TRANSIT, saturday, new java.util.HashMap<>()))
-                .isEqualTo(saturday.atTime(5, 32));
+                .isEqualTo(saturday.atTime(5, 27));
 
         server.verify();
     }
