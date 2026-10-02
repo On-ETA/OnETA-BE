@@ -59,6 +59,17 @@ class TransitScheduleServiceTest {
     private static final ZoneId SEOUL = ZoneId.of("Asia/Seoul");
 
     @Test
+    void mapsOdsaySubwayDayFromServiceDate() {
+        var service = service("0530", "2330");
+        assertThat((String) ReflectionTestUtils.invokeMethod(service, "odsayDay",
+                LocalDate.of(2026, 8, 29))).isEqualTo("2");
+        assertThat((String) ReflectionTestUtils.invokeMethod(service, "odsayDay",
+                LocalDate.of(2026, 8, 30))).isEqualTo("3");
+        assertThat((String) ReflectionTestUtils.invokeMethod(service, "odsayDay",
+                LocalDate.of(2026, 8, 31))).isEqualTo("1");
+    }
+
+    @Test
     void seoulSingleBusUsesStationTimeMinusAccessWalkAndNoOdsayOrRealtime() {
         TransitScheduleService service = service("05:30", "23:30");
         var seoul = mock(SeoulBusScheduleService.class);
