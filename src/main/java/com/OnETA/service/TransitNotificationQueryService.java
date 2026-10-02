@@ -18,6 +18,7 @@ import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.time.ZoneId;
 import java.util.Comparator;
+import java.util.List;
 
 @Service
 @lombok.extern.slf4j.Slf4j
@@ -31,14 +32,29 @@ public class TransitNotificationQueryService {
     private String timeZone = "Asia/Seoul";
     private Clock clock = Clock.systemUTC();
 
-    public TransitNotificationDto.Response getCurrentNotification(String email) {
+    public List<TransitNotificationDto.Response> getCurrentNotifications(String email) {
         var user = users.findByEmail(email).orElseThrow(() -> new GlobalException(ErrorCode.USER_NOT_FOUND));
         var now = OffsetDateTime.ofInstant(clock.instant(), ZoneId.of(timeZone));
-        return notifications.findAllByUserId(user.getId()).stream()
-                .filter(this::isTransit).filter(n -> !n.isTransitArchived())
-                .max(Comparator.comparing((ArrivalNotification n) -> Boolean.TRUE.equals(n.getIsActive()))
-                        .thenComparing(ArrivalNotification::getId))
-                .map(n -> response(n, now)).orElse(null);
+        var activeTransit = notifications.findAllByUserId(user.getId()).stream()
+                .filter(this::isTransit)
+                .filter(n -> !n.isTransitArchived())
+                .filter(n -> Boolean.TRUE.equals(n.getIsActive()))
+                .toList();
+
+        return List.of(NotificationScheduleType.FIRST_TRANSIT, NotificationScheduleType.LAST_TRANSIT).stream()
+                .map(type -> activeTransit.stream()
+                        .filter(n -> n.getScheduleType() == type)
+                        .max(Comparator.comparing(ArrivalNotification::getId))
+                        .orElse(null))
+                .filter(java.util.Objects::nonNull)
+                .map(n -> response(n, now))
+                .toList();
+    }
+
+    public TransitNotificationDto.Response getCurrentNotification(String email) {
+        return getCurrentNotifications(email).stream()
+                .max(Comparator.comparing(TransitNotificationDto.Response::getNotificationId))
+                .orElse(null);
     }
 
     public TransitNotificationDto.Response getNotification(String email, Long id) {
@@ -48,7 +64,10 @@ public class TransitNotificationQueryService {
         if (!notification.getUser().getId().equals(user.getId())) {
             throw new GlobalException(ErrorCode.HANDLE_ACCESS_DENIED);
         }
-        if (!isTransit(notification) || notification.isTransitArchived()) throw new GlobalException(ErrorCode.NOTIFICATION_NOT_FOUND);
+        if (!isTransit(notification) || notification.isTransitArchived()
+                || !Boolean.TRUE.equals(notification.getIsActive())) {
+            throw new GlobalException(ErrorCode.NOTIFICATION_NOT_FOUND);
+        }
         return response(notification, OffsetDateTime.ofInstant(clock.instant(), ZoneId.of(timeZone)));
     }
 
