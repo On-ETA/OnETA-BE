@@ -29,7 +29,7 @@ class NotificationLimitTest {
     private final DepotNotificationRepository depots = mock(DepotNotificationRepository.class);
     private final SeoulBusRouteRepository routes = mock(SeoulBusRouteRepository.class);
     private final DepotNotificationService depotService = new DepotNotificationService(
-            mock(FcmPushService.class), users, buses, depots, routes);
+            mock(FcmPushService.class), users, buses, depots, routes, mock(UserDeviceTokenRepository.class));
 
     @BeforeEach
     void setup() {
@@ -60,15 +60,15 @@ class NotificationLimitTest {
 
     @ParameterizedTest
     @EnumSource(value = NotificationScheduleType.class, names = {"FIRST_TRANSIT", "LAST_TRANSIT"})
-    void firstAndLastShareOneReplaceableSlot(NotificationScheduleType type) {
-        var saved = new ArrayList<>(notifications(NotificationScheduleType.FIRST_TRANSIT, 3));
-        saved.addAll(notifications(NotificationScheduleType.LAST_TRANSIT, 2));
-        when(arrivals.findAllForDuplicateCheckByUserId(1L)).thenReturn(saved);
+    void firstAndLastUseIndependentReplaceableSlots(NotificationScheduleType type) {
+        var first = notification(NotificationScheduleType.FIRST_TRANSIT, 1);
+        var last = notification(NotificationScheduleType.LAST_TRANSIT, 2);
+        when(arrivals.findAllForDuplicateCheckByUserId(1L)).thenReturn(List.of(first, last));
+
         service.createArrivalNotification("me", request(type));
-        assertThat(saved).allSatisfy(n -> {
-            assertThat(n.isTransitArchived()).isTrue();
-            assertThat(n.getIsActive()).isFalse();
-        });
+
+        long replacedId = type == NotificationScheduleType.FIRST_TRANSIT ? 1L : 2L;
+        verify(all).deleteRowsByIds(List.of(replacedId));
         verify(arrivals).save(argThat(n -> n.getScheduleType() == type && !n.isTransitArchived()));
     }
 

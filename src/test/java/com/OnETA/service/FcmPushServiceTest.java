@@ -19,7 +19,10 @@ import static org.mockito.Mockito.*;
 class FcmPushServiceTest {
     @Test
     void scheduledPushWithDeadlineBuildsValidMessageAndReachesFirebase() throws Exception {
-        var service = new FcmPushService(new DefaultResourceLoader());
+        var service = new FcmPushService(
+                new DefaultResourceLoader(),
+                mock(com.OnETA.repository.UserRepository.class),
+                mock(com.OnETA.repository.UserDeviceTokenRepository.class));
         var now = Instant.parse("2026-09-27T07:00:00Z");
         ReflectionTestUtils.setField(service, "firebaseEnabled", true);
         ReflectionTestUtils.setField(service, "clock", Clock.fixed(now, ZoneOffset.UTC));
