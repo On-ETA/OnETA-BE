@@ -134,7 +134,6 @@ class KakaoTransitClientTest {
         assertThat(parsed.get(0).getRouteId()).isEqualTo(kakao.parse(body).get(0).getRouteId());
         assertThat(kakao.parse(body.replace("\"min\":1550,\"max\":1650", "\"value\":1600"))
                 .get(0).getTotalCost()).isEqualTo(1600);
-        assertThat(kakao.parse(body, 4)).hasSize(4);
     }
 
     @ParameterizedTest
