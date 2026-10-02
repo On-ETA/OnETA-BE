@@ -30,7 +30,7 @@ class NotificationLimitTest {
     private final DepotNotificationRepository depots = mock(DepotNotificationRepository.class);
     private final SeoulBusRouteRepository routes = mock(SeoulBusRouteRepository.class);
     private final DepotNotificationService depotService = new DepotNotificationService(
-            mock(FcmPushService.class), users, buses, depots, routes);
+            mock(FcmPushService.class), users, buses, depots, routes, mock(UserDeviceTokenRepository.class));
 
     @BeforeEach
     void setup() {
