@@ -67,6 +67,7 @@ class NotificationDeliveryServiceTest {
 
         ArrivalNotification notification = mock(ArrivalNotification.class);
         when(notification.getRepeatDays()).thenReturn(21);
+        when(notification.getIsActive()).thenReturn(true);
         NotificationDelivery delivery = new NotificationDelivery(
                 notification, LocalDate.of(2026, 8, 10), "token", "title", "body",
                 java.time.LocalDateTime.of(2026, 8, 10, 9, 0),
@@ -298,6 +299,73 @@ class NotificationDeliveryServiceTest {
     }
 
     @Test
+    void nonFinalReminderDoesNotCompleteOneTimeNotification() {
+        TestFixture fixture = fixture();
+        when(fixture.notification.getRepeatDays()).thenReturn(0);
+        when(fixture.notification.getReminderOffsetMinutes()).thenReturn(5);
+        when(fixture.notification.getReminderOffsetMinutesList()).thenReturn(List.of(5, 10, 30));
+        ReflectionTestUtils.setField(fixture.delivery, "reminderOffsetMinutes", 10);
+
+        fixture.service.processDelivery(1L);
+
+        verify(fixture.notification, never()).completeOneTimeNotification();
+        verify(fixture.notification, never()).updateLastSentDate(any());
+    }
+
+    @Test
+    void finalReminderCompletesOneTimeNotificationAfterSuccessfulSend() {
+        TestFixture fixture = fixture();
+        when(fixture.notification.getRepeatDays()).thenReturn(0);
+        when(fixture.notification.getReminderOffsetMinutes()).thenReturn(5);
+        when(fixture.notification.getReminderOffsetMinutesList()).thenReturn(List.of(5, 10, 30));
+        ReflectionTestUtils.setField(fixture.delivery, "reminderOffsetMinutes", 5);
+
+        fixture.service.processDelivery(1L);
+
+        verify(fixture.notification).updateLastSentDate(LocalDate.of(2026, 8, 10));
+        verify(fixture.notification).completeOneTimeNotification();
+    }
+
+    @Test
+    void permanentFailureCompletesOnlyFinalReminder() {
+        TestFixture nonFinal = fixture();
+        when(nonFinal.notification.getRepeatDays()).thenReturn(0);
+        when(nonFinal.notification.getReminderOffsetMinutes()).thenReturn(5);
+        when(nonFinal.notification.getReminderOffsetMinutesList()).thenReturn(List.of(5, 10, 30));
+        ReflectionTestUtils.setField(nonFinal.delivery, "reminderOffsetMinutes", 10);
+        doThrow(new FcmPushException("SENDER_ID_MISMATCH", "permanent", true, null))
+                .when(nonFinal.fcm).sendPushMessage(any(), any(), any(), any());
+
+        nonFinal.service.processPending();
+
+        verify(nonFinal.notification, never()).completeOneTimeNotification();
+
+        TestFixture finalReminder = fixture();
+        when(finalReminder.notification.getRepeatDays()).thenReturn(0);
+        when(finalReminder.notification.getReminderOffsetMinutes()).thenReturn(5);
+        when(finalReminder.notification.getReminderOffsetMinutesList()).thenReturn(List.of(5, 10, 30));
+        ReflectionTestUtils.setField(finalReminder.delivery, "reminderOffsetMinutes", 5);
+        doThrow(new FcmPushException("SENDER_ID_MISMATCH", "permanent", true, null))
+                .when(finalReminder.fcm).sendPushMessage(any(), any(), any(), any());
+
+        finalReminder.service.processPending();
+
+        verify(finalReminder.notification).completeOneTimeNotification();
+    }
+
+    @Test
+    void inactiveNotificationExpiresPendingDeliveryWithoutFcmCall() {
+        TestFixture fixture = fixture();
+        when(fixture.notification.getIsActive()).thenReturn(false);
+
+        fixture.service.processPending();
+
+        assertThat(fixture.delivery.getStatus()).isEqualTo(NotificationDeliveryStatus.EXPIRED);
+        assertThat(fixture.delivery.getLastErrorCode()).isEqualTo("NOTIFICATION_INACTIVE");
+        verifyNoInteractions(fixture.fcm);
+    }
+
+    @Test
     void replacedTransitOutboxIsExpiredBeforeCallingFcm() {
         TestFixture fixture = fixture();
         when(fixture.notification.isTransitArchived()).thenReturn(true);
@@ -317,6 +385,7 @@ class NotificationDeliveryServiceTest {
         ArrivalNotification notification = mock(ArrivalNotification.class);
         User user = mock(User.class);
         when(notification.getRepeatDays()).thenReturn(21);
+        when(notification.getIsActive()).thenReturn(true);
         when(notification.getUser()).thenReturn(user);
         when(user.getId()).thenReturn(1L);
         NotificationDelivery delivery = new NotificationDelivery(
