@@ -31,7 +31,7 @@ jobs:
 
       - name: Validate Kakao subway schedule fallback
         run: |
-          ./gradlew clean test \
+          ./gradlew clean test --info --stacktrace \
             --tests "com.OnETA.service.TransitScheduleServiceTest" \
             --tests "com.OnETA.service.TagoSubwayScheduleServiceTest" \
             --tests "com.OnETA.service.TransitRouteOptimizationServiceTest" \
