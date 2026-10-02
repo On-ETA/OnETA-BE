@@ -260,6 +260,25 @@ public class TransitScheduleService {
         return new RouteSchedulePlan(plan.departure(), plan.durationMinutes(), "ODSAY", null, lead);
     }
 
+    public LocalDateTime previewDepartureForServiceDate(TransitDto.RouteOptionResponse route,
+                                                        NotificationScheduleType type,
+                                                        LocalDate serviceDate,
+                                                        Map<String, LocalDateTime> scheduleCache) {
+        if (type != NotificationScheduleType.FIRST_TRANSIT
+                && type != NotificationScheduleType.LAST_TRANSIT) {
+            throw new com.OnETA.common.exception.GlobalException(
+                    com.OnETA.common.error.ErrorCode.INVALID_INPUT_VALUE);
+        }
+        try {
+            return calculateRoutePlan(route, type, serviceDate, scheduleCache).departure();
+        } catch (com.OnETA.common.exception.GlobalException e) {
+            throw e;
+        } catch (RuntimeException e) {
+            throw new com.OnETA.common.exception.GlobalException(
+                    com.OnETA.common.error.ErrorCode.TRANSIT_SCHEDULE_UNAVAILABLE);
+        }
+    }
+
     public LocalDateTime previewNextDeparture(TransitDto.RouteOptionResponse route,
                                               NotificationScheduleType type,
                                               LocalDateTime now,
