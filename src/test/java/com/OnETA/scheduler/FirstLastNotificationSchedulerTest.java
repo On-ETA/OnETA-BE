@@ -105,32 +105,39 @@ class FirstLastNotificationSchedulerTest {
     }
 
     @Test
-    void expiredOneTimeLastIsCompletedWhenNoDecisionRemains() {
+    void expiredOneTimeLastRollsToNextServiceDayWithoutDeactivating() {
         ArrivalNotification n = notification(NotificationScheduleType.LAST_TRANSIT);
         TransitScheduleService schedules = mock(TransitScheduleService.class);
-        when(schedules.evaluate(any(), any(), any(), any())).thenReturn(null);
-        when(schedules.shouldCompleteExpiredOneTime(eq(n), any(), any())).thenReturn(true);
+        LocalDate today = LocalDate.of(2026, 8, 27);
+        when(schedules.evaluate(eq(n), eq(today), any(), any())).thenReturn(null);
+        when(schedules.shouldAdvanceToNextServiceDay(eq(n), eq(today), any())).thenReturn(true);
+        when(schedules.evaluate(eq(n), eq(today.plusDays(1)), any(), any())).thenReturn(
+                new TransitScheduleService.Decision(today.plusDays(1).atTime(0, 10),
+                        today.plusDays(1).atTime(0, 20), DeliveryPhase.BASE,
+                        today.plusDays(1).atTime(0, 20), today.plusDays(1).atTime(0, 20), false, 30));
         NotificationDeliveryService delivery = mock(NotificationDeliveryService.class);
         NotificationScheduler scheduler = scheduler(n, schedules, delivery, "2026-08-27T23:30");
 
         scheduler.scheduleArrivalNotifications();
 
-        verify(n).completeOneTimeNotification();
-        verify(schedulerRepository(scheduler)).save(n);
-        verify(delivery, never()).prepare(any(), anyInt(), any(), any(), anyInt(), any(), any());
+        verify(schedules).evaluate(eq(n), eq(today.plusDays(1)), any(), any());
+        verify(n, never()).completeOneTimeNotification();
+        verify(schedulerRepository(scheduler), never()).save(n);
     }
 
     @Test
-    void firstRecoveryInProgressIsNotCompletedWhenDecisionIsTemporarilyMissing() {
+    void firstRecoveryInProgressDoesNotRollForwardOrDeactivate() {
         ArrivalNotification n = notification(NotificationScheduleType.FIRST_TRANSIT);
         TransitScheduleService schedules = mock(TransitScheduleService.class);
-        when(schedules.evaluate(any(), any(), any(), any())).thenReturn(null);
-        when(schedules.shouldCompleteExpiredOneTime(eq(n), any(), any())).thenReturn(false);
+        LocalDate today = LocalDate.of(2026, 8, 27);
+        when(schedules.evaluate(eq(n), eq(today), any(), any())).thenReturn(null);
+        when(schedules.shouldAdvanceToNextServiceDay(eq(n), eq(today), any())).thenReturn(false);
         NotificationDeliveryService delivery = mock(NotificationDeliveryService.class);
         NotificationScheduler scheduler = scheduler(n, schedules, delivery, "2026-08-27T05:32");
 
         scheduler.scheduleArrivalNotifications();
 
+        verify(schedules, never()).evaluate(eq(n), eq(today.plusDays(1)), any(), any());
         verify(n, never()).completeOneTimeNotification();
         verify(schedulerRepository(scheduler), never()).save(n);
     }

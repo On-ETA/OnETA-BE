@@ -36,9 +36,10 @@ class TransitScheduleServiceTest {
     }
 
     @Test
-    void displayUsesFuturePersistedDepartureButRejectsPastSnapshot() {
+    void displayUsesFuturePersistedDepartureAndAdvancesPastSnapshotToNextServiceDay() {
         var service = service("0530", "2330");
         var n = notification(NotificationScheduleType.LAST_TRANSIT, 10);
+        when(serviceApi(service).readSavedRoute("route")).thenReturn(route(10, 20, "1"));
         var snapshot = new ScheduleSnapshot(n, DATE, NotificationScheduleType.LAST_TRANSIT, "hash",
                 DATE.plusDays(1).atTime(0, 20), DATE.plusDays(1).atTime(0, 10), DATE.atTime(23, 0), DATE.atTime(12, 0), 30);
         snapshot.updateConnection(DATE.plusDays(1).atTime(0, 15), DATE.plusDays(1).atTime(0, 5), 30, DATE.atTime(23, 50));
@@ -47,13 +48,13 @@ class TransitScheduleServiceTest {
 
         assertThat(service.estimateDeparture(n, DATE.plusDays(1).atTime(0, 10), SEOUL))
                 .isEqualTo(DATE.plusDays(1).atTime(0, 15));
-        assertThatThrownBy(() -> service.estimateDeparture(n, DATE.plusDays(1).atTime(0, 16), SEOUL))
-                .isInstanceOfSatisfying(com.OnETA.common.exception.GlobalException.class,
-                        e -> assertThat(e.getErrorCode()).isEqualTo(com.OnETA.common.error.ErrorCode.TRANSIT_SCHEDULE_UNAVAILABLE));
+        assertThat(service.estimateDeparture(n, DATE.plusDays(1).atTime(0, 16), SEOUL))
+                .isEqualTo(DATE.plusDays(1).atTime(23, 20));
 
         verifyNoInteractions(publicData(service));
         verify(snapshotRepo(service), never()).save(any());
     }
+
     private static final LocalDate DATE = LocalDate.of(2026, 8, 27);
     private static final ZoneId SEOUL = ZoneId.of("Asia/Seoul");
 

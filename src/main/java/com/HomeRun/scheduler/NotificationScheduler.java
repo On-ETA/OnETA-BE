@@ -136,7 +136,17 @@ public class NotificationScheduler {
             processScheduledServiceDay(notification, today.minusDays(1), now, zoneId);
             if (Boolean.FALSE.equals(notification.getIsActive())) return;
         }
+
         processScheduledServiceDay(notification, today, now, zoneId);
+
+        // FIRST/LAST settings are completed only by the delivery pipeline. If today's service
+        // opportunity is already over, keep the setting active and prepare the next service day.
+        // This also keeps web/Swagger QA valid when no FCM token is registered.
+        boolean oneTime = notification.getRepeatDays() == null || notification.getRepeatDays() == 0;
+        if (oneTime && !Boolean.FALSE.equals(notification.getIsActive())
+                && transitScheduleService.shouldAdvanceToNextServiceDay(notification, today, now)) {
+            processScheduledServiceDay(notification, today.plusDays(1), now, zoneId);
+        }
     }
 
     private void processScheduledServiceDay(ArrivalNotification notification, LocalDate today,
@@ -145,14 +155,8 @@ public class NotificationScheduler {
         if (!repeatDaysService.includes(notification.getRepeatDays(), today.getDayOfWeek())
                 && notification.getRepeatDays() != 0) return;
         TransitScheduleService.Decision decision = transitScheduleService.evaluate(notification, today, now, zoneId);
-        if (decision == null) {
-            completeExpiredTransitIfNecessary(notification, today, now);
-            return;
-        }
-        if (!decision.hardDeadlineAt().isAfter(now)) {
-            completeExpiredTransitIfNecessary(notification, today, now);
-            return;
-        }
+        if (decision == null) return;
+        if (!decision.hardDeadlineAt().isAfter(now)) return;
         if (decision.scheduledAt().isAfter(now)) return;
         LocalDateTime deadlineUtc = toUtc(decision.hardDeadlineAt(), zoneId);
 
@@ -184,15 +188,6 @@ public class NotificationScheduler {
                     notification, decision.estimatedDuration(), today,
                     toUtc(scheduledAt, zoneId), offset,
                     toUtc(reminderDeadline, zoneId), decision.phase());
-        }
-    }
-
-    private void completeExpiredTransitIfNecessary(ArrivalNotification notification, LocalDate serviceDate,
-                                                   LocalDateTime now) {
-        if (notification.getRepeatDays() != null && notification.getRepeatDays() != 0) return;
-        if (transitScheduleService.shouldCompleteExpiredOneTime(notification, serviceDate, now)) {
-            notification.completeOneTimeNotification();
-            arrivalNotificationRepository.save(notification);
         }
     }
 
