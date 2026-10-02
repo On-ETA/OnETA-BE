@@ -1,0 +1,45 @@
+name: Validate Kakao dated transit
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Probe dated transit endpoint
+        env:
+          KAKAO_REST_API_KEY: ${{ secrets.KAKAO_REST_API_KEY }}
+        run: |
+          set -e
+          STATUS=$(curl -sS -o /tmp/kakao.json -w "%{http_code}" \
+            -G "https://apis-navi.kakaomobility.com/affiliate/publictransit/v1/multimodal/directions" \
+            -H "Authorization: KakaoAK $KAKAO_REST_API_KEY" \
+            --data-urlencode "start=126.891116,37.508660" \
+            --data-urlencode "goal=126.922304,37.547766" \
+            --data-urlencode "date=20261003" \
+            --data-urlencode "hhmmss=040000" \
+            --data-urlencode "day_type=Saturday" \
+            --data-urlencode "route_type=All")
+          echo "http_status=$STATUS"
+          python3 - <<'PY'
+          import json
+          p="/tmp/kakao.json"
+          try:
+              data=json.load(open(p,encoding="utf-8"))
+          except Exception as e:
+              print("json_parse_error", type(e).__name__)
+              raise SystemExit(0)
+          print("top_keys", sorted(data.keys()))
+          print("result_code", data.get("result_code"))
+          print("result_message", data.get("result_message") or data.get("msg") or data.get("message"))
+          journeys=data.get("journeys") or []
+          print("journey_count", len(journeys))
+          for i,j in enumerate(journeys[:3]):
+              sections=j.get("sections") or []
+              transit=[s for s in sections if (s.get("route") or {}).get("route_short_name") not in (None,"Walk")]
+              print("journey", i, "section_count", len(sections), "transit_count", len(transit),
+                    "first_flags", [bool(s.get("first_trip")) for s in transit],
+                    "last_flags", [bool(s.get("last_trip")) for s in transit])
+          PY
