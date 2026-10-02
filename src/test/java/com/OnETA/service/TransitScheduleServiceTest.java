@@ -78,7 +78,7 @@ class TransitScheduleServiceTest {
         RestTemplate rest = new RestTemplate();
         MockRestServiceServer server = MockRestServiceServer.bindTo(rest).build();
 
-        server.expect(queryParam("stationName", "신도림"))
+        server.expect(requestTo(org.hamcrest.Matchers.containsString("searchStation")))
                 .andExpect(queryParam("stationClass", "2"))
                 .andExpect(queryParam("CID", "1000"))
                 .andRespond(withSuccess("""
@@ -87,7 +87,7 @@ class TransitScheduleServiceTest {
                           {"stationClass":2,"stationID":222,"stationName":"신도림","laneName":"2호선","x":126.8916,"y":37.5082}
                         ]}}
                         """, MediaType.APPLICATION_JSON));
-        server.expect(queryParam("stationName", "합정"))
+        server.expect(requestTo(org.hamcrest.Matchers.containsString("searchStation")))
                 .andExpect(queryParam("stationClass", "2"))
                 .andRespond(withSuccess("""
                         {"result":{"station":[
@@ -131,7 +131,7 @@ class TransitScheduleServiceTest {
         ScheduleSnapshotRepository snapshots = mock(ScheduleSnapshotRepository.class);
         RestTemplate rest = new RestTemplate();
         MockRestServiceServer server = MockRestServiceServer.bindTo(rest).build();
-        server.expect(queryParam("stationName", "신도림"))
+        server.expect(requestTo(org.hamcrest.Matchers.containsString("searchStation")))
                 .andRespond(org.springframework.test.web.client.response.MockRestResponseCreators
                         .withStatus(org.springframework.http.HttpStatus.TOO_MANY_REQUESTS));
 
