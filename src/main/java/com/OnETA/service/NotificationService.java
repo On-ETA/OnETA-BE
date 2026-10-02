@@ -37,8 +37,8 @@ public class NotificationService {
         if (!transit) validateCategoryLimit(user.getId(), request.getScheduleType());
         validateUniqueRoute(user.getId(), null, request.getRouteDetails(), transit);
         // The user lock serializes concurrent replacements, including the legacy /arrival API.
-        // FIRST and LAST are independent slots: creating one only replaces the same schedule type.
-        if (transit) archiveCurrentTransit(user.getId(), request.getScheduleType());
+        // FIRST and LAST are independent slots: creating one hard-deletes only the same schedule type.
+        if (transit) deleteCurrentTransit(user.getId(), request.getScheduleType());
 
         String routeName = transit ? transitName(request.getScheduleType()) : request.getRouteName();
         if (routeName == null || routeName.trim().isEmpty()) {
@@ -138,23 +138,30 @@ public class NotificationService {
     public void deleteCurrentTransitNotification(String email) {
         User user = userRepository.findForNotificationByEmail(email)
                 .orElseThrow(() -> new com.OnETA.common.exception.GlobalException(com.OnETA.common.error.ErrorCode.USER_NOT_FOUND));
-        archiveCurrentTransit(user.getId());
+        deleteCurrentTransit(user.getId(), null);
     }
 
-    private void archiveCurrentTransit(Long userId) {
-        archiveCurrentTransit(userId, null);
-    }
-
-    private void archiveCurrentTransit(Long userId, NotificationScheduleType scheduleType) {
+    private void deleteCurrentTransit(Long userId, NotificationScheduleType scheduleType) {
         var current = arrivalNotificationRepository.findAllForDuplicateCheckByUserId(userId).stream()
                 .filter(n -> !n.isTransitArchived() && isTransit(n.getScheduleType()))
                 .filter(n -> scheduleType == null || n.getScheduleType() == scheduleType)
                 .toList();
-        current.forEach(ArrivalNotification::archiveTransit);
-        if (!current.isEmpty()) {
-            // Flush the archive flags before cancelling the old outbox, preserving delivery history.
-            deliveryRepository.expireReplacedTransitDeliveries(current.stream().map(ArrivalNotification::getId).toList());
-        }
+        if (current.isEmpty()) return;
+
+        List<Long> targetIds = current.stream().map(ArrivalNotification::getId).toList();
+        // Stop any pending/sending outbox work before physically removing the old setting.
+        deliveryRepository.expireReplacedTransitDeliveries(targetIds);
+        deleteNotificationRows(targetIds);
+    }
+
+    private void deleteNotificationRows(List<Long> targetIds) {
+        if (targetIds == null || targetIds.isEmpty()) return;
+        // FK child tables first, then JOINED inheritance child/parent rows.
+        notificationRepository.deleteScheduleSnapshotsByIds(targetIds);
+        notificationRepository.deleteDeliveriesByIds(targetIds);
+        notificationRepository.deleteReminderOffsetsByIds(targetIds);
+        notificationRepository.deleteArrivalRowsByIds(targetIds);
+        notificationRepository.deleteRowsByIds(targetIds);
     }
 
     private String transitName(NotificationScheduleType type) {
@@ -191,12 +198,7 @@ public class NotificationService {
                 .map(ArrivalNotification::getId)
                 .toList();
 
-        // FK 자식 테이블부터 정리한 뒤 JOINED 상속의 부모 notifications를 삭제한다.
-        notificationRepository.deleteScheduleSnapshotsByIds(targetIds);
-        notificationRepository.deleteDeliveriesByIds(targetIds);
-        notificationRepository.deleteReminderOffsetsByIds(targetIds);
-        notificationRepository.deleteArrivalRowsByIds(targetIds);
-        notificationRepository.deleteRowsByIds(targetIds);
+        deleteNotificationRows(targetIds);
     }
 
     @Transactional

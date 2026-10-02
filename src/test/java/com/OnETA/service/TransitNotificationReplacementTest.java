@@ -51,12 +51,13 @@ class TransitNotificationReplacementTest {
         assertThat(first.getIsActive()).isTrue();
         assertThat(normal.isTransitArchived()).isFalse();
         verify(deliveries, never()).expireReplacedTransitDeliveries(anyList());
+        verify(all, never()).deleteRowsByIds(anyList());
         verify(arrivals).save(argThat(n -> n.getScheduleType() == NotificationScheduleType.LAST_TRANSIT
                 && n.getName().equals("막차 알림") && n.getRepeatDays() == 0
                 && Boolean.TRUE.equals(n.getIsActive())));
     }
 
-    @Test void replacingLastArchivesOnlyExistingLastAndCancelsItsOutbox() {
+    @Test void replacingLastHardDeletesOnlyExistingLastAndCancelsItsOutbox() {
         var first = notification(10L, NotificationScheduleType.FIRST_TRANSIT, "first");
         var last = notification(11L, NotificationScheduleType.LAST_TRANSIT, "last");
         var normal = notification(12L, NotificationScheduleType.NORMAL, "normal");
@@ -66,11 +67,13 @@ class TransitNotificationReplacementTest {
 
         assertThat(first.isTransitArchived()).isFalse();
         assertThat(first.getIsActive()).isTrue();
-        assertThat(last.isTransitArchived()).isTrue();
-        assertThat(last.getIsActive()).isFalse();
         assertThat(normal.isTransitArchived()).isFalse();
         verify(deliveries).expireReplacedTransitDeliveries(List.of(11L));
-        verify(all, never()).deleteAll(any());
+        verify(all).deleteScheduleSnapshotsByIds(List.of(11L));
+        verify(all).deleteDeliveriesByIds(List.of(11L));
+        verify(all).deleteReminderOffsetsByIds(List.of(11L));
+        verify(all).deleteArrivalRowsByIds(List.of(11L));
+        verify(all).deleteRowsByIds(List.of(11L));
     }
 
     @Test void invalidReplacementLeavesCurrentNotificationAndOutboxUnchanged() {
@@ -84,13 +87,21 @@ class TransitNotificationReplacementTest {
         verify(arrivals, never()).save(any());
     }
 
-    @Test void singleDeleteArchivesCurrentAndIsIdempotent() {
+    @Test void singleDeleteHardDeletesCurrentAndIsIdempotent() {
         var old = notification(10L, NotificationScheduleType.LAST_TRANSIT, "saved");
-        when(arrivals.findAllForDuplicateCheckByUserId(1L)).thenReturn(List.of(old));
+        when(arrivals.findAllForDuplicateCheckByUserId(1L))
+                .thenReturn(List.of(old))
+                .thenReturn(List.of());
+
         service.deleteCurrentTransitNotification("me");
         service.deleteCurrentTransitNotification("me");
-        assertThat(old.isTransitArchived()).isTrue();
+
         verify(deliveries, times(1)).expireReplacedTransitDeliveries(List.of(10L));
+        verify(all, times(1)).deleteScheduleSnapshotsByIds(List.of(10L));
+        verify(all, times(1)).deleteDeliveriesByIds(List.of(10L));
+        verify(all, times(1)).deleteReminderOffsetsByIds(List.of(10L));
+        verify(all, times(1)).deleteArrivalRowsByIds(List.of(10L));
+        verify(all, times(1)).deleteRowsByIds(List.of(10L));
     }
 
     @Test void legacyEndpointCannotReactivateArchivedNotification() {
