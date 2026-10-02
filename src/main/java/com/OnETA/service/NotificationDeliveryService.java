@@ -163,11 +163,17 @@ public class NotificationDeliveryService {
         if (delivery == null || delivery.getStatus() == NotificationDeliveryStatus.SENT
                 || delivery.getStatus() == NotificationDeliveryStatus.FAILED
                 || delivery.getStatus() == NotificationDeliveryStatus.EXPIRED) return false;
-        if (org.hibernate.Hibernate.unproxy(delivery.getNotification()) instanceof ArrivalNotification arrival
-                && arrival.isTransitArchived()) {
-            delivery.markExpired("TRANSIT_REPLACED", "첫차·막차 알림이 교체 또는 삭제되었습니다.");
-            deliveryRepository.save(delivery);
-            return false;
+        if (org.hibernate.Hibernate.unproxy(delivery.getNotification()) instanceof ArrivalNotification arrival) {
+            if (arrival.isTransitArchived()) {
+                delivery.markExpired("TRANSIT_REPLACED", "첫차·막차 알림이 교체 또는 삭제되었습니다.");
+                deliveryRepository.save(delivery);
+                return false;
+            }
+            if (Boolean.FALSE.equals(arrival.getIsActive())) {
+                delivery.markExpired("NOTIFICATION_INACTIVE", "비활성화된 알림은 발송하지 않습니다.");
+                deliveryRepository.save(delivery);
+                return false;
+            }
         }
         LocalDateTime now = nowUtc();
         if (delivery.getHardDeadlineAt() == null || !now.isBefore(delivery.getHardDeadlineAt())) {
@@ -349,8 +355,11 @@ public class NotificationDeliveryService {
     }
 
     private boolean isFinalReminder(NotificationDelivery delivery) {
-        return delivery.getDeliveryPhase() == DeliveryPhase.RECOVERY
-                || delivery.getReminderOffsetMinutes() == delivery.getNotification().getReminderOffsetMinutes();
+        if (delivery.getDeliveryPhase() == DeliveryPhase.RECOVERY) return true;
+        int finalOffset = delivery.getNotification().getReminderOffsetMinutesList().stream()
+                .min(Integer::compareTo)
+                .orElse(delivery.getNotification().getReminderOffsetMinutes());
+        return delivery.getReminderOffsetMinutes() == finalOffset;
     }
 
     private LocalDateTime nowUtc() {

@@ -51,7 +51,7 @@ class NotificationCategoryTest {
         assertThatThrownBy(() -> controller.transit(null)).isInstanceOf(GlobalException.class);
         controller.schedules(() -> "me"); controller.transit(() -> "me");
         verify(service).getArrivalNotifications("me", NotificationCategory.SCHEDULE);
-        verify(queries).getCurrentNotification("me");
+        verify(queries).getCurrentNotifications("me");
     }
 
     @Test void oldTransitClientCannotReintroduceRepeatDaysOrArrivalTime() {

@@ -71,6 +71,71 @@ class FirstLastNotificationSchedulerTest {
     }
 
     @Test
+    void baseTransitUsesNextReminderAsRetryDeadlineAndSkipsStaleReminder() {
+        ArrivalNotification n = notification(NotificationScheduleType.FIRST_TRANSIT);
+        when(n.getReminderOffsetMinutes()).thenReturn(5);
+        when(n.getReminderOffsetMinutesList()).thenReturn(List.of(5, 10, 30));
+        TransitScheduleService schedules = mock(TransitScheduleService.class);
+        when(schedules.evaluate(any(), any(), any(), any())).thenReturn(
+                new TransitScheduleService.Decision(LocalDateTime.of(2026, 8, 27, 4, 50),
+                        LocalDateTime.of(2026, 8, 27, 5, 20), DeliveryPhase.BASE,
+                        LocalDateTime.of(2026, 8, 27, 5, 20), LocalDateTime.of(2026, 8, 27, 5, 20), false, 30));
+        NotificationDeliveryService delivery = mock(NotificationDeliveryService.class);
+        NotificationScheduler scheduler = scheduler(n, schedules, delivery, "2026-08-27T04:50");
+
+        scheduler.scheduleArrivalNotifications();
+
+        verify(delivery).prepare(eq(n), eq(30), eq(LocalDate.of(2026, 8, 27)),
+                eq(toUtc(LocalDateTime.of(2026, 8, 27, 4, 50))), eq(30),
+                eq(toUtc(LocalDateTime.of(2026, 8, 27, 5, 10))), eq(DeliveryPhase.BASE));
+
+        reset(delivery);
+        ReflectionTestUtils.setField(scheduler, "clock", Clock.fixed(at("2026-08-27T05:10"), ZoneOffset.UTC));
+        scheduler.scheduleArrivalNotifications();
+
+        verify(delivery).prepare(eq(n), eq(30), eq(LocalDate.of(2026, 8, 27)),
+                eq(toUtc(LocalDateTime.of(2026, 8, 27, 5, 10))), eq(10),
+                eq(toUtc(LocalDateTime.of(2026, 8, 27, 5, 15))), eq(DeliveryPhase.BASE));
+        verify(delivery, never()).prepare(eq(n), eq(30), eq(LocalDate.of(2026, 8, 27)),
+                eq(toUtc(LocalDateTime.of(2026, 8, 27, 4, 50))), eq(30),
+                any(), eq(DeliveryPhase.BASE));
+        verify(delivery, never()).prepare(eq(n), eq(30), eq(LocalDate.of(2026, 8, 27)),
+                eq(toUtc(LocalDateTime.of(2026, 8, 27, 5, 15))), eq(5),
+                any(), eq(DeliveryPhase.BASE));
+    }
+
+    @Test
+    void expiredOneTimeLastIsCompletedWhenNoDecisionRemains() {
+        ArrivalNotification n = notification(NotificationScheduleType.LAST_TRANSIT);
+        TransitScheduleService schedules = mock(TransitScheduleService.class);
+        when(schedules.evaluate(any(), any(), any(), any())).thenReturn(null);
+        when(schedules.shouldCompleteExpiredOneTime(eq(n), any(), any())).thenReturn(true);
+        NotificationDeliveryService delivery = mock(NotificationDeliveryService.class);
+        NotificationScheduler scheduler = scheduler(n, schedules, delivery, "2026-08-27T23:30");
+
+        scheduler.scheduleArrivalNotifications();
+
+        verify(n).completeOneTimeNotification();
+        verify(schedulerRepository(scheduler)).save(n);
+        verify(delivery, never()).prepare(any(), anyInt(), any(), any(), anyInt(), any(), any());
+    }
+
+    @Test
+    void firstRecoveryInProgressIsNotCompletedWhenDecisionIsTemporarilyMissing() {
+        ArrivalNotification n = notification(NotificationScheduleType.FIRST_TRANSIT);
+        TransitScheduleService schedules = mock(TransitScheduleService.class);
+        when(schedules.evaluate(any(), any(), any(), any())).thenReturn(null);
+        when(schedules.shouldCompleteExpiredOneTime(eq(n), any(), any())).thenReturn(false);
+        NotificationDeliveryService delivery = mock(NotificationDeliveryService.class);
+        NotificationScheduler scheduler = scheduler(n, schedules, delivery, "2026-08-27T05:32");
+
+        scheduler.scheduleArrivalNotifications();
+
+        verify(n, never()).completeOneTimeNotification();
+        verify(schedulerRepository(scheduler), never()).save(n);
+    }
+
+    @Test
     void lastUsesScheduleServiceButNeverDirectRealtimeDurationPath() {
         ArrivalNotification n = notification(NotificationScheduleType.LAST_TRANSIT);
         TransitScheduleService schedules = mock(TransitScheduleService.class);
@@ -110,6 +175,9 @@ class FirstLastNotificationSchedulerTest {
     }
     private ArrivalNotificationRepository schedulerRepository(NotificationScheduler scheduler) {
         return (ArrivalNotificationRepository) ReflectionTestUtils.getField(scheduler, "arrivalNotificationRepository");
+    }
+    private LocalDateTime toUtc(LocalDateTime value) {
+        return value.atZone(SEOUL).withZoneSameInstant(ZoneOffset.UTC).toLocalDateTime();
     }
     private Instant at(String value) { return ZonedDateTime.parse(value + "+09:00").toInstant(); }
 }

@@ -36,20 +36,21 @@ class TransitScheduleServiceTest {
     }
 
     @Test
-    void displayUsesPersistedEffectiveDepartureForOvernightTripAndCompletedTrip() {
+    void displayUsesFuturePersistedDepartureButRejectsPastSnapshot() {
         var service = service("0530", "2330");
         var n = notification(NotificationScheduleType.LAST_TRANSIT, 10);
-        when(n.getIsActive()).thenReturn(true);
         var snapshot = new ScheduleSnapshot(n, DATE, NotificationScheduleType.LAST_TRANSIT, "hash",
                 DATE.plusDays(1).atTime(0, 20), DATE.plusDays(1).atTime(0, 10), DATE.atTime(23, 0), DATE.atTime(12, 0), 30);
         snapshot.updateConnection(DATE.plusDays(1).atTime(0, 15), DATE.plusDays(1).atTime(0, 5), 30, DATE.atTime(23, 50));
         when(snapshotRepo(service).findFirstByNotificationIdAndScheduleTypeAndRouteHashOrderByServiceDateDesc(any(), any(), any()))
                 .thenReturn(Optional.of(snapshot));
-        assertThat(service.estimateDeparture(n, DATE.plusDays(1).atTime(0, 16), SEOUL))
+
+        assertThat(service.estimateDeparture(n, DATE.plusDays(1).atTime(0, 10), SEOUL))
                 .isEqualTo(DATE.plusDays(1).atTime(0, 15));
-        when(n.getIsActive()).thenReturn(false);
-        assertThat(service.estimateDeparture(n, DATE.plusDays(2).atTime(10, 0), SEOUL))
-                .isEqualTo(DATE.plusDays(1).atTime(0, 15));
+        assertThatThrownBy(() -> service.estimateDeparture(n, DATE.plusDays(1).atTime(0, 16), SEOUL))
+                .isInstanceOfSatisfying(com.OnETA.common.exception.GlobalException.class,
+                        e -> assertThat(e.getErrorCode()).isEqualTo(com.OnETA.common.error.ErrorCode.TRANSIT_SCHEDULE_UNAVAILABLE));
+
         verifyNoInteractions(publicData(service));
         verify(snapshotRepo(service), never()).save(any());
     }
@@ -123,16 +124,17 @@ class TransitScheduleServiceTest {
     }
 
     @Test
-    void calculatesLastUsingMinCandidateAndOffset() throws Exception {
+    void calculatesLastUsingMaxReminderOffsetForEarliestSchedulingWindow() {
         TransitScheduleService service = service("05:30", "23:30");
         when(serviceApi(service).readSavedRoute("route")).thenReturn(route(10, 20, "1"));
         when(snapshotRepo(service).findForUpdate(any(), any(), any(), any())).thenReturn(Optional.empty());
 
-        TransitScheduleService.Decision decision = service.evaluate(notification(NotificationScheduleType.LAST_TRANSIT, 10),
+        TransitScheduleService.Decision decision = service.evaluate(
+                notification(NotificationScheduleType.LAST_TRANSIT, List.of(5, 10, 30)),
                 DATE, DATE.atTime(20, 0), SEOUL);
 
         assertThat(decision.baseDepartureAt()).isEqualTo(DATE.atTime(23, 20));
-        assertThat(decision.scheduledAt()).isEqualTo(DATE.atTime(23, 10));
+        assertThat(decision.scheduledAt()).isEqualTo(DATE.atTime(22, 50));
     }
 
     @Test

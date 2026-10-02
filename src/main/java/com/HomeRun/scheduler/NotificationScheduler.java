@@ -134,6 +134,7 @@ public class NotificationScheduler {
         var route = transitApiService.readSavedRoute(notification.getRouteDetails());
         if (com.OnETA.service.SeoulBusScheduleService.isKakao(route)) {
             processScheduledServiceDay(notification, today.minusDays(1), now, zoneId);
+            if (Boolean.FALSE.equals(notification.getIsActive())) return;
         }
         processScheduledServiceDay(notification, today, now, zoneId);
     }
@@ -144,17 +145,54 @@ public class NotificationScheduler {
         if (!repeatDaysService.includes(notification.getRepeatDays(), today.getDayOfWeek())
                 && notification.getRepeatDays() != 0) return;
         TransitScheduleService.Decision decision = transitScheduleService.evaluate(notification, today, now, zoneId);
-        if (decision == null || !decision.hardDeadlineAt().isAfter(now)
-                || decision.scheduledAt().isAfter(now)) return;
-        LocalDateTime scheduledUtc = toUtc(decision.scheduledAt(), zoneId);
+        if (decision == null) {
+            completeExpiredTransitIfNecessary(notification, today, now);
+            return;
+        }
+        if (!decision.hardDeadlineAt().isAfter(now)) {
+            completeExpiredTransitIfNecessary(notification, today, now);
+            return;
+        }
+        if (decision.scheduledAt().isAfter(now)) return;
         LocalDateTime deadlineUtc = toUtc(decision.hardDeadlineAt(), zoneId);
-        int offset = decision.recovery()
-                ? notification.getReminderOffsetMinutesList().stream().max(Integer::compareTo).orElse(0)
-                : notification.getReminderOffsetMinutes();
-        boolean created = notificationDeliveryService.prepare(notification, decision.estimatedDuration(), today, scheduledUtc,
-                offset, deadlineUtc, decision.phase());
-        if (created && decision.recovery()) {
-            transitScheduleService.markRecoveryDeliveryCreated(notification, today);
+
+        if (decision.recovery()) {
+            int offset = notification.getReminderOffsetMinutesList().stream()
+                    .max(Integer::compareTo).orElse(0);
+            LocalDateTime scheduledUtc = toUtc(decision.scheduledAt(), zoneId);
+            boolean created = notificationDeliveryService.prepare(
+                    notification, decision.estimatedDuration(), today, scheduledUtc,
+                    offset, deadlineUtc, decision.phase());
+            if (created) {
+                transitScheduleService.markRecoveryDeliveryCreated(notification, today);
+            }
+            return;
+        }
+
+        List<Integer> offsets = reminderOffsetsOf(notification).stream().sorted().toList();
+        for (int i = 0; i < offsets.size(); i++) {
+            int offset = offsets.get(i);
+            LocalDateTime scheduledAt = decision.hardDeadlineAt().minusMinutes(offset);
+            if (scheduledAt.isAfter(now)) continue;
+
+            LocalDateTime reminderDeadline = i == 0
+                    ? decision.hardDeadlineAt()
+                    : decision.hardDeadlineAt().minusMinutes(offsets.get(i - 1));
+            if (!reminderDeadline.isAfter(now)) continue;
+
+            notificationDeliveryService.prepare(
+                    notification, decision.estimatedDuration(), today,
+                    toUtc(scheduledAt, zoneId), offset,
+                    toUtc(reminderDeadline, zoneId), decision.phase());
+        }
+    }
+
+    private void completeExpiredTransitIfNecessary(ArrivalNotification notification, LocalDate serviceDate,
+                                                   LocalDateTime now) {
+        if (notification.getRepeatDays() != null && notification.getRepeatDays() != 0) return;
+        if (transitScheduleService.shouldCompleteExpiredOneTime(notification, serviceDate, now)) {
+            notification.completeOneTimeNotification();
+            arrivalNotificationRepository.save(notification);
         }
     }
 

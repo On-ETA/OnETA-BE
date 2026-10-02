@@ -76,9 +76,8 @@ public class TransitScheduleService {
         ScheduleSnapshot snapshot = existing.orElseGet(() -> createSnapshot(notification, date, type, hash, zone));
         if (snapshot.getEvaluationMode() == ScheduleEvaluationMode.FINISHED) return null;
 
-        int offset = type == NotificationScheduleType.FIRST_TRANSIT
-                ? notification.getReminderOffsetMinutesList().stream().max(Integer::compareTo).orElse(0)
-                : notification.getReminderOffsetMinutes();
+        int offset = notification.getReminderOffsetMinutesList().stream()
+                .max(Integer::compareTo).orElse(notification.getReminderOffsetMinutes());
         LocalDateTime scheduled = snapshot.getEffectiveScheduledAt();
         LocalDateTime deadline = snapshot.getEffectiveDepartureAt();
         DeliveryPhase phase = DeliveryPhase.BASE;
@@ -146,6 +145,37 @@ public class TransitScheduleService {
                 .ifPresent(snapshot -> { snapshot.markRecoveryDeliveryCreated(); snapshotRepository.save(snapshot); });
     }
 
+    @Transactional(readOnly = true)
+    public boolean shouldCompleteExpiredOneTime(ArrivalNotification notification, LocalDate serviceDate,
+                                                LocalDateTime now) {
+        if (notification.getRepeatDays() != null && notification.getRepeatDays() != 0) return false;
+
+        String routeHash = hash(notification.getRouteDetails());
+        var snapshot = snapshotRepository
+                .findByNotificationIdAndServiceDateAndScheduleTypeAndRouteHash(
+                        notification.getId(), serviceDate, notification.getScheduleType(), routeHash)
+                .orElse(null);
+        if (snapshot == null || snapshot.getEffectiveDepartureAt().isAfter(now)) return false;
+
+        if (notification.getScheduleType() == NotificationScheduleType.LAST_TRANSIT) {
+            return true;
+        }
+        if (notification.getScheduleType() != NotificationScheduleType.FIRST_TRANSIT) {
+            return false;
+        }
+
+        if ("SEOUL_BUS".equals(snapshot.getSource())) {
+            return true;
+        }
+        if ("SEOUL_BUS_TRANSFER".equals(snapshot.getSource())) {
+            return !now.isBefore(snapshot.getBaseDepartureAt().plusMinutes(60));
+        }
+
+        return snapshot.getRecoveryStatus() == RecoveryStatus.NO_CANDIDATE
+                || snapshot.getRecoveryStatus() == RecoveryStatus.FAILED
+                || snapshot.getRecoveryStatus() == RecoveryStatus.FINISHED;
+    }
+
     private ScheduleSnapshot createSnapshot(ArrivalNotification n, LocalDate date,
                                              NotificationScheduleType type, String hash, ZoneId zone) {
         return snapshotRepository.save(buildSnapshot(n, date, type, hash, zone));
@@ -176,9 +206,8 @@ public class TransitScheduleService {
             plan = TransitScheduleCalculator.conservative(segments, candidates, type);
         }
         departure = plan.departure();
-        int offset = type == NotificationScheduleType.FIRST_TRANSIT
-                ? n.getReminderOffsetMinutesList().stream().max(Integer::compareTo).orElse(0)
-                : n.getReminderOffsetMinutes();
+        int offset = n.getReminderOffsetMinutesList().stream()
+                .max(Integer::compareTo).orElse(n.getReminderOffsetMinutes());
         LocalDateTime scheduled = departure.minusMinutes(offset);
         int duration = plan.durationMinutes();
         LocalDateTime start = scheduled.minusMinutes(Math.max(15, Math.min(60, duration)));
@@ -202,9 +231,8 @@ public class TransitScheduleService {
             }
             var fallback = TransitScheduleCalculator.conservative(route.getSegments(), bounds, type);
             LocalDateTime departure = fallback.departure();
-            int offset = type == NotificationScheduleType.FIRST_TRANSIT
-                    ? n.getReminderOffsetMinutesList().stream().max(Integer::compareTo).orElse(0)
-                    : n.getReminderOffsetMinutes();
+            int offset = n.getReminderOffsetMinutesList().stream()
+                    .max(Integer::compareTo).orElse(n.getReminderOffsetMinutes());
             LocalDateTime scheduled = departure.minusMinutes(offset);
             var snapshot = new ScheduleSnapshot(n, date, type, hash, departure, scheduled,
                     scheduled.minusMinutes(Math.max(60, prefix)), LocalDateTime.now(ZoneOffset.UTC), fallback.durationMinutes());
@@ -215,9 +243,8 @@ public class TransitScheduleService {
         LocalDateTime boarding = type == NotificationScheduleType.FIRST_TRANSIT ? times.first() : times.last();
         var plan = TransitScheduleCalculator.calculate(route.getSegments(), List.of(boarding), type);
         LocalDateTime departure = plan.departure();
-        int offset = type == NotificationScheduleType.FIRST_TRANSIT
-                ? n.getReminderOffsetMinutesList().stream().max(Integer::compareTo).orElse(0)
-                : n.getReminderOffsetMinutes();
+        int offset = n.getReminderOffsetMinutesList().stream()
+                .max(Integer::compareTo).orElse(n.getReminderOffsetMinutes());
         LocalDateTime scheduled = departure.minusMinutes(offset);
         ScheduleSnapshot snapshot = new ScheduleSnapshot(n, date, type, hash, departure, scheduled,
                 scheduled, LocalDateTime.now(ZoneOffset.UTC), plan.durationMinutes());
@@ -230,13 +257,19 @@ public class TransitScheduleService {
         String routeHash = hash(notification.getRouteDetails());
         var type = notification.getScheduleType();
 
-        // First/last notifications are one-time settings. Once a snapshot exists, keep showing
-        // that service day's latest effective departure even after it has passed or completed.
+        // A persisted snapshot may be reused only while its effective departure is still future.
+        // Never expose a past departure as a current estimate, and never roll an expired one-time
+        // setting forward to the next service day.
         var saved = snapshotRepository
                 .findFirstByNotificationIdAndScheduleTypeAndRouteHashOrderByServiceDateDesc(
                         notification.getId(), type, routeHash);
         if (saved.isPresent()) {
-            return saved.get().getEffectiveDepartureAt();
+            LocalDateTime departure = saved.get().getEffectiveDepartureAt();
+            if (departure.isAfter(now)) {
+                return departure;
+            }
+            throw new com.OnETA.common.exception.GlobalException(
+                    com.OnETA.common.error.ErrorCode.TRANSIT_SCHEDULE_UNAVAILABLE);
         }
 
         // An inactive one-time notification without a persisted calculation must not be shifted
