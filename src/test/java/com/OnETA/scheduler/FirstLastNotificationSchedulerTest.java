@@ -105,6 +105,37 @@ class FirstLastNotificationSchedulerTest {
     }
 
     @Test
+    void expiredOneTimeLastIsCompletedWhenNoDecisionRemains() {
+        ArrivalNotification n = notification(NotificationScheduleType.LAST_TRANSIT);
+        TransitScheduleService schedules = mock(TransitScheduleService.class);
+        when(schedules.evaluate(any(), any(), any(), any())).thenReturn(null);
+        when(schedules.shouldCompleteExpiredOneTime(eq(n), any(), any())).thenReturn(true);
+        NotificationDeliveryService delivery = mock(NotificationDeliveryService.class);
+        NotificationScheduler scheduler = scheduler(n, schedules, delivery, "2026-08-27T23:30");
+
+        scheduler.scheduleArrivalNotifications();
+
+        verify(n).completeOneTimeNotification();
+        verify(schedulerRepository(scheduler)).save(n);
+        verify(delivery, never()).prepare(any(), anyInt(), any(), any(), anyInt(), any(), any());
+    }
+
+    @Test
+    void firstRecoveryInProgressIsNotCompletedWhenDecisionIsTemporarilyMissing() {
+        ArrivalNotification n = notification(NotificationScheduleType.FIRST_TRANSIT);
+        TransitScheduleService schedules = mock(TransitScheduleService.class);
+        when(schedules.evaluate(any(), any(), any(), any())).thenReturn(null);
+        when(schedules.shouldCompleteExpiredOneTime(eq(n), any(), any())).thenReturn(false);
+        NotificationDeliveryService delivery = mock(NotificationDeliveryService.class);
+        NotificationScheduler scheduler = scheduler(n, schedules, delivery, "2026-08-27T05:32");
+
+        scheduler.scheduleArrivalNotifications();
+
+        verify(n, never()).completeOneTimeNotification();
+        verify(schedulerRepository(scheduler), never()).save(n);
+    }
+
+    @Test
     void lastUsesScheduleServiceButNeverDirectRealtimeDurationPath() {
         ArrivalNotification n = notification(NotificationScheduleType.LAST_TRANSIT);
         TransitScheduleService schedules = mock(TransitScheduleService.class);

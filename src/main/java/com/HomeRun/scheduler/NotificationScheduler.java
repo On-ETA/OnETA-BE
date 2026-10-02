@@ -134,6 +134,7 @@ public class NotificationScheduler {
         var route = transitApiService.readSavedRoute(notification.getRouteDetails());
         if (com.OnETA.service.SeoulBusScheduleService.isKakao(route)) {
             processScheduledServiceDay(notification, today.minusDays(1), now, zoneId);
+            if (Boolean.FALSE.equals(notification.getIsActive())) return;
         }
         processScheduledServiceDay(notification, today, now, zoneId);
     }
@@ -144,8 +145,15 @@ public class NotificationScheduler {
         if (!repeatDaysService.includes(notification.getRepeatDays(), today.getDayOfWeek())
                 && notification.getRepeatDays() != 0) return;
         TransitScheduleService.Decision decision = transitScheduleService.evaluate(notification, today, now, zoneId);
-        if (decision == null || !decision.hardDeadlineAt().isAfter(now)
-                || decision.scheduledAt().isAfter(now)) return;
+        if (decision == null) {
+            completeExpiredTransitIfNecessary(notification, today, now);
+            return;
+        }
+        if (!decision.hardDeadlineAt().isAfter(now)) {
+            completeExpiredTransitIfNecessary(notification, today, now);
+            return;
+        }
+        if (decision.scheduledAt().isAfter(now)) return;
         LocalDateTime deadlineUtc = toUtc(decision.hardDeadlineAt(), zoneId);
 
         if (decision.recovery()) {
@@ -176,6 +184,15 @@ public class NotificationScheduler {
                     notification, decision.estimatedDuration(), today,
                     toUtc(scheduledAt, zoneId), offset,
                     toUtc(reminderDeadline, zoneId), decision.phase());
+        }
+    }
+
+    private void completeExpiredTransitIfNecessary(ArrivalNotification notification, LocalDate serviceDate,
+                                                   LocalDateTime now) {
+        if (notification.getRepeatDays() != null && notification.getRepeatDays() != 0) return;
+        if (transitScheduleService.shouldCompleteExpiredOneTime(notification, serviceDate, now)) {
+            notification.completeOneTimeNotification();
+            arrivalNotificationRepository.save(notification);
         }
     }
 

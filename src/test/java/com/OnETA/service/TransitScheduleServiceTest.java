@@ -36,20 +36,21 @@ class TransitScheduleServiceTest {
     }
 
     @Test
-    void displayUsesPersistedEffectiveDepartureForOvernightTripAndCompletedTrip() {
+    void displayUsesFuturePersistedDepartureButRejectsPastSnapshot() {
         var service = service("0530", "2330");
         var n = notification(NotificationScheduleType.LAST_TRANSIT, 10);
-        when(n.getIsActive()).thenReturn(true);
         var snapshot = new ScheduleSnapshot(n, DATE, NotificationScheduleType.LAST_TRANSIT, "hash",
                 DATE.plusDays(1).atTime(0, 20), DATE.plusDays(1).atTime(0, 10), DATE.atTime(23, 0), DATE.atTime(12, 0), 30);
         snapshot.updateConnection(DATE.plusDays(1).atTime(0, 15), DATE.plusDays(1).atTime(0, 5), 30, DATE.atTime(23, 50));
         when(snapshotRepo(service).findFirstByNotificationIdAndScheduleTypeAndRouteHashOrderByServiceDateDesc(any(), any(), any()))
                 .thenReturn(Optional.of(snapshot));
-        assertThat(service.estimateDeparture(n, DATE.plusDays(1).atTime(0, 16), SEOUL))
+
+        assertThat(service.estimateDeparture(n, DATE.plusDays(1).atTime(0, 10), SEOUL))
                 .isEqualTo(DATE.plusDays(1).atTime(0, 15));
-        when(n.getIsActive()).thenReturn(false);
-        assertThat(service.estimateDeparture(n, DATE.plusDays(2).atTime(10, 0), SEOUL))
-                .isEqualTo(DATE.plusDays(1).atTime(0, 15));
+        assertThatThrownBy(() -> service.estimateDeparture(n, DATE.plusDays(1).atTime(0, 16), SEOUL))
+                .isInstanceOfSatisfying(com.OnETA.common.exception.GlobalException.class,
+                        e -> assertThat(e.getErrorCode()).isEqualTo(com.OnETA.common.error.ErrorCode.TRANSIT_SCHEDULE_UNAVAILABLE));
+
         verifyNoInteractions(publicData(service));
         verify(snapshotRepo(service), never()).save(any());
     }
