@@ -153,7 +153,7 @@ public class TransitApiService {
             if (e.getErrorCode() == ErrorCode.INVALID_INPUT_VALUE
                     || kakaoTransitClient == null || !kakaoTransitClient.isConfigured()) throw e;
             log.info("ODsay route search failed ({}); trying Kakao", e.getErrorCode().getCode());
-            return kakaoTransitClient.search(originX, originY, destX, destY, limit);
+            return kakaoTransitClient.search(originX, originY, destX, destY);
         }
     }
 
