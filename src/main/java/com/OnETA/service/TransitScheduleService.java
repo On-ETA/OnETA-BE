@@ -211,7 +211,11 @@ public class TransitScheduleService {
         if (SeoulBusScheduleService.isKakao(route)) {
             long rides = route.getSegments().stream().filter(s -> !"WALK".equals(s.getTransitType())).count();
             if (rides > 1 || route.getSegments().stream().anyMatch(s -> "SUBWAY".equals(s.getTransitType()))) {
-                var times = resolveKakaoRouteSchedules(route, date);
+                boolean hasSubway = route.getSegments().stream()
+                        .anyMatch(s -> "SUBWAY".equals(s.getTransitType()));
+                var times = hasSubway
+                        ? resolveKakaoRouteSchedules(route, date)
+                        : seoulBusScheduleService.resolveRoute(route, date);
                 List<LocalDateTime> bounds = new ArrayList<>();
                 int prefix = 0, ride = 0;
                 for (var segment : route.getSegments()) {
@@ -849,7 +853,7 @@ public class TransitScheduleService {
         } catch (Exception e) { return null; }
     }
     private boolean same(JsonNode n, String value) { return value != null && !n.isMissingNode() && value.equals(n.asText()); }
-    private String hash(String v) { try { return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(((SeoulBusScheduleService.isKakao(transitApiService.readSavedRoute(v)) ? "schedule-v4:" : "schedule-v4:") + (v==null?"":v)).getBytes(StandardCharsets.UTF_8))); } catch(Exception e){throw new IllegalStateException(e);} }
+    private String hash(String v) { try { return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(((SeoulBusScheduleService.isKakao(transitApiService.readSavedRoute(v)) ? "schedule-v5:" : "schedule-v4:") + (v==null?"":v)).getBytes(StandardCharsets.UTF_8))); } catch(Exception e){throw new IllegalStateException(e);} }
     public record Decision(LocalDateTime scheduledAt, LocalDateTime hardDeadlineAt, DeliveryPhase phase, LocalDateTime baseDepartureAt, LocalDateTime effectiveDepartureAt, boolean recovery, int estimatedDuration) {}
     private record RouteSchedulePlan(LocalDateTime departure, int durationMinutes, String source,
                                      String providerDetails, int evaluationLeadMinutes) {}
