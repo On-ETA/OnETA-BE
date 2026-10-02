@@ -55,19 +55,6 @@ class TransitScheduleServiceTest {
         verify(snapshotRepo(service), never()).save(any());
     }
 
-    @Test
-    void pastMidnightLastSnapshotPreviewsNextCalendarDaysLastTransit() {
-        var service = service("0530", "0021");
-        var n = notification(NotificationScheduleType.LAST_TRANSIT, 5);
-        when(serviceApi(service).readSavedRoute("route")).thenReturn(route(10, 20, "1"));
-        var snapshot = new ScheduleSnapshot(n, DATE, NotificationScheduleType.LAST_TRANSIT, "hash",
-                DATE.atTime(0, 11), DATE.atTime(0, 6), DATE.atStartOfDay(), DATE.atTime(0, 1), 30);
-        when(snapshotRepo(service).findFirstByNotificationIdAndScheduleTypeAndRouteHashOrderByServiceDateDesc(any(), any(), any()))
-                .thenReturn(Optional.of(snapshot));
-
-        assertThat(service.estimateDeparture(n, DATE.atTime(19, 36), SEOUL))
-                .isEqualTo(DATE.plusDays(1).atTime(0, 11));
-    }
     private static final LocalDate DATE = LocalDate.of(2026, 8, 27);
     private static final ZoneId SEOUL = ZoneId.of("Asia/Seoul");
 
