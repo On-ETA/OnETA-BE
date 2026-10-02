@@ -37,7 +37,8 @@ public class NotificationService {
         if (!transit) validateCategoryLimit(user.getId(), request.getScheduleType());
         validateUniqueRoute(user.getId(), null, request.getRouteDetails(), transit);
         // The user lock serializes concurrent replacements, including the legacy /arrival API.
-        if (transit) archiveCurrentTransit(user.getId());
+        // FIRST and LAST are independent slots: creating one only replaces the same schedule type.
+        if (transit) archiveCurrentTransit(user.getId(), request.getScheduleType());
 
         String routeName = transit ? transitName(request.getScheduleType()) : request.getRouteName();
         if (routeName == null || routeName.trim().isEmpty()) {
@@ -141,8 +142,14 @@ public class NotificationService {
     }
 
     private void archiveCurrentTransit(Long userId) {
+        archiveCurrentTransit(userId, null);
+    }
+
+    private void archiveCurrentTransit(Long userId, NotificationScheduleType scheduleType) {
         var current = arrivalNotificationRepository.findAllForDuplicateCheckByUserId(userId).stream()
-                .filter(n -> !n.isTransitArchived() && isTransit(n.getScheduleType())).toList();
+                .filter(n -> !n.isTransitArchived() && isTransit(n.getScheduleType()))
+                .filter(n -> scheduleType == null || n.getScheduleType() == scheduleType)
+                .toList();
         current.forEach(ArrivalNotification::archiveTransit);
         if (!current.isEmpty()) {
             // Flush the archive flags before cancelling the old outbox, preserving delivery history.
