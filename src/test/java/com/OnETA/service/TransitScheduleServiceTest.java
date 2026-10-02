@@ -123,16 +123,17 @@ class TransitScheduleServiceTest {
     }
 
     @Test
-    void calculatesLastUsingMinCandidateAndOffset() throws Exception {
+    void calculatesLastUsingMaxReminderOffsetForEarliestSchedulingWindow() {
         TransitScheduleService service = service("05:30", "23:30");
         when(serviceApi(service).readSavedRoute("route")).thenReturn(route(10, 20, "1"));
         when(snapshotRepo(service).findForUpdate(any(), any(), any(), any())).thenReturn(Optional.empty());
 
-        TransitScheduleService.Decision decision = service.evaluate(notification(NotificationScheduleType.LAST_TRANSIT, 10),
+        TransitScheduleService.Decision decision = service.evaluate(
+                notification(NotificationScheduleType.LAST_TRANSIT, List.of(5, 10, 30)),
                 DATE, DATE.atTime(20, 0), SEOUL);
 
         assertThat(decision.baseDepartureAt()).isEqualTo(DATE.atTime(23, 20));
-        assertThat(decision.scheduledAt()).isEqualTo(DATE.atTime(23, 10));
+        assertThat(decision.scheduledAt()).isEqualTo(DATE.atTime(22, 50));
     }
 
     @Test

@@ -71,6 +71,32 @@ class FirstLastNotificationSchedulerTest {
     }
 
     @Test
+    void baseTransitCreatesEachDueReminderWithMatchingOffset() {
+        ArrivalNotification n = notification(NotificationScheduleType.FIRST_TRANSIT);
+        when(n.getReminderOffsetMinutes()).thenReturn(5);
+        when(n.getReminderOffsetMinutesList()).thenReturn(List.of(5, 10, 30));
+        TransitScheduleService schedules = mock(TransitScheduleService.class);
+        when(schedules.evaluate(any(), any(), any(), any())).thenReturn(
+                new TransitScheduleService.Decision(LocalDateTime.of(2026, 8, 27, 4, 50),
+                        LocalDateTime.of(2026, 8, 27, 5, 20), DeliveryPhase.BASE,
+                        LocalDateTime.of(2026, 8, 27, 5, 20), LocalDateTime.of(2026, 8, 27, 5, 20), false, 30));
+        NotificationDeliveryService delivery = mock(NotificationDeliveryService.class);
+        NotificationScheduler scheduler = scheduler(n, schedules, delivery, "2026-08-27T05:10");
+
+        scheduler.scheduleArrivalNotifications();
+
+        verify(delivery).prepare(eq(n), eq(30), eq(LocalDate.of(2026, 8, 27)),
+                eq(toUtc(LocalDateTime.of(2026, 8, 27, 4, 50))), eq(30),
+                eq(toUtc(LocalDateTime.of(2026, 8, 27, 5, 20))), eq(DeliveryPhase.BASE));
+        verify(delivery).prepare(eq(n), eq(30), eq(LocalDate.of(2026, 8, 27)),
+                eq(toUtc(LocalDateTime.of(2026, 8, 27, 5, 10))), eq(10),
+                eq(toUtc(LocalDateTime.of(2026, 8, 27, 5, 20))), eq(DeliveryPhase.BASE));
+        verify(delivery, never()).prepare(eq(n), eq(30), eq(LocalDate.of(2026, 8, 27)),
+                eq(toUtc(LocalDateTime.of(2026, 8, 27, 5, 15))), eq(5),
+                any(), eq(DeliveryPhase.BASE));
+    }
+
+    @Test
     void lastUsesScheduleServiceButNeverDirectRealtimeDurationPath() {
         ArrivalNotification n = notification(NotificationScheduleType.LAST_TRANSIT);
         TransitScheduleService schedules = mock(TransitScheduleService.class);
@@ -110,6 +136,9 @@ class FirstLastNotificationSchedulerTest {
     }
     private ArrivalNotificationRepository schedulerRepository(NotificationScheduler scheduler) {
         return (ArrivalNotificationRepository) ReflectionTestUtils.getField(scheduler, "arrivalNotificationRepository");
+    }
+    private LocalDateTime toUtc(LocalDateTime value) {
+        return value.atZone(SEOUL).withZoneSameInstant(ZoneOffset.UTC).toLocalDateTime();
     }
     private Instant at(String value) { return ZonedDateTime.parse(value + "+09:00").toInstant(); }
 }

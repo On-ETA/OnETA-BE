@@ -76,9 +76,8 @@ public class TransitScheduleService {
         ScheduleSnapshot snapshot = existing.orElseGet(() -> createSnapshot(notification, date, type, hash, zone));
         if (snapshot.getEvaluationMode() == ScheduleEvaluationMode.FINISHED) return null;
 
-        int offset = type == NotificationScheduleType.FIRST_TRANSIT
-                ? notification.getReminderOffsetMinutesList().stream().max(Integer::compareTo).orElse(0)
-                : notification.getReminderOffsetMinutes();
+        int offset = notification.getReminderOffsetMinutesList().stream()
+                .max(Integer::compareTo).orElse(notification.getReminderOffsetMinutes());
         LocalDateTime scheduled = snapshot.getEffectiveScheduledAt();
         LocalDateTime deadline = snapshot.getEffectiveDepartureAt();
         DeliveryPhase phase = DeliveryPhase.BASE;
@@ -176,9 +175,8 @@ public class TransitScheduleService {
             plan = TransitScheduleCalculator.conservative(segments, candidates, type);
         }
         departure = plan.departure();
-        int offset = type == NotificationScheduleType.FIRST_TRANSIT
-                ? n.getReminderOffsetMinutesList().stream().max(Integer::compareTo).orElse(0)
-                : n.getReminderOffsetMinutes();
+        int offset = n.getReminderOffsetMinutesList().stream()
+                .max(Integer::compareTo).orElse(n.getReminderOffsetMinutes());
         LocalDateTime scheduled = departure.minusMinutes(offset);
         int duration = plan.durationMinutes();
         LocalDateTime start = scheduled.minusMinutes(Math.max(15, Math.min(60, duration)));
@@ -202,9 +200,8 @@ public class TransitScheduleService {
             }
             var fallback = TransitScheduleCalculator.conservative(route.getSegments(), bounds, type);
             LocalDateTime departure = fallback.departure();
-            int offset = type == NotificationScheduleType.FIRST_TRANSIT
-                    ? n.getReminderOffsetMinutesList().stream().max(Integer::compareTo).orElse(0)
-                    : n.getReminderOffsetMinutes();
+            int offset = n.getReminderOffsetMinutesList().stream()
+                    .max(Integer::compareTo).orElse(n.getReminderOffsetMinutes());
             LocalDateTime scheduled = departure.minusMinutes(offset);
             var snapshot = new ScheduleSnapshot(n, date, type, hash, departure, scheduled,
                     scheduled.minusMinutes(Math.max(60, prefix)), LocalDateTime.now(ZoneOffset.UTC), fallback.durationMinutes());
@@ -215,9 +212,8 @@ public class TransitScheduleService {
         LocalDateTime boarding = type == NotificationScheduleType.FIRST_TRANSIT ? times.first() : times.last();
         var plan = TransitScheduleCalculator.calculate(route.getSegments(), List.of(boarding), type);
         LocalDateTime departure = plan.departure();
-        int offset = type == NotificationScheduleType.FIRST_TRANSIT
-                ? n.getReminderOffsetMinutesList().stream().max(Integer::compareTo).orElse(0)
-                : n.getReminderOffsetMinutes();
+        int offset = n.getReminderOffsetMinutesList().stream()
+                .max(Integer::compareTo).orElse(n.getReminderOffsetMinutes());
         LocalDateTime scheduled = departure.minusMinutes(offset);
         ScheduleSnapshot snapshot = new ScheduleSnapshot(n, date, type, hash, departure, scheduled,
                 scheduled, LocalDateTime.now(ZoneOffset.UTC), plan.durationMinutes());
