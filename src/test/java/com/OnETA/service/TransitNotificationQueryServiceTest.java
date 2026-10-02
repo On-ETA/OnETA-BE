@@ -49,7 +49,10 @@ class TransitNotificationQueryServiceTest {
         assertThat(responses).extracting(TransitNotificationDto.Response::getNotificationId)
                 .containsExactly(2L, 1L);
         assertThat(responses.get(0).getScheduleType()).isEqualTo(NotificationScheduleType.FIRST_TRANSIT);
-        assertThat(responses.get(0).getRemainingSeconds()).isEqualTo(-300L);
+        assertThat(responses.get(0).getEstimatedDepartureAt()).isNull();
+        assertThat(responses.get(0).getRemainingSeconds()).isNull();
+        assertThat(responses.get(0).getEstimateStatus()).isEqualTo(TransitNotificationDto.EstimateStatus.UNAVAILABLE);
+        assertThat(responses.get(0).getEstimateErrorCode()).isEqualTo("T006");
         assertThat(responses.get(1).getScheduleType()).isEqualTo(NotificationScheduleType.LAST_TRANSIT);
         assertThat(responses.get(1).getEstimatedDepartureAt())
                 .isEqualTo(OffsetDateTime.parse("2026-09-28T00:10:00+09:00"));

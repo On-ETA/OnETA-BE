@@ -86,6 +86,10 @@ public class TransitNotificationQueryService {
         try {
             var departure = schedules.estimateDeparture(notification, now.toLocalDateTime(), ZoneId.of(timeZone))
                     .atZone(ZoneId.of(timeZone)).toOffsetDateTime();
+            if (!departure.toInstant().isAfter(now.toInstant())) {
+                return result.estimateStatus(TransitNotificationDto.EstimateStatus.UNAVAILABLE)
+                        .estimateErrorCode(ErrorCode.TRANSIT_SCHEDULE_UNAVAILABLE.getCode()).build();
+            }
             return result.estimatedDepartureAt(departure)
                     .remainingSeconds(Duration.between(now.toInstant(), departure.toInstant()).getSeconds())
                     .estimateStatus(TransitNotificationDto.EstimateStatus.ESTIMATED).build();
