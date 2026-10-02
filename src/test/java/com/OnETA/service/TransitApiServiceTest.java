@@ -157,4 +157,26 @@ class TransitApiServiceTest {
 
         assertThat(duration).isEqualTo(35);
     }
+
+    @Test
+    void scheduleCandidateSearchCanReturnFiveRoutesWithoutRealtimeEnrichment() {
+        PublicDataTransitService realtime = mock(PublicDataTransitService.class);
+        ObjectMapper mapper = new ObjectMapper();
+        RestTemplate http = new RestTemplate();
+        MockRestServiceServer server = MockRestServiceServer.bindTo(http).build();
+        TransitApiService service = new TransitApiService(realtime, mapper, http);
+        ReflectionTestUtils.setField(service, "odsayApiKey", "test");
+        ReflectionTestUtils.setField(service, "odsayApiUrl", "https://api.odsay.com/v1/api/searchPubTransPathR");
+
+        String path = "{\"info\":{\"totalTime\":5,\"payment\":0,\"transitCount\":0},"
+                + "\"subPath\":[{\"trafficType\":3,\"sectionTime\":5}]}";
+        String body = "{\"result\":{\"path\":[" + String.join(",", path, path, path, path, path, path) + "]}}";
+        server.expect(requestTo(org.hamcrest.Matchers.containsString("searchPubTransPathR")))
+                .andRespond(withSuccess(body, MediaType.APPLICATION_JSON));
+
+        assertThat(service.searchScheduleCandidates(127.0, 37.5, 127.1, 37.6, 5)).hasSize(5);
+        verifyNoInteractions(realtime);
+        server.verify();
+    }
+
 }
