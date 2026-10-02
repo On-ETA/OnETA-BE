@@ -184,72 +184,145 @@ public class TransitScheduleService {
     private ScheduleSnapshot buildSnapshot(ArrivalNotification n, LocalDate date,
                                              NotificationScheduleType type, String hash, ZoneId zone) {
         TransitDto.RouteOptionResponse route = transitApiService.readSavedRoute(n.getRouteDetails());
-        if (SeoulBusScheduleService.isKakao(route)) return createSeoulSnapshot(n, route, date, type, hash);
-        List<TransitDto.RouteSegment> segments = route.getSegments() == null ? List.of() : route.getSegments();
-        LocalDateTime departure = date.atStartOfDay(zone).toLocalDateTime();
-        List<LocalDateTime> candidates = new ArrayList<>();
-            int prefix = 0;
-        for (TransitDto.RouteSegment s : segments) {
-            if ("BUS".equals(s.getTransitType()) || "SUBWAY".equals(s.getTransitType())) {
-                LocalDateTime service = serviceTime(s, type, date);
-                if (service == null) throw new com.OnETA.common.exception.GlobalException(
-                        com.OnETA.common.error.ErrorCode.TRANSIT_SCHEDULE_UNSUPPORTED);
-                candidates.add(service);
-            }
-            prefix += Math.max(0, s.getDurationMinutes() == null ? 0 : s.getDurationMinutes());
-        }
-        if (candidates.isEmpty()) throw new IllegalStateException("운행정보가 있는 transit segment가 없습니다.");
-        TransitScheduleCalculator.Plan plan;
-        try { plan = TransitScheduleCalculator.calculate(segments, candidates, type); }
-        catch (com.OnETA.common.exception.GlobalException e) {
-            if (e.getErrorCode() != com.OnETA.common.error.ErrorCode.TRANSIT_CONNECTION_UNVERIFIED) throw e;
-            plan = TransitScheduleCalculator.conservative(segments, candidates, type);
-        }
-        departure = plan.departure();
+        RouteSchedulePlan plan = calculateRoutePlan(route, type, date, null);
         int offset = n.getReminderOffsetMinutesList().stream()
                 .max(Integer::compareTo).orElse(n.getReminderOffsetMinutes());
-        LocalDateTime scheduled = departure.minusMinutes(offset);
-        int duration = plan.durationMinutes();
-        LocalDateTime start = scheduled.minusMinutes(Math.max(15, Math.min(60, duration)));
-        return new ScheduleSnapshot(n, date, type, hash, departure, scheduled, start,
-                LocalDateTime.now(ZoneOffset.UTC), duration);
+        LocalDateTime scheduled = plan.departure().minusMinutes(offset);
+        LocalDateTime evaluationStart = scheduled.minusMinutes(plan.evaluationLeadMinutes());
+        ScheduleSnapshot snapshot = new ScheduleSnapshot(n, date, type, hash, plan.departure(), scheduled,
+                evaluationStart, LocalDateTime.now(ZoneOffset.UTC), plan.durationMinutes());
+        if ("SEOUL_BUS".equals(plan.source())) {
+            snapshot.useSeoulBusSource();
+        } else if ("SEOUL_BUS_TRANSFER".equals(plan.source())) {
+            snapshot.useSeoulTransferSource(plan.providerDetails());
+        }
+        return snapshot;
     }
 
-    private ScheduleSnapshot createSeoulSnapshot(ArrivalNotification n, TransitDto.RouteOptionResponse route,
-                                                 LocalDate date, NotificationScheduleType type, String hash) {
-        long rides = route.getSegments().stream().filter(s -> !"WALK".equals(s.getTransitType())).count();
-        if (rides > 1 || route.getSegments().stream().anyMatch(s -> "SUBWAY".equals(s.getTransitType()))) {
-            var times = seoulBusScheduleService.resolveRoute(route, date);
-            List<LocalDateTime> bounds = new ArrayList<>();
-            int prefix = 0, ride = 0;
-            for (var segment : route.getSegments()) {
-                if (!"WALK".equals(segment.getTransitType())) {
-                    var time = times.get(ride++);
-                    bounds.add(type == NotificationScheduleType.FIRST_TRANSIT ? time.first() : time.last());
-                }
-                prefix += segment.getDurationMinutes();
-            }
-            var fallback = TransitScheduleCalculator.conservative(route.getSegments(), bounds, type);
-            LocalDateTime departure = fallback.departure();
-            int offset = n.getReminderOffsetMinutesList().stream()
-                    .max(Integer::compareTo).orElse(n.getReminderOffsetMinutes());
-            LocalDateTime scheduled = departure.minusMinutes(offset);
-            var snapshot = new ScheduleSnapshot(n, date, type, hash, departure, scheduled,
-                    scheduled.minusMinutes(Math.max(60, prefix)), LocalDateTime.now(ZoneOffset.UTC), fallback.durationMinutes());
-            snapshot.useSeoulTransferSource(objectMapper.writeValueAsString(times));
-            return snapshot;
+    private RouteSchedulePlan calculateRoutePlan(TransitDto.RouteOptionResponse route,
+                                                  NotificationScheduleType type,
+                                                  LocalDate date,
+                                                  Map<String, LocalDateTime> scheduleCache) {
+        if (route == null || route.getSegments() == null || route.getSegments().isEmpty()) {
+            throw new com.OnETA.common.exception.GlobalException(
+                    com.OnETA.common.error.ErrorCode.TRANSIT_SCHEDULE_UNSUPPORTED);
         }
-        var times = seoulBusScheduleService.resolve(route, date);
-        LocalDateTime boarding = type == NotificationScheduleType.FIRST_TRANSIT ? times.first() : times.last();
-        var plan = TransitScheduleCalculator.calculate(route.getSegments(), List.of(boarding), type);
-        LocalDateTime departure = plan.departure();
-        int offset = n.getReminderOffsetMinutesList().stream()
-                .max(Integer::compareTo).orElse(n.getReminderOffsetMinutes());
-        LocalDateTime scheduled = departure.minusMinutes(offset);
-        ScheduleSnapshot snapshot = new ScheduleSnapshot(n, date, type, hash, departure, scheduled,
-                scheduled, LocalDateTime.now(ZoneOffset.UTC), plan.durationMinutes());
-        snapshot.useSeoulBusSource();
-        return snapshot;
+
+        if (SeoulBusScheduleService.isKakao(route)) {
+            long rides = route.getSegments().stream().filter(s -> !"WALK".equals(s.getTransitType())).count();
+            if (rides > 1 || route.getSegments().stream().anyMatch(s -> "SUBWAY".equals(s.getTransitType()))) {
+                var times = seoulBusScheduleService.resolveRoute(route, date);
+                List<LocalDateTime> bounds = new ArrayList<>();
+                int prefix = 0, ride = 0;
+                for (var segment : route.getSegments()) {
+                    if (!"WALK".equals(segment.getTransitType())) {
+                        var time = times.get(ride++);
+                        bounds.add(type == NotificationScheduleType.FIRST_TRANSIT ? time.first() : time.last());
+                    }
+                    prefix += Math.max(0, segment.getDurationMinutes() == null ? 0 : segment.getDurationMinutes());
+                }
+                var plan = TransitScheduleCalculator.conservative(route.getSegments(), bounds, type);
+                return new RouteSchedulePlan(plan.departure(), plan.durationMinutes(),
+                        "SEOUL_BUS_TRANSFER", objectMapper.writeValueAsString(times), Math.max(60, prefix));
+            }
+
+            var times = seoulBusScheduleService.resolve(route, date);
+            LocalDateTime boarding = type == NotificationScheduleType.FIRST_TRANSIT ? times.first() : times.last();
+            var plan = TransitScheduleCalculator.calculate(route.getSegments(), List.of(boarding), type);
+            return new RouteSchedulePlan(plan.departure(), plan.durationMinutes(), "SEOUL_BUS", null, 0);
+        }
+
+        List<TransitDto.RouteSegment> segments = route.getSegments();
+        List<LocalDateTime> candidates = new ArrayList<>();
+        for (TransitDto.RouteSegment segment : segments) {
+            if ("BUS".equals(segment.getTransitType()) || "SUBWAY".equals(segment.getTransitType())) {
+                LocalDateTime service = serviceTimeCached(segment, type, date, scheduleCache);
+                if (service == null) {
+                    throw new com.OnETA.common.exception.GlobalException(
+                            com.OnETA.common.error.ErrorCode.TRANSIT_SCHEDULE_UNSUPPORTED);
+                }
+                candidates.add(service);
+            }
+        }
+        if (candidates.isEmpty()) {
+            throw new com.OnETA.common.exception.GlobalException(
+                    com.OnETA.common.error.ErrorCode.TRANSIT_SCHEDULE_UNSUPPORTED);
+        }
+
+        TransitScheduleCalculator.Plan plan;
+        try {
+            plan = TransitScheduleCalculator.calculate(segments, candidates, type);
+        } catch (com.OnETA.common.exception.GlobalException ex) {
+            if (ex.getErrorCode() != com.OnETA.common.error.ErrorCode.TRANSIT_CONNECTION_UNVERIFIED) throw ex;
+            plan = TransitScheduleCalculator.conservative(segments, candidates, type);
+        }
+        int lead = Math.max(15, Math.min(60, plan.durationMinutes()));
+        return new RouteSchedulePlan(plan.departure(), plan.durationMinutes(), "ODSAY", null, lead);
+    }
+
+    public LocalDateTime previewDepartureForServiceDate(TransitDto.RouteOptionResponse route,
+                                                        NotificationScheduleType type,
+                                                        LocalDate serviceDate,
+                                                        Map<String, LocalDateTime> scheduleCache) {
+        if (type != NotificationScheduleType.FIRST_TRANSIT
+                && type != NotificationScheduleType.LAST_TRANSIT) {
+            throw new com.OnETA.common.exception.GlobalException(
+                    com.OnETA.common.error.ErrorCode.INVALID_INPUT_VALUE);
+        }
+        try {
+            return calculateRoutePlan(route, type, serviceDate, scheduleCache).departure();
+        } catch (com.OnETA.common.exception.GlobalException e) {
+            throw e;
+        } catch (RuntimeException e) {
+            throw new com.OnETA.common.exception.GlobalException(
+                    com.OnETA.common.error.ErrorCode.TRANSIT_SCHEDULE_UNAVAILABLE);
+        }
+    }
+
+    public LocalDateTime previewNextDeparture(TransitDto.RouteOptionResponse route,
+                                              NotificationScheduleType type,
+                                              LocalDateTime now,
+                                              ZoneId zone) {
+        return previewNextDeparture(route, type, now, zone, new HashMap<>());
+    }
+
+    public LocalDateTime previewNextDeparture(TransitDto.RouteOptionResponse route,
+                                              NotificationScheduleType type,
+                                              LocalDateTime now,
+                                              ZoneId zone,
+                                              Map<String, LocalDateTime> scheduleCache) {
+        if (type != NotificationScheduleType.FIRST_TRANSIT
+                && type != NotificationScheduleType.LAST_TRANSIT) {
+            throw new com.OnETA.common.exception.GlobalException(
+                    com.OnETA.common.error.ErrorCode.INVALID_INPUT_VALUE);
+        }
+        com.OnETA.common.exception.GlobalException unavailable = null;
+        com.OnETA.common.exception.GlobalException unsupported = null;
+        LocalDate today = now.toLocalDate();
+
+        for (LocalDate day = today; !day.isAfter(today.plusDays(1)); day = day.plusDays(1)) {
+            try {
+                RouteSchedulePlan plan = calculateRoutePlan(route, type, day, scheduleCache);
+                if (plan.departure().isAfter(now)) return plan.departure();
+            } catch (com.OnETA.common.exception.GlobalException ex) {
+                if (ex.getErrorCode() == com.OnETA.common.error.ErrorCode.TRANSIT_SCHEDULE_UNAVAILABLE) {
+                    unavailable = ex;
+                } else if (ex.getErrorCode() == com.OnETA.common.error.ErrorCode.TRANSIT_SCHEDULE_UNSUPPORTED
+                        || ex.getErrorCode() == com.OnETA.common.error.ErrorCode.TRANSIT_CONNECTION_UNVERIFIED) {
+                    unsupported = ex;
+                } else {
+                    throw ex;
+                }
+            } catch (RuntimeException ex) {
+                unavailable = new com.OnETA.common.exception.GlobalException(
+                        com.OnETA.common.error.ErrorCode.TRANSIT_SCHEDULE_UNAVAILABLE);
+            }
+        }
+
+        if (unavailable != null) throw unavailable;
+        if (unsupported != null) throw unsupported;
+        throw new com.OnETA.common.exception.GlobalException(
+                com.OnETA.common.error.ErrorCode.TRANSIT_SCHEDULE_UNSUPPORTED);
     }
 
     /** Read-only display estimate: never runs realtime polling, recovery, or delivery creation. */
@@ -390,6 +463,31 @@ public class TransitScheduleService {
         return null;
     }
 
+    private LocalDateTime serviceTimeCached(TransitDto.RouteSegment segment,
+                                            NotificationScheduleType type,
+                                            LocalDate serviceDate,
+                                            Map<String, LocalDateTime> scheduleCache) {
+        if (scheduleCache == null) return serviceTime(segment, type, serviceDate);
+        String key = type + "|" + serviceDate + "|" + segment.getTransitType() + "|"
+                + Objects.toString(segment.getOdsayStartStationId(), "") + "|"
+                + Objects.toString(segment.getOdsayEndStationId(), "") + "|"
+                + Objects.toString(segment.getOdsayRouteId(), "") + "|"
+                + Objects.toString(segment.getLocalRouteId(), "");
+        LocalDateTime cached = scheduleCache.get(key);
+        if (cached != null) return cached;
+        LocalDateTime resolved = serviceTime(segment, type, serviceDate);
+        if (resolved != null) scheduleCache.put(key, resolved);
+        return resolved;
+    }
+
+    private String odsayDay(LocalDate serviceDate) {
+        return switch (serviceDate.getDayOfWeek()) {
+            case SATURDAY -> "2";
+            case SUNDAY -> "3";
+            default -> "1";
+        };
+    }
+
     private LocalDateTime serviceTime(TransitDto.RouteSegment s, NotificationScheduleType type, LocalDate serviceDate) {
         if ("BUS".equals(s.getTransitType())) {
             JsonNode response = request("/busStationInfo", Map.of("stationID", s.getOdsayStartStationId()));
@@ -424,7 +522,8 @@ public class TransitScheduleService {
             try {
                 JsonNode root = request("/subwayPathSchedule", Map.of(
                         "SID", s.getOdsayStartStationId(), "EID", s.getOdsayEndStationId(),
-                        "MODE", type == NotificationScheduleType.FIRST_TRANSIT ? "3" : "4", "DAY", "1"));
+                        "MODE", type == NotificationScheduleType.FIRST_TRANSIT ? "3" : "4",
+                        "DAY", odsayDay(serviceDate)));
                 ensureNoOdsayError(root);
                 return findTime(root, type == NotificationScheduleType.FIRST_TRANSIT, serviceDate);
             } catch (OdsayQuotaExceededException quota) {
@@ -587,5 +686,7 @@ public class TransitScheduleService {
     private boolean same(JsonNode n, String value) { return value != null && !n.isMissingNode() && value.equals(n.asText()); }
     private String hash(String v) { try { return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(((SeoulBusScheduleService.isKakao(transitApiService.readSavedRoute(v)) ? "schedule-v3:" : "schedule-v4:") + (v==null?"":v)).getBytes(StandardCharsets.UTF_8))); } catch(Exception e){throw new IllegalStateException(e);} }
     public record Decision(LocalDateTime scheduledAt, LocalDateTime hardDeadlineAt, DeliveryPhase phase, LocalDateTime baseDepartureAt, LocalDateTime effectiveDepartureAt, boolean recovery, int estimatedDuration) {}
+    private record RouteSchedulePlan(LocalDateTime departure, int durationMinutes, String source,
+                                     String providerDetails, int evaluationLeadMinutes) {}
     private record RecoveryCandidate(LocalDateTime boardingAt, LocalDateTime scheduledAt) {}
 }

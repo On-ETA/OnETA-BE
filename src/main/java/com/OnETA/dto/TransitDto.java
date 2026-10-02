@@ -7,6 +7,8 @@ import lombok.NoArgsConstructor;
 import lombok.Setter;
 
 import java.util.List;
+import java.time.OffsetDateTime;
+import com.OnETA.entity.NotificationScheduleType;
 
 public class TransitDto {
 
@@ -36,6 +38,17 @@ public class TransitDto {
         private Integer totalCost;
         private Integer transferCount;
         private List<RouteSegment> segments;
+    }
+
+    @Getter
+    @Setter
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class FirstLastRouteOptionResponse {
+        private RouteOptionResponse route;
+        private NotificationScheduleType scheduleType;
+        private OffsetDateTime estimatedDepartureAt;
     }
 
     @Getter

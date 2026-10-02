@@ -134,10 +134,21 @@ public class TransitApiService {
 
     public List<TransitDto.RouteOptionResponse> searchRoutes(
             Double originX, Double originY, Double destX, Double destY) {
+        return searchRoutes(originX, originY, destX, destY, 3, true);
+    }
 
+    public List<TransitDto.RouteOptionResponse> searchScheduleCandidates(
+            Double originX, Double originY, Double destX, Double destY, int maxCandidates) {
+        return searchRoutes(originX, originY, destX, destY, maxCandidates, false);
+    }
+
+    private List<TransitDto.RouteOptionResponse> searchRoutes(
+            Double originX, Double originY, Double destX, Double destY,
+            int maxCandidates, boolean enrichRealtime) {
         validateCoordinates(originX, originY, destX, destY);
+        int limit = Math.max(1, Math.min(maxCandidates, 10));
         try {
-            return searchOdsayRoutes(originX, originY, destX, destY);
+            return searchOdsayRoutes(originX, originY, destX, destY, limit, enrichRealtime);
         } catch (GlobalException e) {
             if (e.getErrorCode() == ErrorCode.INVALID_INPUT_VALUE
                     || kakaoTransitClient == null || !kakaoTransitClient.isConfigured()) throw e;
@@ -147,7 +158,8 @@ public class TransitApiService {
     }
 
     private List<TransitDto.RouteOptionResponse> searchOdsayRoutes(
-            Double originX, Double originY, Double destX, Double destY) {
+            Double originX, Double originY, Double destX, Double destY,
+            int maxCandidates, boolean enrichRealtime) {
         if (odsayApiKey == null || odsayApiKey.isBlank()) {
             throw new GlobalException(ErrorCode.TRANSIT_API_UNAVAILABLE);
         }
@@ -172,9 +184,11 @@ public class TransitApiService {
             com.OnETA.common.ExternalApiCallCounter.record("ODSAY", "searchPubTransPathR");
             ResponseEntity<String> response = restTemplate.exchange(
                     uri, HttpMethod.GET, new HttpEntity<>(headers), String.class);
-            return parseOdsayResponse(response.getBody()).stream()
-                    .map(this::enrichWithRealTimeArrivals)
-                    .toList();
+            List<TransitDto.RouteOptionResponse> routes =
+                    parseOdsayResponse(response.getBody(), maxCandidates);
+            return enrichRealtime
+                    ? routes.stream().map(this::enrichWithRealTimeArrivals).toList()
+                    : routes;
         } catch (GlobalException e) {
             throw e;
         } catch (Exception e) {
@@ -199,6 +213,28 @@ public class TransitApiService {
         final String resolvedOriginAddress = normalizeAddressText(originAddress);
         final String resolvedDestinationAddress = normalizeAddressText(destAddress);
         return searchRoutes(originX, originY, destX, destY).stream()
+                .map(route -> route.toBuilder()
+                        .originAddress(resolvedOriginAddress)
+                        .destinationAddress(resolvedDestinationAddress)
+                        .build())
+                .toList();
+    }
+
+    public List<TransitDto.RouteOptionResponse> searchScheduleCandidates(
+            String email, Double originX, Double originY, String originAddress,
+            Double destX, Double destY, String destAddress, int maxCandidates) {
+        if ((destX == null) != (destY == null)) {
+            throw new GlobalException(ErrorCode.INVALID_INPUT_VALUE, "목적지 x, y 좌표는 함께 입력해주세요.");
+        }
+        if (destX == null) {
+            com.OnETA.entity.UserAddress currentAddress = userAddressService.getCurrentEntity(email);
+            destX = currentAddress.getX();
+            destY = currentAddress.getY();
+            destAddress = currentAddress.getAddress();
+        }
+        final String resolvedOriginAddress = normalizeAddressText(originAddress);
+        final String resolvedDestinationAddress = normalizeAddressText(destAddress);
+        return searchScheduleCandidates(originX, originY, destX, destY, maxCandidates).stream()
                 .map(route -> route.toBuilder()
                         .originAddress(resolvedOriginAddress)
                         .destinationAddress(resolvedDestinationAddress)
@@ -278,6 +314,10 @@ public class TransitApiService {
     }
 
     private List<TransitDto.RouteOptionResponse> parseOdsayResponse(String jsonString) {
+        return parseOdsayResponse(jsonString, 3);
+    }
+
+    private List<TransitDto.RouteOptionResponse> parseOdsayResponse(String jsonString, int maxCandidates) {
         try {
             JsonNode root = objectMapper.readTree(jsonString);
             if (root == null || !root.isObject()) {
@@ -368,7 +408,7 @@ public class TransitApiService {
                         .segments(segments)
                         .build());
 
-                if (results.size() >= 3) {
+                if (results.size() >= Math.max(1, Math.min(maxCandidates, 10))) {
                     break;
                 }
             }
