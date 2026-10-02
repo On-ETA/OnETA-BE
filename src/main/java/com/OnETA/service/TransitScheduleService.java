@@ -146,8 +146,8 @@ public class TransitScheduleService {
     }
 
     @Transactional(readOnly = true)
-    public boolean shouldCompleteExpiredOneTime(ArrivalNotification notification, LocalDate serviceDate,
-                                                LocalDateTime now) {
+    public boolean shouldAdvanceToNextServiceDay(ArrivalNotification notification, LocalDate serviceDate,
+                                                 LocalDateTime now) {
         if (notification.getRepeatDays() != null && notification.getRepeatDays() != 0) return false;
 
         String routeHash = hash(notification.getRouteDetails());
@@ -257,31 +257,32 @@ public class TransitScheduleService {
         String routeHash = hash(notification.getRouteDetails());
         var type = notification.getScheduleType();
 
-        // A persisted snapshot may be reused only while its effective departure is still future.
-        // Never expose a past departure as a current estimate, and never roll an expired one-time
-        // setting forward to the next service day.
+        // Reuse a persisted snapshot only while it is still in the future. If the latest
+        // service-day snapshot has already passed but the setting is still active, preview the
+        // next service day instead of returning a stale time or deactivating the setting.
         var saved = snapshotRepository
                 .findFirstByNotificationIdAndScheduleTypeAndRouteHashOrderByServiceDateDesc(
                         notification.getId(), type, routeHash);
+        LocalDate today = now.toLocalDate();
+        LocalDate startDay = today;
         if (saved.isPresent()) {
             LocalDateTime departure = saved.get().getEffectiveDepartureAt();
             if (departure.isAfter(now)) {
                 return departure;
             }
-            throw new com.OnETA.common.exception.GlobalException(
-                    com.OnETA.common.error.ErrorCode.TRANSIT_SCHEDULE_UNAVAILABLE);
+            startDay = saved.get().getServiceDate().plusDays(1);
+            if (startDay.isBefore(today)) startDay = today;
         }
 
-        // An inactive one-time notification without a persisted calculation must not be shifted
-        // to a future service day and presented as a new estimate.
+        // A setting that was actually completed by the delivery pipeline must not be rolled
+        // forward. Missing FCM tokens do not complete a setting, so those remain active.
         if (Boolean.FALSE.equals(notification.getIsActive())) {
             throw new com.OnETA.common.exception.GlobalException(
                     com.OnETA.common.error.ErrorCode.TRANSIT_SCHEDULE_UNAVAILABLE);
         }
 
-        // Before the scheduler has persisted a snapshot, preview today or the next service day.
-        LocalDate today = now.toLocalDate();
-        for (LocalDate day = today; !day.isAfter(today.plusDays(1)); day = day.plusDays(1)) {
+        LocalDate endDay = today.plusDays(1);
+        for (LocalDate day = startDay; !day.isAfter(endDay); day = day.plusDays(1)) {
             ScheduleSnapshot snapshot = buildSnapshot(notification, day, type, routeHash, zone);
             LocalDateTime departure = snapshot.getEffectiveDepartureAt();
             if (departure.isAfter(now)) {
