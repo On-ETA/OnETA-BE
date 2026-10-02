@@ -67,6 +67,7 @@ class NotificationDeliveryServiceTest {
 
         ArrivalNotification notification = mock(ArrivalNotification.class);
         when(notification.getRepeatDays()).thenReturn(21);
+        when(notification.getIsActive()).thenReturn(true);
         NotificationDelivery delivery = new NotificationDelivery(
                 notification, LocalDate.of(2026, 8, 10), "token", "title", "body",
                 java.time.LocalDateTime.of(2026, 8, 10, 9, 0),
