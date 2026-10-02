@@ -14,7 +14,7 @@ import org.springframework.web.bind.annotation.*;
 import java.security.Principal;
 import java.util.List;
 
-/** Schedule lists and a single replaceable first/last transit setting per user. */
+/** Schedule lists and independently replaceable first/last transit settings per user. */
 @RestController
 @RequestMapping("/api/notifications")
 @RequiredArgsConstructor
@@ -46,8 +46,8 @@ public class ScheduleNotificationController {
     }
 
     @GetMapping("/transit")
-    public ApiResponse<TransitNotificationDto.Response> transit(Principal principal) {
-        return ApiResponse.success(transitQueries.getCurrentNotification(email(principal)));
+    public ApiResponse<List<TransitNotificationDto.Response>> transit(Principal principal) {
+        return ApiResponse.success(transitQueries.getCurrentNotifications(email(principal)));
     }
 
     @DeleteMapping("/transit")
