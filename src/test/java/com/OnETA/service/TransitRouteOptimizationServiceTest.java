@@ -26,11 +26,11 @@ class TransitRouteOptimizationServiceTest {
         var c = route("C", "ODSAY", 20);
         when(api.searchScheduleCandidates(anyString(), anyDouble(), anyDouble(), any(), anyDouble(), anyDouble(), any(), eq(5)))
                 .thenReturn(List.of(a, b, c));
-        when(schedules.previewDepartureForServiceDate(eq(a), eq(NotificationScheduleType.LAST_TRANSIT), any(), any(), anyMap()))
+        when(schedules.previewDepartureForServiceDate(eq(a), eq(NotificationScheduleType.LAST_TRANSIT), any(), anyMap()))
                 .thenReturn(LocalDateTime.of(2026, 10, 2, 23, 10));
-        when(schedules.previewDepartureForServiceDate(eq(b), eq(NotificationScheduleType.LAST_TRANSIT), any(), any(), anyMap()))
+        when(schedules.previewDepartureForServiceDate(eq(b), eq(NotificationScheduleType.LAST_TRANSIT), any(), anyMap()))
                 .thenReturn(LocalDateTime.of(2026, 10, 2, 23, 35));
-        when(schedules.previewDepartureForServiceDate(eq(c), eq(NotificationScheduleType.LAST_TRANSIT), any(), any(), anyMap()))
+        when(schedules.previewDepartureForServiceDate(eq(c), eq(NotificationScheduleType.LAST_TRANSIT), any(), anyMap()))
                 .thenReturn(LocalDateTime.of(2026, 10, 2, 23, 20));
 
         var result = service.search("user@test.com", 126.8, 37.5, "출발",
@@ -51,11 +51,11 @@ class TransitRouteOptimizationServiceTest {
         var late = route("LATE", "ODSAY", 20);
         when(api.searchScheduleCandidates(anyString(), anyDouble(), anyDouble(), any(), anyDouble(), anyDouble(), any(), eq(5)))
                 .thenReturn(List.of(unsupported, late, early));
-        when(schedules.previewDepartureForServiceDate(eq(unsupported), eq(NotificationScheduleType.FIRST_TRANSIT), any(), any(), anyMap()))
+        when(schedules.previewDepartureForServiceDate(eq(unsupported), eq(NotificationScheduleType.FIRST_TRANSIT), any(), anyMap()))
                 .thenThrow(new GlobalException(ErrorCode.TRANSIT_SCHEDULE_UNSUPPORTED));
-        when(schedules.previewDepartureForServiceDate(eq(early), eq(NotificationScheduleType.FIRST_TRANSIT), any(), any(), anyMap()))
+        when(schedules.previewDepartureForServiceDate(eq(early), eq(NotificationScheduleType.FIRST_TRANSIT), any(), anyMap()))
                 .thenReturn(LocalDateTime.of(2026, 10, 3, 5, 10));
-        when(schedules.previewDepartureForServiceDate(eq(late), eq(NotificationScheduleType.FIRST_TRANSIT), any(), any(), anyMap()))
+        when(schedules.previewDepartureForServiceDate(eq(late), eq(NotificationScheduleType.FIRST_TRANSIT), any(), anyMap()))
                 .thenReturn(LocalDateTime.of(2026, 10, 3, 5, 30));
 
         var result = service.search("user@test.com", 126.8, 37.5, null,
@@ -74,9 +74,9 @@ class TransitRouteOptimizationServiceTest {
         var unavailable = route("Y", "ODSAY", 10);
         when(api.searchScheduleCandidates(anyString(), anyDouble(), anyDouble(), any(), anyDouble(), anyDouble(), any(), eq(5)))
                 .thenReturn(List.of(unsupported, unavailable));
-        when(schedules.previewDepartureForServiceDate(eq(unsupported), any(), any(), any(), anyMap()))
+        when(schedules.previewDepartureForServiceDate(eq(unsupported), any(), any(), anyMap()))
                 .thenThrow(new GlobalException(ErrorCode.TRANSIT_SCHEDULE_UNSUPPORTED));
-        when(schedules.previewDepartureForServiceDate(eq(unavailable), any(), any(), any(), anyMap()))
+        when(schedules.previewDepartureForServiceDate(eq(unavailable), any(), any(), anyMap()))
                 .thenThrow(new GlobalException(ErrorCode.TRANSIT_SCHEDULE_UNAVAILABLE));
 
         assertThatThrownBy(() -> service.search("user@test.com", 126.8, 37.5, null,
