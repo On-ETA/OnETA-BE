@@ -57,6 +57,34 @@ class NotificationDeliveryServiceTest {
     }
 
     @Test
+    void missingFcmTokenDoesNotCompleteOrDeactivateTransitSetting() {
+        NotificationDeliveryRepository deliveries = mock(NotificationDeliveryRepository.class);
+        ArrivalNotificationRepository notifications = mock(ArrivalNotificationRepository.class);
+        UserDeviceTokenRepository tokens = mock(UserDeviceTokenRepository.class);
+        User user = mock(User.class);
+        when(user.getId()).thenReturn(1L);
+        when(tokens.findByUserId(1L)).thenReturn(Optional.empty());
+        ArrivalNotification notification = mock(ArrivalNotification.class);
+        when(notification.getId()).thenReturn(10L);
+        when(notification.getUser()).thenReturn(user);
+        when(notification.getName()).thenReturn("막차 알림");
+
+        NotificationDeliveryService service = new NotificationDeliveryService(
+                deliveries, notifications, tokens, mock(FcmPushService.class),
+                mock(PlatformTransactionManager.class), retryProperties(),
+                mock(ScheduledExecutorService.class), new Semaphore(4));
+
+        boolean created = service.prepare(notification, 30, LocalDate.of(2026, 10, 2),
+                LocalDateTime.of(2026, 10, 3, 0, 16), 5,
+                LocalDateTime.of(2026, 10, 3, 0, 21), DeliveryPhase.BASE);
+
+        assertThat(created).isFalse();
+        verify(deliveries, never()).save(any());
+        verify(notification, never()).completeOneTimeNotification();
+        verify(notification, never()).toggleActive(false);
+    }
+
+    @Test
     void sentDeliveryIsNotDispatchedAgain() {
         NotificationDeliveryRepository deliveries = mock(NotificationDeliveryRepository.class);
         ArrivalNotificationRepository notifications = mock(ArrivalNotificationRepository.class);
