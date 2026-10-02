@@ -9,7 +9,9 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.time.Clock;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.LocalTime;
 import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -40,39 +42,66 @@ public class TransitRouteOptimizationService {
                 email, originX, originY, originAddress, destX, destY, destAddress, CANDIDATE_LIMIT);
         LocalDateTime now = LocalDateTime.now(clock.withZone(SEOUL));
         Map<String, LocalDateTime> scheduleCache = new HashMap<>();
-        List<Candidate> candidates = new ArrayList<>();
-        boolean unavailable = false;
-        boolean unsupported = false;
+        FailureState failures = new FailureState();
 
-        for (TransitDto.RouteOptionResponse route : routes) {
-            try {
-                LocalDateTime departure = transitScheduleService.previewNextDeparture(
-                        route, scheduleType, now, SEOUL, scheduleCache);
-                candidates.add(new Candidate(route, departure));
-            } catch (GlobalException e) {
-                if (e.getErrorCode() == ErrorCode.TRANSIT_SCHEDULE_UNAVAILABLE) {
-                    unavailable = true;
-                } else if (e.getErrorCode() == ErrorCode.TRANSIT_SCHEDULE_UNSUPPORTED
-                        || e.getErrorCode() == ErrorCode.TRANSIT_CONNECTION_UNVERIFIED) {
-                    unsupported = true;
-                } else {
-                    throw e;
-                }
-                log.debug("Skipping FIRST/LAST route candidate: routeId={}, provider={}, error={}",
-                        route.getRouteId(), route.getProvider(), e.getErrorCode().getCode());
-            } catch (RuntimeException e) {
-                unavailable = true;
-                log.warn("FIRST/LAST route candidate evaluation failed: routeId={}, provider={}, type={}",
-                        route.getRouteId(), route.getProvider(), e.getClass().getSimpleName());
+        List<LocalDate> serviceDays = new ArrayList<>();
+        if (scheduleType == NotificationScheduleType.LAST_TRANSIT
+                && now.toLocalTime().isBefore(LocalTime.of(4, 0))) {
+            serviceDays.add(now.toLocalDate().minusDays(1));
+        }
+        serviceDays.add(now.toLocalDate());
+        serviceDays.add(now.toLocalDate().plusDays(1));
+
+        for (LocalDate serviceDate : serviceDays) {
+            List<Candidate> futureCandidates = evaluateCandidates(
+                    routes, scheduleType, serviceDate, now, scheduleCache, failures);
+            if (!futureCandidates.isEmpty()) {
+                return rank(futureCandidates, scheduleType);
             }
         }
 
-        if (candidates.isEmpty()) {
-            if (unavailable) throw new GlobalException(ErrorCode.TRANSIT_SCHEDULE_UNAVAILABLE);
-            if (unsupported) throw new GlobalException(ErrorCode.TRANSIT_SCHEDULE_UNSUPPORTED);
-            throw new GlobalException(ErrorCode.TRANSIT_ROUTE_NOT_FOUND);
-        }
+        if (failures.unavailable) throw new GlobalException(ErrorCode.TRANSIT_SCHEDULE_UNAVAILABLE);
+        if (failures.unsupported) throw new GlobalException(ErrorCode.TRANSIT_SCHEDULE_UNSUPPORTED);
+        throw new GlobalException(ErrorCode.TRANSIT_ROUTE_NOT_FOUND);
+    }
 
+    private List<Candidate> evaluateCandidates(
+            List<TransitDto.RouteOptionResponse> routes,
+            NotificationScheduleType scheduleType,
+            LocalDate serviceDate,
+            LocalDateTime now,
+            Map<String, LocalDateTime> scheduleCache,
+            FailureState failures) {
+        List<Candidate> candidates = new ArrayList<>();
+        for (TransitDto.RouteOptionResponse route : routes) {
+            try {
+                LocalDateTime departure = transitScheduleService.previewDepartureForServiceDate(
+                        route, scheduleType, serviceDate, scheduleCache);
+                if (departure.isAfter(now)) {
+                    candidates.add(new Candidate(route, departure));
+                }
+            } catch (GlobalException e) {
+                if (e.getErrorCode() == ErrorCode.TRANSIT_SCHEDULE_UNAVAILABLE) {
+                    failures.unavailable = true;
+                } else if (e.getErrorCode() == ErrorCode.TRANSIT_SCHEDULE_UNSUPPORTED
+                        || e.getErrorCode() == ErrorCode.TRANSIT_CONNECTION_UNVERIFIED) {
+                    failures.unsupported = true;
+                } else {
+                    throw e;
+                }
+                log.debug("Skipping FIRST/LAST route candidate: routeId={}, provider={}, serviceDate={}, error={}",
+                        route.getRouteId(), route.getProvider(), serviceDate, e.getErrorCode().getCode());
+            } catch (RuntimeException e) {
+                failures.unavailable = true;
+                log.warn("FIRST/LAST route candidate evaluation failed: routeId={}, provider={}, serviceDate={}, type={}",
+                        route.getRouteId(), route.getProvider(), serviceDate, e.getClass().getSimpleName());
+            }
+        }
+        return candidates;
+    }
+
+    private List<TransitDto.FirstLastRouteOptionResponse> rank(
+            List<Candidate> candidates, NotificationScheduleType scheduleType) {
         Comparator<Candidate> order = Comparator.comparing(Candidate::departure);
         if (scheduleType == NotificationScheduleType.LAST_TRANSIT) order = order.reversed();
         order = order.thenComparing(candidate ->
@@ -96,6 +125,11 @@ public class TransitRouteOptimizationService {
             throw new GlobalException(ErrorCode.INVALID_INPUT_VALUE,
                     "FIRST_TRANSIT 또는 LAST_TRANSIT을 지정해주세요.");
         }
+    }
+
+    private static final class FailureState {
+        private boolean unavailable;
+        private boolean unsupported;
     }
 
     private record Candidate(TransitDto.RouteOptionResponse route, LocalDateTime departure) {}
