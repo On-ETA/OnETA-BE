@@ -29,8 +29,16 @@ jobs:
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
-      - name: Build
-        run: ./gradlew clean build -x test
+      - name: Validate first-last route optimization
+        run: |
+          ./gradlew clean test \
+            --tests "com.OnETA.service.TransitRouteOptimizationServiceTest" \
+            --tests "com.OnETA.service.TransitApiServiceTest" \
+            --tests "com.OnETA.service.KakaoTransitClientTest" \
+            --tests "com.OnETA.service.TransitScheduleServiceTest" \
+            --tests "com.OnETA.scheduler.FirstLastNotificationSchedulerTest" \
+            --tests "com.OnETA.service.NotificationDeliveryServiceTest"
+          ./gradlew build -x test
 
       - name: Copy JAR to EC2
         if: github.event_name == 'push'
