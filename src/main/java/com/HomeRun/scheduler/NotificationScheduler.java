@@ -161,12 +161,21 @@ public class NotificationScheduler {
             return;
         }
 
-        for (Integer offset : reminderOffsetsOf(notification)) {
+        List<Integer> offsets = reminderOffsetsOf(notification).stream().sorted().toList();
+        for (int i = 0; i < offsets.size(); i++) {
+            int offset = offsets.get(i);
             LocalDateTime scheduledAt = decision.hardDeadlineAt().minusMinutes(offset);
             if (scheduledAt.isAfter(now)) continue;
+
+            LocalDateTime reminderDeadline = i == 0
+                    ? decision.hardDeadlineAt()
+                    : decision.hardDeadlineAt().minusMinutes(offsets.get(i - 1));
+            if (!reminderDeadline.isAfter(now)) continue;
+
             notificationDeliveryService.prepare(
                     notification, decision.estimatedDuration(), today,
-                    toUtc(scheduledAt, zoneId), offset, deadlineUtc, decision.phase());
+                    toUtc(scheduledAt, zoneId), offset,
+                    toUtc(reminderDeadline, zoneId), decision.phase());
         }
     }
 

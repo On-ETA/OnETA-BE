@@ -71,7 +71,7 @@ class FirstLastNotificationSchedulerTest {
     }
 
     @Test
-    void baseTransitCreatesEachDueReminderWithMatchingOffset() {
+    void baseTransitUsesNextReminderAsRetryDeadlineAndSkipsStaleReminder() {
         ArrivalNotification n = notification(NotificationScheduleType.FIRST_TRANSIT);
         when(n.getReminderOffsetMinutes()).thenReturn(5);
         when(n.getReminderOffsetMinutesList()).thenReturn(List.of(5, 10, 30));
@@ -81,16 +81,24 @@ class FirstLastNotificationSchedulerTest {
                         LocalDateTime.of(2026, 8, 27, 5, 20), DeliveryPhase.BASE,
                         LocalDateTime.of(2026, 8, 27, 5, 20), LocalDateTime.of(2026, 8, 27, 5, 20), false, 30));
         NotificationDeliveryService delivery = mock(NotificationDeliveryService.class);
-        NotificationScheduler scheduler = scheduler(n, schedules, delivery, "2026-08-27T05:10");
+        NotificationScheduler scheduler = scheduler(n, schedules, delivery, "2026-08-27T04:50");
 
         scheduler.scheduleArrivalNotifications();
 
         verify(delivery).prepare(eq(n), eq(30), eq(LocalDate.of(2026, 8, 27)),
                 eq(toUtc(LocalDateTime.of(2026, 8, 27, 4, 50))), eq(30),
-                eq(toUtc(LocalDateTime.of(2026, 8, 27, 5, 20))), eq(DeliveryPhase.BASE));
+                eq(toUtc(LocalDateTime.of(2026, 8, 27, 5, 10))), eq(DeliveryPhase.BASE));
+
+        reset(delivery);
+        ReflectionTestUtils.setField(scheduler, "clock", Clock.fixed(at("2026-08-27T05:10"), ZoneOffset.UTC));
+        scheduler.scheduleArrivalNotifications();
+
         verify(delivery).prepare(eq(n), eq(30), eq(LocalDate.of(2026, 8, 27)),
                 eq(toUtc(LocalDateTime.of(2026, 8, 27, 5, 10))), eq(10),
-                eq(toUtc(LocalDateTime.of(2026, 8, 27, 5, 20))), eq(DeliveryPhase.BASE));
+                eq(toUtc(LocalDateTime.of(2026, 8, 27, 5, 15))), eq(DeliveryPhase.BASE));
+        verify(delivery, never()).prepare(eq(n), eq(30), eq(LocalDate.of(2026, 8, 27)),
+                eq(toUtc(LocalDateTime.of(2026, 8, 27, 4, 50))), eq(30),
+                any(), eq(DeliveryPhase.BASE));
         verify(delivery, never()).prepare(eq(n), eq(30), eq(LocalDate.of(2026, 8, 27)),
                 eq(toUtc(LocalDateTime.of(2026, 8, 27, 5, 15))), eq(5),
                 any(), eq(DeliveryPhase.BASE));
