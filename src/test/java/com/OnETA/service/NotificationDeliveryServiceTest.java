@@ -384,6 +384,7 @@ class NotificationDeliveryServiceTest {
         ArrivalNotification notification = mock(ArrivalNotification.class);
         User user = mock(User.class);
         when(notification.getRepeatDays()).thenReturn(21);
+        when(notification.getIsActive()).thenReturn(true);
         when(notification.getUser()).thenReturn(user);
         when(user.getId()).thenReturn(1L);
         NotificationDelivery delivery = new NotificationDelivery(
