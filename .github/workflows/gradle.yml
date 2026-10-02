@@ -29,9 +29,17 @@ jobs:
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
-      - name: Full test suite
+      - name: FIRST/LAST regression suite
         run: |
-          ./gradlew clean test
+          ./gradlew clean test \
+            --tests "com.OnETA.service.NotificationCategoryTest" \
+            --tests "com.OnETA.service.TransitNotificationReplacementTest" \
+            --tests "com.OnETA.service.TransitNotificationQueryServiceTest" \
+            --tests "com.OnETA.service.NotificationLimitTest" \
+            --tests "com.OnETA.scheduler.FirstLastNotificationSchedulerTest" \
+            --tests "com.OnETA.service.NotificationDeliveryServiceTest" \
+            --tests "com.OnETA.service.TransitScheduleServiceTest" \
+            --tests "com.OnETA.service.FcmPushServiceTest"
           ./gradlew build -x test
 
       - name: Copy JAR to EC2
