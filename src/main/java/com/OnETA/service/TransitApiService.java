@@ -105,15 +105,35 @@ public class TransitApiService {
             throw new GlobalException(ErrorCode.INVALID_INPUT_VALUE, "저장된 경로 정보가 없습니다.");
         }
         try {
+            JsonNode root = objectMapper.readTree(routeDetails);
+            JsonNode routeNode = root != null && root.path("route").isObject()
+                    ? root.path("route") : root;
             TransitDto.RouteOptionResponse route =
-                    objectMapper.readValue(routeDetails, TransitDto.RouteOptionResponse.class);
+                    objectMapper.treeToValue(routeNode, TransitDto.RouteOptionResponse.class);
             List<TransitDto.RouteSegment> segments = route.getSegments() == null
                     ? List.of()
                     : route.getSegments().stream().map(this::withFallbackStations).toList();
-            return route.toBuilder().segments(segments).build();
+            String originAddress = firstNonBlank(route.getOriginAddress(),
+                    root == null ? null : root.path("originAddress").asText(null),
+                    root == null ? null : root.path("origin").asText(null));
+            String destinationAddress = firstNonBlank(route.getDestinationAddress(),
+                    root == null ? null : root.path("destinationAddress").asText(null),
+                    root == null ? null : root.path("destination").asText(null));
+            return route.toBuilder()
+                    .originAddress(originAddress)
+                    .destinationAddress(destinationAddress)
+                    .segments(segments)
+                    .build();
         } catch (Exception e) {
             throw new GlobalException(ErrorCode.INVALID_INPUT_VALUE, "저장된 경로 정보를 읽을 수 없습니다.");
         }
+    }
+
+    private static String firstNonBlank(String... values) {
+        for (String value : values) {
+            if (value != null && !value.isBlank()) return value.trim();
+        }
+        return null;
     }
 
     private TransitDto.RouteSegment withFallbackStations(TransitDto.RouteSegment segment) {
@@ -153,7 +173,7 @@ public class TransitApiService {
             if (e.getErrorCode() == ErrorCode.INVALID_INPUT_VALUE
                     || kakaoTransitClient == null || !kakaoTransitClient.isConfigured()) throw e;
             log.info("ODsay route search failed ({}); trying Kakao", e.getErrorCode().getCode());
-            return kakaoTransitClient.search(originX, originY, destX, destY);
+            return kakaoTransitClient.search(originX, originY, destX, destY, limit);
         }
     }
 
