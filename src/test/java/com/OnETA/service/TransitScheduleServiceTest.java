@@ -153,7 +153,7 @@ class TransitScheduleServiceTest {
                 route, NotificationScheduleType.FIRST_TRANSIT, day, new java.util.HashMap<>()))
                 .isEqualTo(day.atTime(22, 17));
 
-        verify(metro).firstTripAtOrAfter(any(), eq(day), eq(day.atTime(22, 49)));
+        verify(metro).firstTripAtOrAfter(any(), eq(day), eq(day.atTime(22, 50)));
     }
 
     @Test
