@@ -66,6 +66,41 @@ class TransitNotificationQueryServiceTest {
         verify(schedules, never()).estimateDeparture(eq(inactiveLast), any(), any());
     }
 
+    @Test void filtersCurrentNotificationsByRequestedScheduleType() {
+        var first = notification(10L, NotificationScheduleType.FIRST_TRANSIT);
+        var last = notification(20L, NotificationScheduleType.LAST_TRANSIT);
+        when(notifications.findAllByUserId(1L)).thenReturn(List.of(first, last));
+        when(schedules.estimateDeparture(eq(first), any(), any()))
+                .thenReturn(LocalDateTime.parse("2026-09-28T05:30:00"));
+        when(schedules.estimateDeparture(eq(last), any(), any()))
+                .thenReturn(LocalDateTime.parse("2026-09-28T00:10:00"));
+
+        var firstResponses = service.getCurrentNotifications(
+                "me", NotificationScheduleType.FIRST_TRANSIT);
+        var lastResponses = service.getCurrentNotifications(
+                "me", NotificationScheduleType.LAST_TRANSIT);
+
+        assertThat(firstResponses).hasSize(1);
+        assertThat(firstResponses.get(0).getNotificationId()).isEqualTo(10L);
+        assertThat(firstResponses.get(0).getScheduleType())
+                .isEqualTo(NotificationScheduleType.FIRST_TRANSIT);
+
+        assertThat(lastResponses).hasSize(1);
+        assertThat(lastResponses.get(0).getNotificationId()).isEqualTo(20L);
+        assertThat(lastResponses.get(0).getScheduleType())
+                .isEqualTo(NotificationScheduleType.LAST_TRANSIT);
+    }
+
+    @Test void rejectsNormalScheduleTypeOnTransitListQuery() {
+        assertThatThrownBy(() ->
+                service.getCurrentNotifications("me", NotificationScheduleType.NORMAL))
+                .isInstanceOfSatisfying(GlobalException.class,
+                        e -> assertThat(e.getErrorCode())
+                                .isEqualTo(ErrorCode.INVALID_INPUT_VALUE));
+        verify(notifications, never()).findAllByUserId(anyLong());
+        verifyNoInteractions(schedules);
+    }
+
     @Test void unavailableTimetablePreservesSettingWithoutPretendingZeroRemaining() {
         var missing = notification(1L, NotificationScheduleType.FIRST_TRANSIT);
         when(notifications.findAllByUserId(1L)).thenReturn(List.of(missing));
@@ -110,7 +145,8 @@ class TransitNotificationQueryServiceTest {
         assertThat(service.getCurrentNotifications("me")).isEmpty();
 
         var controller = new com.OnETA.controller.ScheduleNotificationController(mock(NotificationService.class), service);
-        var json = new tools.jackson.databind.ObjectMapper().writeValueAsString(controller.transit(() -> "me"));
+        var json = new tools.jackson.databind.ObjectMapper().writeValueAsString(
+                controller.transit(() -> "me", NotificationScheduleType.FIRST_TRANSIT));
         assertThat(json).contains("SUCCESS", "\"data\":[]");
         verifyNoInteractions(schedules);
     }
