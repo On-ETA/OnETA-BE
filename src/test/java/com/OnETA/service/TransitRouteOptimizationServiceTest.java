@@ -21,6 +21,9 @@ class TransitRouteOptimizationServiceTest {
         TransitApiService api = mock(TransitApiService.class);
         TransitScheduleService schedules = mock(TransitScheduleService.class);
         var service = new TransitRouteOptimizationService(api, schedules);
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "clock",
+                java.time.Clock.fixed(java.time.ZonedDateTime.parse("2026-10-02T20:00:00+09:00").toInstant(),
+                        java.time.ZoneId.of("Asia/Seoul")));
         var a = route("A", "ODSAY", 30);
         var b = route("B", "KAKAO", 40);
         var c = route("C", "ODSAY", 20);
@@ -46,6 +49,9 @@ class TransitRouteOptimizationServiceTest {
         TransitApiService api = mock(TransitApiService.class);
         TransitScheduleService schedules = mock(TransitScheduleService.class);
         var service = new TransitRouteOptimizationService(api, schedules);
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "clock",
+                java.time.Clock.fixed(java.time.ZonedDateTime.parse("2026-10-03T04:00:00+09:00").toInstant(),
+                        java.time.ZoneId.of("Asia/Seoul")));
         var unsupported = route("X", "KAKAO", 10);
         var early = route("EARLY", "ODSAY", 35);
         var late = route("LATE", "ODSAY", 20);
