@@ -31,7 +31,7 @@ jobs:
 
       - name: Validate FIRST connection and wrapped route compatibility
         run: |
-          ./gradlew clean test --info --stacktrace \
+          ./gradlew clean bootJar test --info --stacktrace \
             --tests "com.OnETA.service.TransitScheduleServiceTest.seoulTransferPollsNearDepartureButStillAlertsConservativelyWhenDataIsMissing"
 
       - name: Copy JAR to EC2
