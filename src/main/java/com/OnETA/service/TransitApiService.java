@@ -400,6 +400,8 @@ public class TransitApiService {
                             .busType(trafficType == 2
                                     ? BusType.fromOdsay(integerOrNull(lane, "type"))
                                     : null)
+                            .nightBus(trafficType == 2
+                                    && TransitRouteClassifier.isNightBusName(transitName))
                             .odsayStartStationId(textOrNull(subPath, "startID"))
                             .odsayEndStationId(textOrNull(subPath, "endID"))
                             .odsayRouteId(textOrNull(lane, "busID"))
