@@ -94,6 +94,15 @@ class KakaoTransitClientTest {
     }
 
     @Test
+    void marksKakaoNightBusByRouteName() {
+        String body = BODY.replace("\"name\":\"8543\"", "\"name\":\"N62\"");
+
+        var bus = kakao.parse(body).get(0).getSegments().get(1);
+
+        assertThat(bus.isNightBus()).isTrue();
+    }
+
+    @Test
     void networkFailureFallsBackAndBothProviderFailureIsUnavailable() {
         configure();
         server.expect(queryParam("SX", "127.1"))
