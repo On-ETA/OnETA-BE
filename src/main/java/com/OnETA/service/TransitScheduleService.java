@@ -26,8 +26,8 @@ import java.util.*;
 @Service
 @Slf4j
 public class TransitScheduleService {
-    private static final int FIRST_ACCESS_BUFFER_MINUTES = 5;
-    private static final int FIRST_TRANSFER_BUFFER_MINUTES = 5;
+    private static final int FIRST_ACCESS_BUFFER_MINUTES = 0;
+    private static final int FIRST_TRANSFER_BUFFER_MINUTES = 0;
     private static final int MAX_FIRST_TRANSFER_WAIT_MINUTES = 45;
 
     private final TransitApiService transitApiService;
@@ -285,9 +285,17 @@ public class TransitScheduleService {
             LocalDate serviceDate,
             Map<String, LocalDateTime> scheduleCache) {
         boolean kakao = SeoulBusScheduleService.isKakao(route);
-        List<SeoulBusScheduleService.Schedule> providerSchedules = kakao ? new ArrayList<>() : null;
+        List<SeoulBusScheduleService.Schedule> providerSchedules = null;
+        if (kakao) {
+            boolean hasSubway = route.getSegments().stream()
+                    .anyMatch(segment -> "SUBWAY".equals(segment.getTransitType()));
+            providerSchedules = hasSubway
+                    ? resolveKakaoRouteSchedules(route, serviceDate)
+                    : seoulBusScheduleService.resolveRoute(route, serviceDate);
+        }
 
         int accessWalk = 0;
+        int rideIndex = 0;
         LocalDateTime departure = null;
         LocalDateTime ready = null;
 
@@ -308,10 +316,18 @@ public class TransitScheduleService {
                         com.OnETA.common.error.ErrorCode.TRANSIT_SCHEDULE_UNSUPPORTED);
             }
 
-            FirstBoundary boundary = resolveFirstBoundary(route, segment, serviceDate, scheduleCache);
-            if (kakao && boundary.providerSchedule() != null) {
-                providerSchedules.add(boundary.providerSchedule());
+            FirstBoundary boundary;
+            if (kakao) {
+                if (providerSchedules == null || rideIndex >= providerSchedules.size()) {
+                    throw new com.OnETA.common.exception.GlobalException(
+                            com.OnETA.common.error.ErrorCode.TRANSIT_SCHEDULE_UNSUPPORTED);
+                }
+                SeoulBusScheduleService.Schedule schedule = providerSchedules.get(rideIndex);
+                boundary = new FirstBoundary(schedule.first(), schedule);
+            } else {
+                boundary = resolveFirstBoundary(route, segment, serviceDate, scheduleCache);
             }
+            rideIndex++;
 
             LocalDateTime boarding;
             LocalDateTime alighting;
@@ -339,9 +355,6 @@ public class TransitScheduleService {
                     boarding = trip.departure();
                     alighting = trip.arrival();
                 } else {
-                    // Static bus APIs expose only first/last boundaries. Once the first bus
-                    // has already passed, the next exact bus cannot be proven for a future
-                    // service day, so do not fabricate a connection.
                     throw connectionUnverified();
                 }
 
@@ -375,17 +388,6 @@ public class TransitScheduleService {
             TransitDto.RouteSegment segment,
             LocalDate serviceDate,
             Map<String, LocalDateTime> scheduleCache) {
-        if (SeoulBusScheduleService.isKakao(route)) {
-            SeoulBusScheduleService.Schedule schedule;
-            if ("SUBWAY".equals(segment.getTransitType())) {
-                schedule = resolveKakaoSubwaySchedule(segment, serviceDate);
-            } else {
-                schedule = seoulBusScheduleService.resolve(
-                        route.toBuilder().transferCount(0).segments(List.of(segment)).build(), serviceDate);
-            }
-            return new FirstBoundary(schedule.first(), schedule);
-        }
-
         LocalDateTime first = serviceTimeCached(
                 segment, NotificationScheduleType.FIRST_TRANSIT, serviceDate, scheduleCache);
         if (first == null) {
