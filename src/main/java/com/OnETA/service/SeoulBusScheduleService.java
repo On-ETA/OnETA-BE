@@ -90,14 +90,21 @@ public class SeoulBusScheduleService {
 
     public synchronized Schedule resolve(TransitDto.RouteOptionResponse route, LocalDate day) {
         var bus = singleBus(route);
-        if (!today().equals(day)) throw unavailable(); // API has no service-date parameter.
+        if (!today().equals(day)) throw unsupported(); // API has no service-date parameter.
         String cacheKey = day + ":" + bus.getTransitName() + ":" + bus.getStartStation() + ":"
                 + bus.getEndStation() + ":" + bus.getStartX() + ":" + bus.getStartY() + ":"
                 + bus.getEndX() + ":" + bus.getEndY() + ":"
                 + bus.getStations().stream().map(TransitDto.RouteStation::getName).toList();
         Cached cached = cache.get(cacheKey);
         if (cached != null && cached.expires().isAfter(clock.instant())) return cached.schedule();
-        if (key.isBlank() || retryAfter.isAfter(clock.instant())) throw unavailable();
+        if (key.isBlank()) {
+            log.error("Seoul schedule API key is not configured");
+            throw unavailable();
+        }
+        if (retryAfter.isAfter(clock.instant())) {
+            log.warn("Seoul schedule API retry backoff is active");
+            throw unavailable();
+        }
 
         List<Element> starts = nearby(bus.getStartStation(), bus.getStartX(), bus.getStartY());
         List<Element> ends = nearby(bus.getEndStation(), bus.getEndX(), bus.getEndY());
@@ -255,9 +262,15 @@ public class SeoulBusScheduleService {
             for (int i = 0; i < nodes.getLength(); i++) items.add((Element) nodes.item(i));
             return items;
         } catch (Exception e) {
-            log.warn("Seoul API lookup failed: endpoint={}, failureType={}, httpStatus={}", path,
-                    e.getClass().getSimpleName(), e instanceof RestClientResponseException response
-                            ? response.getStatusCode().value() : null);
+            Integer status = e instanceof RestClientResponseException response
+                    ? response.getStatusCode().value() : null;
+            if (status != null && (status == 401 || status == 403)) {
+                log.error("Seoul API authentication rejected: endpoint={}, httpStatus={}, keyConfigured={}",
+                        path, status, !key.isBlank());
+            } else {
+                log.warn("Seoul API lookup failed: endpoint={}, failureType={}, httpStatus={}", path,
+                        e.getClass().getSimpleName(), status);
+            }
             retryAfter = clock.instant().plusSeconds(60);
             throw unavailable(); // Never expose URI containing the service key.
         }

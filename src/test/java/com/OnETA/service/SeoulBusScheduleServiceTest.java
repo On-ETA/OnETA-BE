@@ -111,7 +111,7 @@ class SeoulBusScheduleServiceTest {
     }
     @Test
     void doesNotReuseTodayForAnotherServiceDay() {
-        assertThatThrownBy(() -> service.resolve(route(), DAY.minusDays(1))).isInstanceOf(GlobalException.class);
+        assertUnsupported(() -> service.resolve(route(), DAY.minusDays(1)));
         server.verify();
     }
     @ParameterizedTest

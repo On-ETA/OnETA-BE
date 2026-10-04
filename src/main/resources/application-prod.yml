@@ -94,6 +94,15 @@ jwt:
   refresh-expiration: ${JWT_REFRESH_EXPIRATION:1209600000}
 
 
+# Public-data clients use the same approved data.go.kr service key.
+# Keep the explicit property mapping so runtime binding does not depend on
+# environment-variable relaxed binding alone.
+publicdata:
+  api:
+    key: ${PUBLICDATA_API_KEY:}
+  seoul:
+    schedule-key: ${PUBLICDATA_API_KEY:}
+
 api:
   seoul-bus:
     service-key: ${PUBLICDATA_API_KEY}
