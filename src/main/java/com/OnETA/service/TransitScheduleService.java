@@ -26,7 +26,7 @@ import java.util.*;
 @Service
 @Slf4j
 public class TransitScheduleService {
-    private static final int FIRST_ACCESS_BUFFER_MINUTES = 0;
+    private static final int FIRST_ACCESS_BUFFER_MINUTES = 5;
     private static final int FIRST_TRANSFER_BUFFER_MINUTES = 0;
     private static final int MAX_FIRST_TRANSFER_WAIT_MINUTES = 45;
 
