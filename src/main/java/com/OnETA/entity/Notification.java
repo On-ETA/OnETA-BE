@@ -71,7 +71,13 @@ public abstract class Notification {
 
     public void updateCommonInfo(String name, List<Integer> reminderOffsetMinutes) {
         if (name != null) this.name = name;
-        if (reminderOffsetMinutes != null) this.reminderOffsetMinutes = normalizeReminderOffsets(reminderOffsetMinutes);
+        if (reminderOffsetMinutes != null) {
+            List<Integer> normalized = normalizeReminderOffsets(reminderOffsetMinutes);
+            // Keep Hibernate's managed collection instance. Replacing an @ElementCollection
+            // field on a managed entity can break dirty tracking/orphan cleanup at flush time.
+            this.reminderOffsetMinutes.clear();
+            this.reminderOffsetMinutes.addAll(normalized);
+        }
     }
 
     public Integer getReminderOffsetMinutes() {
