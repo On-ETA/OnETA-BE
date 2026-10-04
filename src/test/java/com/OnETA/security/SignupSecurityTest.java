@@ -56,7 +56,7 @@ class SignupSecurityTest {
         when(authentication.getPrincipal()).thenReturn(principal);
         when(auth.startSocialSignup("test@example.com")).thenReturn(new SignupResponseDto("temporary", 900));
         MockHttpServletResponse response = new MockHttpServletResponse();
-        new OAuth2SuccessHandler(auth, users, mock(com.OnETA.service.OAuth2CodeStore.class), mock(CookieAuthorizationRequestRepository.class)).onAuthenticationSuccess(new MockHttpServletRequest(), response, authentication);
+        new OAuth2SuccessHandler(auth, users).onAuthenticationSuccess(new MockHttpServletRequest(), response, authentication);
         assertThat(response.getRedirectedUrl()).isEqualTo(
                 "https://on-eta.com/signup/consent?tempId=temporary&expiresInSeconds=900");
         verify(auth, never()).loginSocialUser(anyString());
@@ -75,7 +75,7 @@ class SignupSecurityTest {
         when(users.findByEmail("test@example.com")).thenReturn(Optional.of(User.builder().role(Role.USER).build()));
         when(auth.loginSocialUser("test@example.com")).thenReturn(new TokenResponseDto("access", "refresh"));
         MockHttpServletResponse response = new MockHttpServletResponse();
-        new OAuth2SuccessHandler(auth, users, mock(com.OnETA.service.OAuth2CodeStore.class), mock(CookieAuthorizationRequestRepository.class)).onAuthenticationSuccess(new MockHttpServletRequest(), response, authentication);
+        new OAuth2SuccessHandler(auth, users).onAuthenticationSuccess(new MockHttpServletRequest(), response, authentication);
         assertThat(response.getRedirectedUrl()).contains("accessToken=access", "refreshToken=refresh").doesNotContain("tempId");
         verify(auth, never()).startSocialSignup(anyString());
     }
