@@ -33,12 +33,17 @@ public class TransitScheduleService {
     private final RestTemplate restTemplate;
     private SeoulBusScheduleService seoulBusScheduleService;
     private TagoSubwayScheduleService tagoSubwayScheduleService;
+    private SeoulMetroTrainScheduleService seoulMetroTrainScheduleService;
 
     @Autowired
     void setTagoSubwayScheduleService(TagoSubwayScheduleService service) {
         this.tagoSubwayScheduleService = service;
     }
 
+    @Autowired
+    void setSeoulMetroTrainScheduleService(SeoulMetroTrainScheduleService service) {
+        this.seoulMetroTrainScheduleService = service;
+    }
 
     @Value("${odsay.api.key:}") private String apiKey;
     @Value("${odsay.schedule.url:https://api.odsay.com/v1/api}") private String scheduleBaseUrl;
@@ -295,45 +300,16 @@ public class TransitScheduleService {
                 throw ex;
             }
             tagoFailure = ex;
-            log.info("TAGO subway schedule unavailable; trying ODsay fallback: line={}, start={}, end={}, serviceDate={}, code={}",
+            log.info("TAGO subway schedule unavailable; trying Seoul Metro fallback: line={}, start={}, end={}, serviceDate={}, code={}",
                     segment.getTransitName(), segment.getStartStation(), segment.getEndStation(),
                     serviceDate, ex.getErrorCode().getCode());
         }
 
         try {
-            String startId = resolveOdsaySubwayStationId(
-                    segment.getStartStation(), segment.getTransitName(), segment.getStartX(), segment.getStartY());
-            String endId = resolveOdsaySubwayStationId(
-                    segment.getEndStation(), segment.getTransitName(), segment.getEndX(), segment.getEndY());
-
-            JsonNode firstRoot = request("/subwayPathSchedule", Map.of(
-                    "SID", startId, "EID", endId, "MODE", "3", "DAY", odsayDay(serviceDate)));
-            ensureNoOdsayError(firstRoot);
-            LocalDateTime first = findTime(firstRoot, true, serviceDate);
-
-            JsonNode lastRoot = request("/subwayPathSchedule", Map.of(
-                    "SID", startId, "EID", endId, "MODE", "4", "DAY", odsayDay(serviceDate)));
-            ensureNoOdsayError(lastRoot);
-            LocalDateTime last = findTime(lastRoot, false, serviceDate);
-
-            if (first == null || last == null) {
-                throw new com.OnETA.common.exception.GlobalException(
-                        com.OnETA.common.error.ErrorCode.TRANSIT_SCHEDULE_UNSUPPORTED);
-            }
-            if (last.isBefore(first) && last.toLocalDate().equals(serviceDate)) {
-                last = last.plusDays(1);
-            }
-            log.info("ODsay subway fallback resolved: line={}, start={}, end={}, serviceDate={}, startId={}, endId={}",
-                    segment.getTransitName(), segment.getStartStation(), segment.getEndStation(),
-                    serviceDate, startId, endId);
-            return new SeoulBusScheduleService.Schedule(
-                    startId, "", "ODSAY_SUBWAY:" + normalizeSubwayLine(segment.getTransitName()),
-                    first, last, 0, endId, 0);
-        } catch (OdsayQuotaExceededException ex) {
-            var unavailable = new com.OnETA.common.exception.GlobalException(
-                    com.OnETA.common.error.ErrorCode.TRANSIT_SCHEDULE_UNAVAILABLE);
-            if (tagoFailure != null) unavailable.addSuppressed(tagoFailure);
-            throw unavailable;
+            var resolved = seoulMetroTrainScheduleService.resolve(segment, serviceDate);
+            log.info("Seoul Metro subway fallback resolved: line={}, start={}, end={}, serviceDate={}",
+                    segment.getTransitName(), segment.getStartStation(), segment.getEndStation(), serviceDate);
+            return resolved;
         } catch (com.OnETA.common.exception.GlobalException ex) {
             if (tagoFailure != null) ex.addSuppressed(tagoFailure);
             throw ex;
@@ -344,89 +320,6 @@ public class TransitScheduleService {
             unavailable.addSuppressed(ex);
             throw unavailable;
         }
-    }
-
-    private String resolveOdsaySubwayStationId(
-            String stationName, String lineName, Double x, Double y) {
-        Map<String, String> params = new LinkedHashMap<>();
-        params.put("stationName", stationName == null ? "" : stationName);
-        params.put("CID", "1000");
-        params.put("stationClass", "2");
-        params.put("displayCnt", "20");
-        params.put("startNO", "1");
-        if (validCoordinate(x, y)) {
-            params.put("myLocation", x + ":" + y);
-        }
-
-        JsonNode root = request("/searchStation", params);
-        ensureNoOdsayError(root);
-        JsonNode result = root.path("result");
-        List<JsonNode> candidates = new ArrayList<>();
-        for (String field : List.of("station", "lane")) {
-            JsonNode node = result.path(field);
-            if (node.isArray()) node.forEach(candidates::add);
-            else if (node.isObject()) candidates.add(node);
-        }
-
-        String normalizedStation = normalizeSubwayStation(stationName);
-        String normalizedLine = normalizeSubwayLine(lineName);
-        record Match(String id, double distance) {}
-        List<Match> matches = new ArrayList<>();
-        for (JsonNode candidate : candidates) {
-            int stationClass = candidate.path("stationClass").asInt(2);
-            if (stationClass != 2) continue;
-            String candidateName = candidate.path("stationName").asText("");
-            String candidateLine = candidate.path("laneName").asText(
-                    candidate.path("subwayLaneName").asText(""));
-            String stationId = candidate.path("stationID").asText("");
-            if (stationId.isBlank()
-                    || !normalizeSubwayStation(candidateName).equals(normalizedStation)
-                    || !normalizeSubwayLine(candidateLine).equals(normalizedLine)) {
-                continue;
-            }
-            double distance = Double.POSITIVE_INFINITY;
-            if (validCoordinate(x, y)
-                    && candidate.path("x").isNumber() && candidate.path("y").isNumber()) {
-                distance = haversineMeters(x, y, candidate.path("x").asDouble(), candidate.path("y").asDouble());
-            }
-            matches.add(new Match(stationId, distance));
-        }
-
-        if (matches.isEmpty()) {
-            log.warn("ODsay subway station mapping failed: station={}, line={}", stationName, lineName);
-            throw new com.OnETA.common.exception.GlobalException(
-                    com.OnETA.common.error.ErrorCode.TRANSIT_SCHEDULE_UNSUPPORTED);
-        }
-        matches.sort(Comparator.comparingDouble(Match::distance));
-        if (matches.size() > 1
-                && Double.isInfinite(matches.get(0).distance())
-                && !matches.get(0).id().equals(matches.get(1).id())) {
-            throw new com.OnETA.common.exception.GlobalException(
-                    com.OnETA.common.error.ErrorCode.TRANSIT_SCHEDULE_UNSUPPORTED);
-        }
-        return matches.get(0).id();
-    }
-
-    private static boolean validCoordinate(Double x, Double y) {
-        return x != null && y != null && Double.isFinite(x) && Double.isFinite(y)
-                && x >= -180 && x <= 180 && y >= -90 && y <= 90;
-    }
-
-    private static double haversineMeters(double x1, double y1, double x2, double y2) {
-        double dLat = Math.toRadians(y2 - y1);
-        double dLon = Math.toRadians(x2 - x1);
-        double a = Math.pow(Math.sin(dLat / 2), 2)
-                + Math.cos(Math.toRadians(y1)) * Math.cos(Math.toRadians(y2))
-                * Math.pow(Math.sin(dLon / 2), 2);
-        return 6371000 * 2 * Math.asin(Math.sqrt(Math.min(1, a)));
-    }
-
-    private static String normalizeSubwayStation(String value) {
-        return value == null ? "" : value.replaceAll("\\([^)]*\\)", "").replaceAll("\\s", "");
-    }
-
-    private static String normalizeSubwayLine(String value) {
-        return value == null ? "" : value.replace("수도권", "").replace("서울", "").replaceAll("\\s", "");
     }
 
     public LocalDateTime previewDepartureForServiceDate(TransitDto.RouteOptionResponse route,
@@ -853,7 +746,7 @@ public class TransitScheduleService {
         } catch (Exception e) { return null; }
     }
     private boolean same(JsonNode n, String value) { return value != null && !n.isMissingNode() && value.equals(n.asText()); }
-    private String hash(String v) { try { return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(((SeoulBusScheduleService.isKakao(transitApiService.readSavedRoute(v)) ? "schedule-v5:" : "schedule-v4:") + (v==null?"":v)).getBytes(StandardCharsets.UTF_8))); } catch(Exception e){throw new IllegalStateException(e);} }
+    private String hash(String v) { try { return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(((SeoulBusScheduleService.isKakao(transitApiService.readSavedRoute(v)) ? "schedule-v6:" : "schedule-v4:") + (v==null?"":v)).getBytes(StandardCharsets.UTF_8))); } catch(Exception e){throw new IllegalStateException(e);} }
     public record Decision(LocalDateTime scheduledAt, LocalDateTime hardDeadlineAt, DeliveryPhase phase, LocalDateTime baseDepartureAt, LocalDateTime effectiveDepartureAt, boolean recovery, int estimatedDuration) {}
     private record RouteSchedulePlan(LocalDateTime departure, int durationMinutes, String source,
                                      String providerDetails, int evaluationLeadMinutes) {}
