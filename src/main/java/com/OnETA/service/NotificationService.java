@@ -132,6 +132,12 @@ public class NotificationService {
         if (requestedRepeatDays != null) notification.updateRepeatDays(requestedRepeatDays);
         notification.updateArrivalInfo(request.getTargetArrivalTime(), request.getRouteDetails());
         notification.updateScheduleType(request.getScheduleType());
+
+        // FIRST/LAST snapshots cache the scheduled reminder window. When reminder offsets
+        // change, drop the cached snapshot so the next query/scheduler run rebuilds it.
+        if (request.getReminderOffsetMinutes() != null && isTransit(effectiveType)) {
+            notificationRepository.deleteScheduleSnapshotsByIds(List.of(notification.getId()));
+        }
     }
 
     @Transactional
