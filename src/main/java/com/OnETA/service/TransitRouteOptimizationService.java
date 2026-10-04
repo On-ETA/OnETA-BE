@@ -2,6 +2,7 @@ package com.OnETA.service;
 
 import com.OnETA.common.error.ErrorCode;
 import com.OnETA.common.exception.GlobalException;
+import com.OnETA.dto.FirstLastRouteStatus;
 import com.OnETA.dto.TransitDto;
 import com.OnETA.entity.NotificationScheduleType;
 import lombok.RequiredArgsConstructor;
@@ -40,6 +41,13 @@ public class TransitRouteOptimizationService {
 
         List<TransitDto.RouteOptionResponse> routes = transitApiService.searchScheduleCandidates(
                 email, originX, originY, originAddress, destX, destY, destAddress, CANDIDATE_LIMIT);
+        List<TransitDto.RouteOptionResponse> nightOnlyRoutes = routes.stream()
+                .filter(TransitRouteClassifier::isNightOnlyRoute)
+                .toList();
+        List<TransitDto.RouteOptionResponse> schedulableRoutes = routes.stream()
+                .filter(route -> !TransitRouteClassifier.isNightOnlyRoute(route))
+                .toList();
+
         LocalDateTime now = LocalDateTime.now(clock.withZone(SEOUL));
         Map<String, LocalDateTime> scheduleCache = new HashMap<>();
         FailureState failures = new FailureState();
@@ -55,7 +63,7 @@ public class TransitRouteOptimizationService {
         for (LocalDate serviceDate : serviceDays) {
             boolean futureOnly = scheduleType != NotificationScheduleType.FIRST_TRANSIT;
             List<Candidate> candidates = evaluateCandidates(
-                    routes, scheduleType, serviceDate, now, scheduleCache, failures, futureOnly);
+                    schedulableRoutes, scheduleType, serviceDate, now, scheduleCache, failures, futureOnly);
             if (candidates.isEmpty()) continue;
 
             if (scheduleType == NotificationScheduleType.FIRST_TRANSIT) {
@@ -67,9 +75,12 @@ public class TransitRouteOptimizationService {
                 // must not keep today's FIRST alive; advance the whole search to the next day.
                 if (!earliest.departure().isAfter(now)) continue;
             }
-            return rank(candidates, scheduleType);
+            return combineWithNightOnly(rank(candidates, scheduleType), nightOnlyRoutes, scheduleType);
         }
 
+        if (!nightOnlyRoutes.isEmpty()) {
+            return nightOnlyResponses(nightOnlyRoutes, scheduleType, RESULT_LIMIT);
+        }
         if (failures.unavailable) throw new GlobalException(ErrorCode.TRANSIT_SCHEDULE_UNAVAILABLE);
         if (failures.unsupported) throw new GlobalException(ErrorCode.TRANSIT_SCHEDULE_UNSUPPORTED);
         throw new GlobalException(ErrorCode.TRANSIT_ROUTE_NOT_FOUND);
@@ -126,6 +137,37 @@ public class TransitRouteOptimizationService {
                         .route(candidate.route())
                         .scheduleType(scheduleType)
                         .estimatedDepartureAt(candidate.departure().atZone(SEOUL).toOffsetDateTime())
+                        .status(FirstLastRouteStatus.AVAILABLE)
+                        .build())
+                .toList();
+    }
+
+    private List<TransitDto.FirstLastRouteOptionResponse> combineWithNightOnly(
+            List<TransitDto.FirstLastRouteOptionResponse> available,
+            List<TransitDto.RouteOptionResponse> nightOnlyRoutes,
+            NotificationScheduleType scheduleType) {
+        int remaining = RESULT_LIMIT - available.size();
+        if (remaining <= 0 || nightOnlyRoutes.isEmpty()) return available;
+
+        List<TransitDto.FirstLastRouteOptionResponse> result = new ArrayList<>(available);
+        result.addAll(nightOnlyResponses(nightOnlyRoutes, scheduleType, remaining));
+        return result;
+    }
+
+    private List<TransitDto.FirstLastRouteOptionResponse> nightOnlyResponses(
+            List<TransitDto.RouteOptionResponse> nightOnlyRoutes,
+            NotificationScheduleType scheduleType,
+            int limit) {
+        return nightOnlyRoutes.stream()
+                .sorted(Comparator.comparing(route ->
+                        route.getTotalDurationMinutes() == null
+                                ? Integer.MAX_VALUE : route.getTotalDurationMinutes()))
+                .limit(Math.max(0, limit))
+                .map(route -> TransitDto.FirstLastRouteOptionResponse.builder()
+                        .route(route)
+                        .scheduleType(scheduleType)
+                        .estimatedDepartureAt(null)
+                        .status(FirstLastRouteStatus.NIGHT_ONLY)
                         .build())
                 .toList();
     }
