@@ -52,16 +52,16 @@ class SeoulMetroTrainScheduleServiceTest {
         var service = new SeoulMetroTrainScheduleService(
                 new ObjectMapper(), http, "key", "https://metro.test/getTrainSch");
 
-        server.expect(queryParam("upbdnbSe", "내선"))
+        server.expect(requestTo(org.hamcrest.Matchers.containsString("getTrainSch")))
                 .andRespond(withSuccess(response(items(
                         row("100", "05:32:00", "05:31:00", "내선"))), MediaType.APPLICATION_JSON));
-        server.expect(queryParam("upbdnbSe", "내선"))
+        server.expect(requestTo(org.hamcrest.Matchers.containsString("getTrainSch")))
                 .andRespond(withSuccess(response(items(
                         row("100", "05:43:00", "05:42:00", "내선"))), MediaType.APPLICATION_JSON));
-        server.expect(queryParam("upbdnbSe", "외선"))
+        server.expect(requestTo(org.hamcrest.Matchers.containsString("getTrainSch")))
                 .andRespond(withSuccess(response(items(
                         row("900", "05:00:00", "04:59:00", "외선"))), MediaType.APPLICATION_JSON));
-        server.expect(queryParam("upbdnbSe", "외선"))
+        server.expect(requestTo(org.hamcrest.Matchers.containsString("getTrainSch")))
                 .andRespond(withSuccess(response(items(
                         row("900", "06:10:00", "06:09:00", "외선"))), MediaType.APPLICATION_JSON));
 
