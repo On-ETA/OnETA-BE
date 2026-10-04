@@ -268,11 +268,10 @@ public class NotificationService {
 
     private void validateRouteSchedule(NotificationScheduleType type, String details) {
         if (type == null || type == NotificationScheduleType.NORMAL) return;
-        var route = transitApiService.readSavedRoute(details);
-        if (route != null && ("KAKAO".equals(route.getProvider())
-                || (route.getRouteId() != null && route.getRouteId().startsWith("KAKAO_")))) {
-            transitApiService.validateSeoulSchedule(route);
-        }
+        // Registration/update must validate only the persisted route payload.
+        // External timetable availability is transient and is reported by the
+        // transit query/scheduler as T005/T006 after the setting is saved.
+        transitApiService.readSavedRoute(details);
     }
 
     private void validateTargetArrivalTime(NotificationScheduleType type, java.time.LocalTime time) {
