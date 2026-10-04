@@ -35,38 +35,53 @@ class NotificationServiceTest {
 
     @ParameterizedTest
     @EnumSource(value = NotificationScheduleType.class, names = {"FIRST_TRANSIT", "LAST_TRANSIT"})
-    void rejectsKakaoSchedulesOnCreationAndUpdate(NotificationScheduleType type) {
-        when(transit.readSavedRoute("{}" )).thenReturn(com.OnETA.dto.TransitDto.RouteOptionResponse.builder()
-                .provider("KAKAO").routeId("KAKAO_test").build());
-        doThrow(new GlobalException(com.OnETA.common.error.ErrorCode.TRANSIT_SCHEDULE_UNSUPPORTED))
-                .when(transit).validateSeoulSchedule(any());
-        assertThatThrownBy(() -> service.createArrivalNotification("test@example.com", request(type)))
-                .isInstanceOfSatisfying(GlobalException.class, e -> assertThat(e.getErrorCode())
-                        .isEqualTo(com.OnETA.common.error.ErrorCode.TRANSIT_SCHEDULE_UNSUPPORTED));
-        verifyNoInteractions(arrivals);
+    void savesKakaoTransitWithoutLiveTimetableValidation(NotificationScheduleType type) {
+        var route = com.OnETA.dto.TransitDto.RouteOptionResponse.builder()
+                .provider("KAKAO").routeId("KAKAO_test")
+                .segments(List.of(com.OnETA.dto.TransitDto.RouteSegment.builder()
+                        .transitType("BUS").transitName("N13").build()))
+                .build();
+        when(transit.readSavedRoute("{}")).thenReturn(route);
         when(user.getId()).thenReturn(1L);
         when(users.findByEmail("test@example.com")).thenReturn(Optional.of(user));
+        when(arrivals.save(any())).thenAnswer(i -> i.getArgument(0));
+
+        // Even if a live timetable check would currently fail, registration must not call it.
+        doThrow(new GlobalException(com.OnETA.common.error.ErrorCode.TRANSIT_SCHEDULE_UNSUPPORTED))
+                .when(transit).validateSeoulSchedule(any());
+
+        service.createArrivalNotification("test@example.com", request(type));
+
+        verify(transit, never()).validateSeoulSchedule(any());
+        verify(arrivals).save(any());
+
         var notification = new ArrivalNotification(user, "경로", List.of(10), 0,
                 LocalTime.of(9, 0), "{}", NotificationScheduleType.NORMAL);
         when(arrivals.findById(1L)).thenReturn(Optional.of(notification));
         var update = new NotificationDto.UpdateArrivalRequest();
         update.setScheduleType(type);
-        assertThatThrownBy(() -> service.updateArrivalNotification("test@example.com", 1L, update))
-                .isInstanceOfSatisfying(GlobalException.class, e -> assertThat(e.getErrorCode())
-                        .isEqualTo(com.OnETA.common.error.ErrorCode.TRANSIT_SCHEDULE_UNSUPPORTED));
-        assertThat(notification.getScheduleType()).isEqualTo(NotificationScheduleType.NORMAL);
+
+        service.updateArrivalNotification("test@example.com", 1L, update);
+
+        verify(transit, never()).validateSeoulSchedule(any());
+        assertThat(notification.getScheduleType()).isEqualTo(type);
+        assertThat(notification.getTargetArrivalTime()).isNull();
     }
 
-    @ParameterizedTest
-    @EnumSource(value = NotificationScheduleType.class, names = {"FIRST_TRANSIT", "LAST_TRANSIT"})
-    void acceptsVerifiedSeoulKakaoSchedule(NotificationScheduleType type) {
-        var route = SeoulBusScheduleServiceTest.route();
-        when(transit.readSavedRoute("{}")).thenReturn(route);
+    @Test
+    void rejectsMalformedTransitRouteBeforeSave() {
+        doThrow(new GlobalException(com.OnETA.common.error.ErrorCode.INVALID_INPUT_VALUE))
+                .when(transit).readSavedRoute("bad-route");
         when(users.findByEmail("test@example.com")).thenReturn(Optional.of(user));
-        when(arrivals.save(any())).thenAnswer(i -> i.getArgument(0));
-        service.createArrivalNotification("test@example.com", request(type));
-        verify(transit).validateSeoulSchedule(route);
-        verify(arrivals).save(any());
+
+        var request = request(NotificationScheduleType.FIRST_TRANSIT);
+        request.setRouteDetails("bad-route");
+
+        assertThatThrownBy(() -> service.createArrivalNotification("test@example.com", request))
+                .isInstanceOfSatisfying(GlobalException.class, e -> assertThat(e.getErrorCode())
+                        .isEqualTo(com.OnETA.common.error.ErrorCode.INVALID_INPUT_VALUE));
+        verify(arrivals, never()).save(any());
+        verify(transit, never()).validateSeoulSchedule(any());
     }
 
     private NotificationDto.CreateArrivalRequest request(NotificationScheduleType type) {
