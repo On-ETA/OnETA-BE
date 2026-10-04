@@ -25,11 +25,7 @@ import org.springframework.stereotype.Service;
 
 import jakarta.annotation.PostConstruct;
 import java.io.InputStream;
-import java.time.Clock;
-import java.time.Duration;
-import java.time.Instant;
-import java.time.ZoneOffset;
-import java.time.ZonedDateTime;
+import java.time.*;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
 import java.util.Map;
@@ -77,6 +73,10 @@ public class FcmPushService {
     }
 
     public void sendPush(String targetEmail, String title, String body) {
+        sendPush(targetEmail, title, body, null);
+    }
+
+    public void sendPush(String targetEmail, String title, String body, Map<String, String> data) {
         if (!firebaseEnabled) {
             log.debug("Firebase is disabled; skipping FCM push. Email: {}", targetEmail);
             return;
@@ -103,7 +103,7 @@ public class FcmPushService {
 
         for (UserDeviceToken token : deviceTokens) {
             try {
-                sendPushMessage(token.getDeviceToken(), title, body, deadline);
+                sendPushMessage(token.getDeviceToken(), title, body, deadline, data);
             } catch (FcmPushException e) {
                 if (e.isPermanent()) {
                     userDeviceTokenRepository.delete(token);
@@ -118,11 +118,17 @@ public class FcmPushService {
     }
 
     public void sendPushMessage(String deviceToken, String title, String body) {
-        sendPushMessage(deviceToken, title, body, null);
+        sendPushMessage(deviceToken, title, body, null, null);
     }
 
     public void sendPushMessage(String deviceToken, String title, String body,
-                                java.time.LocalDateTime hardDeadlineAt) {
+                                LocalDateTime hardDeadlineAt) {
+        sendPushMessage(deviceToken, title, body, hardDeadlineAt, null);
+    }
+
+    public void sendPushMessage(String deviceToken, String title, String body,
+                                LocalDateTime hardDeadlineAt,
+                                Map<String, String> data) {
         if (!firebaseEnabled) {
             throw new FcmPushException("FIREBASE_DISABLED", "Firebase 발송이 비활성화되어 있습니다.", true, null);
         }
@@ -137,6 +143,10 @@ public class FcmPushService {
             Message.Builder messageBuilder = Message.builder()
                     .setToken(deviceToken)
                     .setNotification(Notification.builder().setTitle(title).setBody(body).build());
+            
+            if (data != null && !data.isEmpty()) {
+                messageBuilder.putAllData(data);
+            }
             if (hardDeadlineAt != null) {
                 long remainingMillis = Duration.between(
                         clock.instant(), hardDeadlineAt.toInstant(ZoneOffset.UTC)).toMillis();
