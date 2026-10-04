@@ -26,7 +26,8 @@ public final class TransitRouteClassifier {
             if ("WALK".equals(segment.getTransitType())) continue;
 
             hasRide = true;
-            if (!"BUS".equals(segment.getTransitType()) || !segment.isNightBus()) {
+            if (!"BUS".equals(segment.getTransitType())
+                    || (!segment.isNightBus() && !isNightBusName(segment.getTransitName()))) {
                 return false;
             }
         }
