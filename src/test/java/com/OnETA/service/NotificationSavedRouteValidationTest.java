@@ -57,6 +57,32 @@ class NotificationSavedRouteValidationTest {
     }
 
     @Test
+    void acceptsFrontendWrappedRouteDetailsForNormalSchedule() {
+        String wrapped = """
+                {"route":%s,
+                 "origin":"출발지","destination":"도착지",
+                 "originAddress":"경기도 화성시","destinationAddress":"서울특별시 마포구"}
+                """.formatted(ROUTE);
+        when(arrivals.findAllForDuplicateCheckByUserId(1L)).thenReturn(List.of());
+
+        var request = new NotificationDto.CreateArrivalRequest();
+        request.setRouteName("출근");
+        request.setScheduleType(NotificationScheduleType.NORMAL);
+        request.setTargetArrivalTime(LocalTime.of(13, 25));
+        request.setReminderOffsetMinutes(List.of(5, 10));
+        request.setRepeatDays(List.of());
+        request.setRouteDetails(wrapped);
+
+        service.createArrivalNotification("me", request);
+
+        verify(arrivals).save(argThat(n -> wrapped.equals(n.getRouteDetails())));
+        var parsed = transit.readSavedRoute(wrapped);
+        assertThat(parsed.getSegments()).hasSize(3);
+        assertThat(parsed.getOriginAddress()).isEqualTo("경기도 화성시");
+        assertThat(parsed.getDestinationAddress()).isEqualTo("서울특별시 마포구");
+    }
+
+    @Test
     void stillRejectsActualDuplicateAfterSkippingLegacyRoute() {
         var duplicate = saved(11L, ROUTE);
         duplicate.toggleActive(false);
