@@ -24,7 +24,9 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 @Slf4j
@@ -215,7 +217,10 @@ public class DepotNotificationService {
 
             for (UserDeviceToken token : tokens) {
                 try {
-                    fcmPushService.sendPushMessage(token.getDeviceToken(), pushTitle, pushBody, deadline);
+                    Map<String, String> customData = new HashMap<>();
+                    customData.put("user_bus_id", String.valueOf(notification.getUserBus().getId()));
+
+                    fcmPushService.sendPushMessage(token.getDeviceToken(), pushTitle, pushBody, deadline, customData);
                     anySuccess = true;
                 } catch (FcmPushException e) {
                     if (e.isPermanent()) {
