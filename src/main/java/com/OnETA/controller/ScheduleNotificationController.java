@@ -46,8 +46,11 @@ public class ScheduleNotificationController {
     }
 
     @GetMapping("/transit")
-    public ApiResponse<List<TransitNotificationDto.Response>> transit(Principal principal) {
-        return ApiResponse.success(transitQueries.getCurrentNotifications(email(principal)));
+    public ApiResponse<List<TransitNotificationDto.Response>> transit(
+            Principal principal,
+            @RequestParam NotificationScheduleType scheduleType) {
+        return ApiResponse.success(
+                transitQueries.getCurrentNotifications(email(principal), scheduleType));
     }
 
     @DeleteMapping("/transit/{id}")

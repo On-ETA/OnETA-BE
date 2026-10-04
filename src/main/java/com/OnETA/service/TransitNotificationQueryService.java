@@ -51,6 +51,29 @@ public class TransitNotificationQueryService {
                 .toList();
     }
 
+    public List<TransitNotificationDto.Response> getCurrentNotifications(
+            String email, NotificationScheduleType scheduleType) {
+        if (scheduleType != NotificationScheduleType.FIRST_TRANSIT
+                && scheduleType != NotificationScheduleType.LAST_TRANSIT) {
+            throw new GlobalException(
+                    ErrorCode.INVALID_INPUT_VALUE,
+                    "FIRST_TRANSIT 또는 LAST_TRANSIT을 지정해주세요.");
+        }
+
+        var user = users.findByEmail(email)
+                .orElseThrow(() -> new GlobalException(ErrorCode.USER_NOT_FOUND));
+        var now = OffsetDateTime.ofInstant(clock.instant(), ZoneId.of(timeZone));
+
+        return notifications.findAllByUserId(user.getId()).stream()
+                .filter(this::isTransit)
+                .filter(n -> !n.isTransitArchived())
+                .filter(n -> Boolean.TRUE.equals(n.getIsActive()))
+                .filter(n -> n.getScheduleType() == scheduleType)
+                .max(Comparator.comparing(ArrivalNotification::getId))
+                .map(n -> List.of(response(n, now)))
+                .orElseGet(List::of);
+    }
+
     public TransitNotificationDto.Response getCurrentNotification(String email) {
         return getCurrentNotifications(email).stream()
                 .max(Comparator.comparing(TransitNotificationDto.Response::getNotificationId))
