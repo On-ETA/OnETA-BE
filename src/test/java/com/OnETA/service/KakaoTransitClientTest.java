@@ -79,6 +79,9 @@ class KakaoTransitClientTest {
             "YELLOW, CIRCULAR",
             "RED, METROPOLITAN",
             "SEAT, METROPOLITAN",
+            "DIRECT, METROPOLITAN",
+            "직행, METROPOLITAN",
+            "MAUL, VILLAGE",
             "간선, TRUNK",
             "광역, METROPOLITAN"
     })
