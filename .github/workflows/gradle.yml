@@ -45,7 +45,7 @@ jobs:
           python3 - <<'PY'
           import json, os, urllib.parse, urllib.request
           params = {
-              "serviceKey": os.environ["PUBLICDATA_API_KEY"],
+              "serviceKey": urllib.parse.unquote(os.environ["PUBLICDATA_API_KEY"]),
               "dataType": "JSON",
               "tmprTmtblYn": "N",
               "upbdnbSe": "내선",
