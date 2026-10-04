@@ -39,6 +39,38 @@ jobs:
             --tests "com.OnETA.scheduler.FirstLastNotificationSchedulerTest"
           ./gradlew build -x test
 
+      - name: Probe approved Seoul Metro timetable API
+        env:
+          PUBLICDATA_API_KEY: ${{ secrets.PUBLICDATA_API_KEY }}
+        run: |
+          python3 - <<'PY'
+          import json, os, urllib.parse, urllib.request
+          params = {
+              "serviceKey": os.environ["PUBLICDATA_API_KEY"],
+              "dataType": "JSON",
+              "tmprTmtblYn": "N",
+              "upbdnbSe": "내선",
+              "wkndSe": "주말",
+              "lineNm": "2호선",
+              "stnNm": "신도림",
+              "searchDt": "2026-10-04T00:00:00",
+              "pageNo": "1",
+              "numOfRows": "20",
+          }
+          url = "https://apis.data.go.kr/B553766/schedule/getTrainSch?" + urllib.parse.urlencode(params)
+          with urllib.request.urlopen(url, timeout=15) as response:
+              data = json.load(response)
+          header = data.get("response", {}).get("header", {})
+          body = data.get("response", {}).get("body", {})
+          code = str(header.get("resultCode", ""))
+          count = int(body.get("totalCount") or 0)
+          print("resultCode=", code, "totalCount=", count)
+          if code not in ("", "00", "INFO-000"):
+              raise SystemExit("Seoul Metro API permission/response failure")
+          if count <= 0:
+              raise SystemExit("Seoul Metro API returned no weekend 2호선 신도림 timetable rows")
+          PY
+
       - name: Copy JAR to EC2
         if: github.event_name == 'push'
         uses: appleboy/scp-action@v1
