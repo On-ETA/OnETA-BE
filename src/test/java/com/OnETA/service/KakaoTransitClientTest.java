@@ -2,6 +2,7 @@ package com.OnETA.service;
 
 import com.OnETA.common.error.ErrorCode;
 import com.OnETA.common.exception.GlobalException;
+import com.OnETA.dto.BusType;
 import com.OnETA.dto.TransitDto;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -69,6 +70,15 @@ class KakaoTransitClientTest {
         assertThat(service.getRealTimeDuration(mapper.writeValueAsString(route))).isEqualTo(371);
         verifyNoInteractions(realtime);
         server.verify();
+    }
+
+    @Test
+    void normalizesKakaoBusType() {
+        String trunkBody = BODY.replace("\"type\":\"시외\"", "\"type\":\"간선\"");
+
+        var bus = kakao.parse(trunkBody).get(0).getSegments().get(1);
+
+        assertThat(bus.getBusType()).isEqualTo(BusType.TRUNK);
     }
 
     @Test
