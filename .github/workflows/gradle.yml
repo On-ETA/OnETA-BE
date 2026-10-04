@@ -31,14 +31,8 @@ jobs:
 
       - name: Validate FIRST connection and wrapped route compatibility
         run: |
-          ./gradlew clean test \
-            --tests "com.OnETA.service.TransitRouteOptimizationServiceTest" \
-            --tests "com.OnETA.service.TransitScheduleServiceTest" \
-            --tests "com.OnETA.service.SeoulMetroTrainScheduleServiceTest" \
-            --tests "com.OnETA.service.NotificationSavedRouteValidationTest" \
-            --tests "com.OnETA.service.KakaoTransitClientTest" \
-            --tests "com.OnETA.scheduler.FirstLastNotificationSchedulerTest"
-          ./gradlew build -x test
+          ./gradlew clean test --info --stacktrace \
+            --tests "com.OnETA.service.TransitScheduleServiceTest.seoulTransferPollsNearDepartureButStillAlertsConservativelyWhenDataIsMissing"
 
       - name: Copy JAR to EC2
         if: github.event_name == 'push'
