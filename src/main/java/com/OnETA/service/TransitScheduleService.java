@@ -26,6 +26,10 @@ import java.util.*;
 @Service
 @Slf4j
 public class TransitScheduleService {
+    private static final int FIRST_ACCESS_BUFFER_MINUTES = 5;
+    private static final int FIRST_TRANSFER_BUFFER_MINUTES = 5;
+    private static final int MAX_FIRST_TRANSFER_WAIT_MINUTES = 45;
+
     private final TransitApiService transitApiService;
     private final PublicDataTransitService publicDataTransitService;
     private final ScheduleSnapshotRepository snapshotRepository;
@@ -213,6 +217,13 @@ public class TransitScheduleService {
                     com.OnETA.common.error.ErrorCode.TRANSIT_SCHEDULE_UNSUPPORTED);
         }
 
+        long rideCount = route.getSegments().stream()
+                .filter(segment -> !"WALK".equals(segment.getTransitType()))
+                .count();
+        if (type == NotificationScheduleType.FIRST_TRANSIT && rideCount > 1) {
+            return calculateConnectedFirstPlan(route, date, scheduleCache);
+        }
+
         if (SeoulBusScheduleService.isKakao(route)) {
             long rides = route.getSegments().stream().filter(s -> !"WALK".equals(s.getTransitType())).count();
             if (rides > 1 || route.getSegments().stream().anyMatch(s -> "SUBWAY".equals(s.getTransitType()))) {
@@ -267,6 +278,126 @@ public class TransitScheduleService {
         }
         int lead = Math.max(15, Math.min(60, plan.durationMinutes()));
         return new RouteSchedulePlan(plan.departure(), plan.durationMinutes(), "ODSAY", null, lead);
+    }
+
+    private RouteSchedulePlan calculateConnectedFirstPlan(
+            TransitDto.RouteOptionResponse route,
+            LocalDate serviceDate,
+            Map<String, LocalDateTime> scheduleCache) {
+        boolean kakao = SeoulBusScheduleService.isKakao(route);
+        List<SeoulBusScheduleService.Schedule> providerSchedules = kakao ? new ArrayList<>() : null;
+
+        int accessWalk = 0;
+        LocalDateTime departure = null;
+        LocalDateTime ready = null;
+
+        for (TransitDto.RouteSegment segment : route.getSegments()) {
+            if (segment == null || segment.getDurationMinutes() == null
+                    || segment.getDurationMinutes() < 0) {
+                throw new com.OnETA.common.exception.GlobalException(
+                        com.OnETA.common.error.ErrorCode.TRANSIT_SCHEDULE_UNSUPPORTED);
+            }
+
+            if ("WALK".equals(segment.getTransitType())) {
+                if (departure == null) accessWalk = Math.addExact(accessWalk, segment.getDurationMinutes());
+                else ready = ready.plusMinutes(segment.getDurationMinutes());
+                continue;
+            }
+            if (!"BUS".equals(segment.getTransitType()) && !"SUBWAY".equals(segment.getTransitType())) {
+                throw new com.OnETA.common.exception.GlobalException(
+                        com.OnETA.common.error.ErrorCode.TRANSIT_SCHEDULE_UNSUPPORTED);
+            }
+
+            FirstBoundary boundary = resolveFirstBoundary(route, segment, serviceDate, scheduleCache);
+            if (kakao && boundary.providerSchedule() != null) {
+                providerSchedules.add(boundary.providerSchedule());
+            }
+
+            LocalDateTime boarding;
+            LocalDateTime alighting;
+            if (departure == null) {
+                boarding = boundary.firstDeparture();
+                departure = boarding.minusMinutes(accessWalk + FIRST_ACCESS_BUFFER_MINUTES);
+                alighting = boarding.plusMinutes(segment.getDurationMinutes());
+            } else {
+                LocalDateTime earliestBoarding = ready.plusMinutes(FIRST_TRANSFER_BUFFER_MINUTES);
+                if (!boundary.firstDeparture().isBefore(earliestBoarding)) {
+                    boarding = boundary.firstDeparture();
+                    alighting = boarding.plusMinutes(segment.getDurationMinutes());
+                } else if ("SUBWAY".equals(segment.getTransitType())) {
+                    SeoulMetroTrainScheduleService.TripWindow trip;
+                    try {
+                        trip = seoulMetroTrainScheduleService
+                                .firstTripAtOrAfter(segment, serviceDate, earliestBoarding)
+                                .orElseThrow(this::connectionUnverified);
+                    } catch (com.OnETA.common.exception.GlobalException ex) {
+                        if (ex.getErrorCode() == com.OnETA.common.error.ErrorCode.TRANSIT_SCHEDULE_UNAVAILABLE) {
+                            throw ex;
+                        }
+                        throw connectionUnverified();
+                    }
+                    boarding = trip.departure();
+                    alighting = trip.arrival();
+                } else {
+                    // Static bus APIs expose only first/last boundaries. Once the first bus
+                    // has already passed, the next exact bus cannot be proven for a future
+                    // service day, so do not fabricate a connection.
+                    throw connectionUnverified();
+                }
+
+                long waitMinutes = Duration.between(ready, boarding).toMinutes();
+                if (waitMinutes < FIRST_TRANSFER_BUFFER_MINUTES
+                        || waitMinutes > MAX_FIRST_TRANSFER_WAIT_MINUTES) {
+                    throw connectionUnverified();
+                }
+            }
+            ready = alighting;
+        }
+
+        if (departure == null || ready == null || !ready.isAfter(departure)) {
+            throw new com.OnETA.common.exception.GlobalException(
+                    com.OnETA.common.error.ErrorCode.TRANSIT_SCHEDULE_UNSUPPORTED);
+        }
+
+        long seconds = Duration.between(departure, ready).getSeconds();
+        int duration = Math.toIntExact((seconds + 59) / 60);
+        if (kakao) {
+            String details = objectMapper.writeValueAsString(providerSchedules);
+            return new RouteSchedulePlan(departure, duration,
+                    "SEOUL_BUS_TRANSFER", details, Math.max(60, duration));
+        }
+        int lead = Math.max(15, Math.min(60, duration));
+        return new RouteSchedulePlan(departure, duration, "ODSAY", null, lead);
+    }
+
+    private FirstBoundary resolveFirstBoundary(
+            TransitDto.RouteOptionResponse route,
+            TransitDto.RouteSegment segment,
+            LocalDate serviceDate,
+            Map<String, LocalDateTime> scheduleCache) {
+        if (SeoulBusScheduleService.isKakao(route)) {
+            SeoulBusScheduleService.Schedule schedule;
+            if ("SUBWAY".equals(segment.getTransitType())) {
+                schedule = resolveKakaoSubwaySchedule(segment, serviceDate);
+            } else {
+                schedule = seoulBusScheduleService.resolve(
+                        route.toBuilder().transferCount(0).segments(List.of(segment)).build(), serviceDate);
+            }
+            return new FirstBoundary(schedule.first(), schedule);
+        }
+
+        LocalDateTime first = serviceTimeCached(
+                segment, NotificationScheduleType.FIRST_TRANSIT, serviceDate, scheduleCache);
+        if (first == null) {
+            throw new com.OnETA.common.exception.GlobalException(
+                    com.OnETA.common.error.ErrorCode.TRANSIT_SCHEDULE_UNSUPPORTED);
+        }
+        return new FirstBoundary(first, null);
+    }
+
+    private com.OnETA.common.exception.GlobalException connectionUnverified() {
+        return new com.OnETA.common.exception.GlobalException(
+                com.OnETA.common.error.ErrorCode.TRANSIT_CONNECTION_UNVERIFIED);
     }
 
     private List<SeoulBusScheduleService.Schedule> resolveKakaoRouteSchedules(
@@ -750,5 +881,7 @@ public class TransitScheduleService {
     public record Decision(LocalDateTime scheduledAt, LocalDateTime hardDeadlineAt, DeliveryPhase phase, LocalDateTime baseDepartureAt, LocalDateTime effectiveDepartureAt, boolean recovery, int estimatedDuration) {}
     private record RouteSchedulePlan(LocalDateTime departure, int durationMinutes, String source,
                                      String providerDetails, int evaluationLeadMinutes) {}
+    private record FirstBoundary(LocalDateTime firstDeparture,
+                                 SeoulBusScheduleService.Schedule providerSchedule) {}
     private record RecoveryCandidate(LocalDateTime boardingAt, LocalDateTime scheduledAt) {}
 }
