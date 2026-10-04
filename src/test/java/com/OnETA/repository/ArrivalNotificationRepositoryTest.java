@@ -27,6 +27,30 @@ class ArrivalNotificationRepositoryTest {
     private TransactionTemplate transactionTemplate;
 
     @Test
+    void updatesManagedReminderOffsetsAndFlushesSuccessfully() {
+        Long notificationId = transactionTemplate.execute(status -> {
+            User user = users.save(new User(
+                    "offset-update-" + System.nanoTime() + "@example.com",
+                    "password", "tester", Role.USER));
+            ArrivalNotification notification = new ArrivalNotification(
+                    user, "first-transit", List.of(10), 0,
+                    null, "route", NotificationScheduleType.FIRST_TRANSIT);
+            return notifications.saveAndFlush(notification).getId();
+        });
+
+        transactionTemplate.executeWithoutResult(status -> {
+            ArrivalNotification loaded = notifications.findById(notificationId).orElseThrow();
+            loaded.updateCommonInfo(null, List.of(1, 5, 30));
+            notifications.flush();
+        });
+
+        transactionTemplate.executeWithoutResult(status -> {
+            ArrivalNotification reloaded = notifications.findById(notificationId).orElseThrow();
+            assertThat(reloaded.getReminderOffsetMinutesList()).containsExactly(1, 5, 30);
+        });
+    }
+
+    @Test
     void schedulerQueryInitializesReminderOffsetsAfterRepositoryTransactionEnds() {
         Long notificationId = transactionTemplate.execute(status -> {
             User user = users.save(new User(
