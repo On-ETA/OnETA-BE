@@ -27,6 +27,21 @@ import static org.springframework.test.web.client.response.MockRestResponseCreat
 class TransitApiServiceTest {
 
     @ParameterizedTest
+    @CsvSource({
+            "4, METROPOLITAN",
+            "14, METROPOLITAN",
+            "22, METROPOLITAN",
+            "11, TRUNK",
+            "12, BRANCH",
+            "13, CIRCULAR",
+            "3, VILLAGE"
+    })
+    void normalizesOdsayBusTypes(int providerType, BusType expected) {
+        assertThat(BusType.fromOdsay(providerType)).isEqualTo(expected);
+    }
+
+
+    @ParameterizedTest
     @CsvSource(delimiter = '|', value = {
             "{\"error\":[{\"code\":\"429\",\"message\":\"Daily quota exceeded\"}]}|TRANSIT_API_UNAVAILABLE",
             "{\"error\":{\"code\":\"-99\"}}|TRANSIT_ROUTE_NOT_FOUND",

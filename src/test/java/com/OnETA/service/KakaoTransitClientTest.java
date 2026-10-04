@@ -72,13 +72,22 @@ class KakaoTransitClientTest {
         server.verify();
     }
 
-    @Test
-    void normalizesKakaoBusType() {
-        String trunkBody = BODY.replace("\"type\":\"시외\"", "\"type\":\"간선\"");
+    @ParameterizedTest
+    @org.junit.jupiter.params.provider.CsvSource({
+            "BLUE, TRUNK",
+            "GREEN, BRANCH",
+            "YELLOW, CIRCULAR",
+            "RED, METROPOLITAN",
+            "SEAT, METROPOLITAN",
+            "간선, TRUNK",
+            "광역, METROPOLITAN"
+    })
+    void normalizesKakaoBusType(String providerType, BusType expected) {
+        String body = BODY.replace("\"type\":\"시외\"", "\"type\":\"" + providerType + "\"");
 
-        var bus = kakao.parse(trunkBody).get(0).getSegments().get(1);
+        var bus = kakao.parse(body).get(0).getSegments().get(1);
 
-        assertThat(bus.getBusType()).isEqualTo(BusType.TRUNK);
+        assertThat(bus.getBusType()).isEqualTo(expected);
     }
 
     @Test
