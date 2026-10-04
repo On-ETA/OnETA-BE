@@ -126,6 +126,69 @@ class TransitScheduleServiceTest {
     }
 
     @Test
+    void connectedFirstUsesActualNextSubwayInsteadOfOnlyItsDailyFirst() {
+        TransitApiService transit = mock(TransitApiService.class);
+        PublicDataTransitService publicData = mock(PublicDataTransitService.class);
+        ScheduleSnapshotRepository snapshots = mock(ScheduleSnapshotRepository.class);
+        TransitScheduleService service = new TransitScheduleService(
+                transit, publicData, snapshots, new ObjectMapper(), new RestTemplate());
+
+        var seoulBus = mock(SeoulBusScheduleService.class);
+        ReflectionTestUtils.setField(service, "seoulBusScheduleService", seoulBus);
+        var tago = mock(TagoSubwayScheduleService.class);
+        service.setTagoSubwayScheduleService(tago);
+        var metro = mock(SeoulMetroTrainScheduleService.class);
+        service.setSeoulMetroTrainScheduleService(metro);
+
+        LocalDate day = LocalDate.of(2026, 10, 4);
+        var route = kakaoBusSubwayRoute();
+        when(seoulBus.resolve(any(), eq(day))).thenReturn(new SeoulBusScheduleService.Schedule(
+                "bus", "", "night-bus", day.atTime(22, 30), day.plusDays(1).atTime(1, 0)));
+        when(tago.resolve(any(), eq(day))).thenReturn(new SeoulBusScheduleService.Schedule(
+                "subway", "", "1호선", day.atTime(5, 30), day.plusDays(1).atTime(0, 30)));
+        when(metro.firstTripAtOrAfter(any(), eq(day), any())).thenReturn(Optional.of(
+                new SeoulMetroTrainScheduleService.TripWindow(day.atTime(23, 5), day.atTime(23, 55))));
+
+        assertThat(service.previewDepartureForServiceDate(
+                route, NotificationScheduleType.FIRST_TRANSIT, day, new java.util.HashMap<>()))
+                .isEqualTo(day.atTime(22, 17));
+
+        verify(metro).firstTripAtOrAfter(any(), eq(day), eq(day.atTime(22, 49)));
+    }
+
+    @Test
+    void connectedFirstRejectsOvernightTransferWait() {
+        TransitApiService transit = mock(TransitApiService.class);
+        PublicDataTransitService publicData = mock(PublicDataTransitService.class);
+        ScheduleSnapshotRepository snapshots = mock(ScheduleSnapshotRepository.class);
+        TransitScheduleService service = new TransitScheduleService(
+                transit, publicData, snapshots, new ObjectMapper(), new RestTemplate());
+
+        var seoulBus = mock(SeoulBusScheduleService.class);
+        ReflectionTestUtils.setField(service, "seoulBusScheduleService", seoulBus);
+        var tago = mock(TagoSubwayScheduleService.class);
+        service.setTagoSubwayScheduleService(tago);
+        var metro = mock(SeoulMetroTrainScheduleService.class);
+        service.setSeoulMetroTrainScheduleService(metro);
+
+        LocalDate day = LocalDate.of(2026, 10, 4);
+        var route = kakaoBusSubwayRoute();
+        when(seoulBus.resolve(any(), eq(day))).thenReturn(new SeoulBusScheduleService.Schedule(
+                "bus", "", "night-bus", day.atTime(22, 30), day.plusDays(1).atTime(1, 0)));
+        when(tago.resolve(any(), eq(day))).thenReturn(new SeoulBusScheduleService.Schedule(
+                "subway", "", "1호선", day.atTime(5, 30), day.plusDays(1).atTime(0, 30)));
+        when(metro.firstTripAtOrAfter(any(), eq(day), any())).thenReturn(Optional.of(
+                new SeoulMetroTrainScheduleService.TripWindow(
+                        day.plusDays(1).atTime(5, 30), day.plusDays(1).atTime(6, 20))));
+
+        assertThatThrownBy(() -> service.previewDepartureForServiceDate(
+                route, NotificationScheduleType.FIRST_TRANSIT, day, new java.util.HashMap<>()))
+                .isInstanceOfSatisfying(com.OnETA.common.exception.GlobalException.class,
+                        e -> assertThat(e.getErrorCode())
+                                .isEqualTo(com.OnETA.common.error.ErrorCode.TRANSIT_CONNECTION_UNVERIFIED));
+    }
+
+    @Test
     void seoulSingleBusUsesStationTimeMinusAccessWalkAndNoOdsayOrRealtime() {
         TransitScheduleService service = service("05:30", "23:30");
         var seoul = mock(SeoulBusScheduleService.class);
@@ -516,7 +579,7 @@ class TransitScheduleServiceTest {
                 DATE.atTime(6, 0), DATE.atTime(6, 15), false, "B")));
         var decision = service.evaluate(n, DATE, DATE.atTime(5, 10), SEOUL);
         assertThat(decision.scheduledAt()).isEqualTo(DATE.atTime(5, 5));
-        assertThat(decision.estimatedDuration()).isEqualTo(68);
+        assertThat(decision.estimatedDuration()).isEqualTo(60);
         assertThat(saved.get().getProviderDetails()).contains("stationId");
         when(seoul.arrivals(eq(b), any())).thenReturn(List.of());
         assertThat(service.evaluate(n, DATE, DATE.atTime(5, 11), SEOUL).scheduledAt()).isEqualTo(DATE.atTime(5, 5));
@@ -612,6 +675,39 @@ class TransitScheduleServiceTest {
         when(n.getReminderOffsetMinutes()).thenReturn(offsets.get(0));
         when(n.getReminderOffsetMinutesList()).thenReturn(offsets);
         return n;
+    }
+
+    private TransitDto.RouteOptionResponse kakaoBusSubwayRoute() {
+        return TransitDto.RouteOptionResponse.builder()
+                .provider("KAKAO")
+                .routeId("KAKAO_connected_first")
+                .totalDurationMinutes(87)
+                .transferCount(1)
+                .segments(List.of(
+                        TransitDto.RouteSegment.builder()
+                                .transitType("WALK").durationMinutes(8)
+                                .startStation("").endStation("버스정류장").stations(List.of()).build(),
+                        TransitDto.RouteSegment.builder()
+                                .transitType("BUS").transitName("H6B(심야)").durationMinutes(18)
+                                .startStation("동탄119안전센터").endStation("서동탄")
+                                .stations(List.of(
+                                        TransitDto.RouteStation.builder().name("동탄119안전센터").sequence(1).build(),
+                                        TransitDto.RouteStation.builder().name("서동탄").sequence(2).build()))
+                                .build(),
+                        TransitDto.RouteSegment.builder()
+                                .transitType("WALK").durationMinutes(1)
+                                .startStation("서동탄").endStation("서동탄역").stations(List.of()).build(),
+                        TransitDto.RouteSegment.builder()
+                                .transitType("SUBWAY").transitName("1호선").durationMinutes(55)
+                                .startStation("서동탄").endStation("신도림")
+                                .stations(List.of(
+                                        TransitDto.RouteStation.builder().name("서동탄").sequence(1).build(),
+                                        TransitDto.RouteStation.builder().name("신도림").sequence(2).build()))
+                                .build(),
+                        TransitDto.RouteSegment.builder()
+                                .transitType("WALK").durationMinutes(5)
+                                .startStation("신도림").endStation("").stations(List.of()).build()))
+                .build();
     }
 
     private TransitDto.RouteOptionResponse kakaoSubwayRoute() {

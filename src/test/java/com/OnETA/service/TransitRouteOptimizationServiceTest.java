@@ -21,6 +21,9 @@ class TransitRouteOptimizationServiceTest {
         TransitApiService api = mock(TransitApiService.class);
         TransitScheduleService schedules = mock(TransitScheduleService.class);
         var service = new TransitRouteOptimizationService(api, schedules);
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "clock",
+                java.time.Clock.fixed(java.time.ZonedDateTime.parse("2026-10-02T20:00:00+09:00").toInstant(),
+                        java.time.ZoneId.of("Asia/Seoul")));
         var a = route("A", "ODSAY", 30);
         var b = route("B", "KAKAO", 40);
         var c = route("C", "ODSAY", 20);
@@ -46,6 +49,9 @@ class TransitRouteOptimizationServiceTest {
         TransitApiService api = mock(TransitApiService.class);
         TransitScheduleService schedules = mock(TransitScheduleService.class);
         var service = new TransitRouteOptimizationService(api, schedules);
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "clock",
+                java.time.Clock.fixed(java.time.ZonedDateTime.parse("2026-10-03T04:00:00+09:00").toInstant(),
+                        java.time.ZoneId.of("Asia/Seoul")));
         var unsupported = route("X", "KAKAO", 10);
         var early = route("EARLY", "ODSAY", 35);
         var late = route("LATE", "ODSAY", 20);
@@ -63,6 +69,41 @@ class TransitRouteOptimizationServiceTest {
 
         assertThat(result).extracting(r -> r.getRoute().getRouteId())
                 .containsExactly("EARLY", "LATE");
+    }
+
+    @Test
+    void firstTransitAdvancesWholeServiceDayAfterEarliestFirstHasPassed() {
+        TransitApiService api = mock(TransitApiService.class);
+        TransitScheduleService schedules = mock(TransitScheduleService.class);
+        var service = new TransitRouteOptimizationService(api, schedules);
+        var morning = route("MORNING", "ODSAY", 60);
+        var night = route("NIGHT", "ODSAY", 90);
+        when(api.searchScheduleCandidates(anyString(), anyDouble(), anyDouble(), any(), anyDouble(), anyDouble(), any(), eq(5)))
+                .thenReturn(List.of(morning, night));
+
+        when(schedules.previewDepartureForServiceDate(eq(morning), eq(NotificationScheduleType.FIRST_TRANSIT),
+                any(LocalDate.class), anyMap())).thenAnswer(invocation -> {
+            LocalDate day = invocation.getArgument(2);
+            return day.atTime(5, 30);
+        });
+        when(schedules.previewDepartureForServiceDate(eq(night), eq(NotificationScheduleType.FIRST_TRANSIT),
+                any(LocalDate.class), anyMap())).thenAnswer(invocation -> {
+            LocalDate day = invocation.getArgument(2);
+            return day.atTime(22, 17);
+        });
+
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "clock",
+                java.time.Clock.fixed(java.time.ZonedDateTime.parse("2026-10-04T15:00:00+09:00").toInstant(),
+                        java.time.ZoneId.of("Asia/Seoul")));
+
+        var result = service.search("user@test.com", 127.07, 37.20, null,
+                126.92, 37.55, null, NotificationScheduleType.FIRST_TRANSIT);
+
+        assertThat(result.get(0).getRoute().getRouteId()).isEqualTo("MORNING");
+        assertThat(result.get(0).getEstimatedDepartureAt().toLocalDate())
+                .isEqualTo(LocalDate.of(2026, 10, 5));
+        assertThat(result.get(0).getEstimatedDepartureAt().toLocalTime())
+                .isEqualTo(java.time.LocalTime.of(5, 30));
     }
 
     @Test

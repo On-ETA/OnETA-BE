@@ -53,11 +53,21 @@ public class TransitRouteOptimizationService {
         serviceDays.add(now.toLocalDate().plusDays(1));
 
         for (LocalDate serviceDate : serviceDays) {
-            List<Candidate> futureCandidates = evaluateCandidates(
-                    routes, scheduleType, serviceDate, now, scheduleCache, failures);
-            if (!futureCandidates.isEmpty()) {
-                return rank(futureCandidates, scheduleType);
+            boolean futureOnly = scheduleType != NotificationScheduleType.FIRST_TRANSIT;
+            List<Candidate> candidates = evaluateCandidates(
+                    routes, scheduleType, serviceDate, now, scheduleCache, failures, futureOnly);
+            if (candidates.isEmpty()) continue;
+
+            if (scheduleType == NotificationScheduleType.FIRST_TRANSIT) {
+                Candidate earliest = candidates.stream()
+                        .min(Comparator.comparing(Candidate::departure))
+                        .orElseThrow();
+                // FIRST is the first connected opportunity of a service day. Once that
+                // opportunity has passed, a route whose own first run begins late at night
+                // must not keep today's FIRST alive; advance the whole search to the next day.
+                if (!earliest.departure().isAfter(now)) continue;
             }
+            return rank(candidates, scheduleType);
         }
 
         if (failures.unavailable) throw new GlobalException(ErrorCode.TRANSIT_SCHEDULE_UNAVAILABLE);
@@ -71,13 +81,14 @@ public class TransitRouteOptimizationService {
             LocalDate serviceDate,
             LocalDateTime now,
             Map<String, LocalDateTime> scheduleCache,
-            FailureState failures) {
+            FailureState failures,
+            boolean futureOnly) {
         List<Candidate> candidates = new ArrayList<>();
         for (TransitDto.RouteOptionResponse route : routes) {
             try {
                 LocalDateTime departure = transitScheduleService.previewDepartureForServiceDate(
                         route, scheduleType, serviceDate, scheduleCache);
-                if (departure.isAfter(now)) {
+                if (!futureOnly || departure.isAfter(now)) {
                     candidates.add(new Candidate(route, departure));
                 }
             } catch (GlobalException e) {

@@ -57,6 +57,11 @@ public class KakaoTransitClient {
     boolean isConfigured() { return enabled && !key.isBlank(); }
 
     public List<TransitDto.RouteOptionResponse> search(double sx, double sy, double ex, double ey) {
+        return search(sx, sy, ex, ey, 3);
+    }
+
+    public List<TransitDto.RouteOptionResponse> search(
+            double sx, double sy, double ex, double ey, int maxCandidates) {
         if (!isConfigured()) throw new GlobalException(ErrorCode.TRANSIT_API_UNAVAILABLE);
         var uri = UriComponentsBuilder.fromUriString(URL)
                 .queryParam("start_x", sx).queryParam("start_y", sy)
@@ -68,7 +73,7 @@ public class KakaoTransitClient {
             var response = restTemplate.exchange(uri, HttpMethod.GET, new HttpEntity<>(headers), String.class);
             // Different alternatives often share the same access or egress walk.
             Map<WalkLeg, Integer> walkingTimes = new HashMap<>();
-            return parse(response.getBody()).stream()
+            return parse(response.getBody(), maxCandidates).stream()
                     .map(route -> completeEndpointWalks(route, sx, sy, ex, ey, headers, walkingTimes))
                     .toList();
         } catch (GlobalException e) {
@@ -145,6 +150,10 @@ public class KakaoTransitClient {
     }
 
     List<TransitDto.RouteOptionResponse> parse(String body) {
+        return parse(body, 3);
+    }
+
+    List<TransitDto.RouteOptionResponse> parse(String body, int maxCandidates) {
         try {
             JsonNode root = mapper.readTree(body);
             if (root == null || !root.isObject()) throw invalid();
@@ -178,7 +187,7 @@ public class KakaoTransitClient {
                         .routeId("KAKAO_" + HexFormat.of().formatHex(hash, 0, 8)).provider("KAKAO")
                         .totalDurationMinutes(minutes).realTimeDurationMinutes(minutes)
                         .totalCost(cost).transferCount(transfers).segments(segments).build());
-                if (result.size() == 3) break;
+                if (result.size() >= Math.max(1, Math.min(maxCandidates, 10))) break;
             }
             return result;
         } catch (GlobalException e) {

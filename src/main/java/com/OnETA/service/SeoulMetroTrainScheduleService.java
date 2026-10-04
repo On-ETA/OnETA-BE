@@ -40,7 +40,7 @@ public class SeoulMetroTrainScheduleService {
     private final RestTemplate http;
     private final String key;
     private final String url;
-    private final Map<String, Cached> cache = new HashMap<>();
+    private final Map<String, CachedTrips> cache = new HashMap<>();
 
     @Autowired
     public SeoulMetroTrainScheduleService(
@@ -69,43 +69,57 @@ public class SeoulMetroTrainScheduleService {
 
     public synchronized SeoulBusScheduleService.Schedule resolve(
             TransitDto.RouteSegment segment, LocalDate serviceDate) {
+        List<Trip> validTrips = loadTrips(segment, serviceDate);
+        LocalDateTime first = validTrips.get(0).departure();
+        LocalDateTime last = validTrips.get(validTrips.size() - 1).departure();
+        return new SeoulBusScheduleService.Schedule(
+                normalize(segment.getStartStation()), "", "SEOUL_METRO:" + normalizeLine(segment.getTransitName()),
+                first, last, 0, normalize(segment.getEndStation()), 0);
+    }
+
+    public synchronized Optional<TripWindow> firstTripAtOrAfter(
+            TransitDto.RouteSegment segment, LocalDate serviceDate, LocalDateTime earliestBoarding) {
+        if (earliestBoarding == null) return Optional.empty();
+        return loadTrips(segment, serviceDate).stream()
+                .filter(trip -> !trip.departure().isBefore(earliestBoarding))
+                .min(Comparator.comparing(Trip::departure))
+                .map(trip -> new TripWindow(trip.departure(), trip.arrival()));
+    }
+
+    private List<Trip> loadTrips(TransitDto.RouteSegment segment, LocalDate serviceDate) {
         validate(segment, serviceDate);
-        String cacheKey = serviceDate + "|" + normalize(segment.getTransitName()) + "|"
+        String cacheKey = serviceDate + "|" + normalizeLine(segment.getTransitName()) + "|"
                 + normalize(segment.getStartStation()) + "|" + normalize(segment.getEndStation());
-        Cached cached = cache.get(cacheKey);
+        CachedTrips cached = cache.get(cacheKey);
         if (cached != null && cached.expiresAt().isAfter(java.time.Instant.now())) {
-            return cached.schedule();
+            return cached.trips();
         }
         if (key.isBlank()) throw unavailable();
 
         String weekday = isWeekend(serviceDate) ? "주말" : "평일";
-        List<String> directions = directions(segment.getTransitName());
+        String lineName = normalizeLine(segment.getTransitName());
+        List<String> directions = directions(lineName);
         List<Trip> validTrips = new ArrayList<>();
 
         for (String direction : directions) {
-            List<Row> starts = fetch(segment.getTransitName(), segment.getStartStation(),
+            List<Row> starts = fetch(lineName, segment.getStartStation(),
                     direction, weekday, serviceDate);
-            List<Row> ends = fetch(segment.getTransitName(), segment.getEndStation(),
+            List<Row> ends = fetch(lineName, segment.getEndStation(),
                     direction, weekday, serviceDate);
             validTrips.addAll(matchTrips(starts, ends, segment, serviceDate));
         }
 
         if (validTrips.isEmpty()) {
             log.info("Seoul Metro schedule had no connectable train: line={}, start={}, end={}, serviceDate={}",
-                    segment.getTransitName(), segment.getStartStation(), segment.getEndStation(), serviceDate);
+                    lineName, segment.getStartStation(), segment.getEndStation(), serviceDate);
             throw unsupported();
         }
 
         validTrips.sort(Comparator.comparing(Trip::departure));
-        LocalDateTime first = validTrips.get(0).departure();
-        LocalDateTime last = validTrips.get(validTrips.size() - 1).departure();
-        var schedule = new SeoulBusScheduleService.Schedule(
-                normalize(segment.getStartStation()), "", "SEOUL_METRO:" + normalize(segment.getTransitName()),
-                first, last, 0, normalize(segment.getEndStation()), 0);
-
+        List<Trip> immutable = List.copyOf(validTrips);
         if (cache.size() >= 1000) cache.clear();
-        cache.put(cacheKey, new Cached(schedule, java.time.Instant.now().plus(Duration.ofHours(6))));
-        return schedule;
+        cache.put(cacheKey, new CachedTrips(immutable, java.time.Instant.now().plus(Duration.ofHours(6))));
+        return immutable;
     }
 
     private List<Row> fetch(String lineName, String stationName, String direction,
@@ -217,9 +231,16 @@ public class SeoulMetroTrainScheduleService {
     }
 
     private List<String> directions(String lineName) {
-        String line = normalize(lineName);
+        String line = normalizeLine(lineName);
         if ("2호선".equals(line)) return List.of("내선", "외선");
         return List.of("상행", "하행");
+    }
+
+    private static String normalizeLine(String value) {
+        return normalize(value)
+                .replace("수도권", "")
+                .replace("서울", "")
+                .replace("지하철", "");
     }
 
     private boolean isWeekend(LocalDate date) {
@@ -258,7 +279,8 @@ public class SeoulMetroTrainScheduleService {
         return new GlobalException(ErrorCode.TRANSIT_SCHEDULE_UNAVAILABLE);
     }
 
+    public record TripWindow(LocalDateTime departure, LocalDateTime arrival) {}
     private record Row(String trainNo, String departure, String arrival) {}
     private record Trip(String trainNo, LocalDateTime departure, LocalDateTime arrival) {}
-    private record Cached(SeoulBusScheduleService.Schedule schedule, java.time.Instant expiresAt) {}
+    private record CachedTrips(List<Trip> trips, java.time.Instant expiresAt) {}
 }
