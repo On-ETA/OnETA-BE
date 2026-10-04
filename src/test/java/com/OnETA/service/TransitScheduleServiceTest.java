@@ -150,7 +150,7 @@ class TransitScheduleServiceTest {
                 new SeoulMetroTrainScheduleService.TripWindow(day.atTime(23, 5), day.atTime(23, 55))));
 
         assertThat(service.previewDepartureForServiceDate(
-                route, NotificationScheduleType.FIRST_TRANSIT, day, new HashMap<>()))
+                route, NotificationScheduleType.FIRST_TRANSIT, day, new java.util.HashMap<>()))
                 .isEqualTo(day.atTime(22, 17));
 
         verify(metro).firstTripAtOrAfter(any(), eq(day), eq(day.atTime(22, 54)));
@@ -182,7 +182,7 @@ class TransitScheduleServiceTest {
                         day.plusDays(1).atTime(5, 30), day.plusDays(1).atTime(6, 20))));
 
         assertThatThrownBy(() -> service.previewDepartureForServiceDate(
-                route, NotificationScheduleType.FIRST_TRANSIT, day, new HashMap<>()))
+                route, NotificationScheduleType.FIRST_TRANSIT, day, new java.util.HashMap<>()))
                 .isInstanceOfSatisfying(com.OnETA.common.exception.GlobalException.class,
                         e -> assertThat(e.getErrorCode())
                                 .isEqualTo(com.OnETA.common.error.ErrorCode.TRANSIT_CONNECTION_UNVERIFIED));
