@@ -268,10 +268,14 @@ public class NotificationService {
 
     private void validateRouteSchedule(NotificationScheduleType type, String details) {
         if (type == null || type == NotificationScheduleType.NORMAL) return;
-        // Registration/update must validate only the persisted route payload.
-        // External timetable availability is transient and is reported by the
-        // transit query/scheduler as T005/T006 after the setting is saved.
-        transitApiService.readSavedRoute(details);
+        // Registration/update validates only the persisted route payload.
+        // NIGHT_ONLY is a route characteristic, so reject it here without
+        // depending on transient timetable API availability.
+        var route = transitApiService.readSavedRoute(details);
+        if (TransitRouteClassifier.isNightOnlyRoute(route)) {
+            throw new com.OnETA.common.exception.GlobalException(
+                    com.OnETA.common.error.ErrorCode.TRANSIT_NIGHT_ONLY_ROUTE);
+        }
     }
 
     private void validateTargetArrivalTime(NotificationScheduleType type, java.time.LocalTime time) {
