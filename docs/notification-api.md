@@ -36,7 +36,7 @@
 
 두 예제의 routeDetails는 자리표시자다. 실제 검색 경로의 정류장 목록·좌표·provider를 보존해 넣어야 한다.
 
-등록 응답은 기존과 같이 HTTP 200과 생성 ID다. 목록/상세 응답에는 `category: SCHEDULE | TRANSIT`와 `scheduleType: NORMAL | FIRST_TRANSIT | LAST_TRANSIT`가 함께 포함된다. 기존 `/arrival` 응답에서 첫·막차의 targetArrivalTime은 null이다. 전용 `/transit` 응답은 아래 예상 출발 시각 형식을 따른다. 내 일정은 목록으로, 첫차·막차는 본인의 현재 설정 하나만 반환한다. 보관된 알림은 제외한다.
+등록 응답은 기존과 같이 HTTP 200과 생성 ID다. 등록 단계에서는 저장할 경로 JSON 형식만 검증하며, 서울 버스·지하철 시간표 API의 현재 가용 여부는 등록 성공 여부를 결정하지 않는다. 시간표 계산이 T005/T006으로 실패해도 설정은 저장되고 조회 시 `estimateStatus=UNAVAILABLE`로 반환한다. 목록/상세 응답에는 `category: SCHEDULE | TRANSIT`와 `scheduleType: NORMAL | FIRST_TRANSIT | LAST_TRANSIT`가 함께 포함된다. 기존 `/arrival` 응답에서 첫·막차의 targetArrivalTime은 null이다. 전용 `/transit` 응답은 아래 예상 출발 시각 형식을 따른다. 내 일정은 목록으로, 첫차·막차는 본인의 현재 설정 하나만 반환한다. 보관된 알림은 제외한다.
 
 첫차·막차 설정 변경은 새 본문으로 `POST /api/notifications/transit`을 호출한다. `DELETE /api/notifications/transit`은 ID나 목록 없이 현재 설정을 제거한다(보관 처리, 반복 호출 가능). 상태 변경은 기존 `/arrival/{id}/status`를 사용할 수 있으며 보관된 ID는 접근할 수 없다. 일반 일정의 기존 수정·삭제 API는 유지한다. 호환 `/arrival` 등록도 첫차·막차에 같은 교체 정책을 적용한다. NORMAL→첫·막차 PATCH는 다른 현재 첫·막차가 있으면 N006 제한 오류이며, 교체하려면 POST를 사용한다.
 
@@ -91,6 +91,6 @@
 - 사용자별 첫차·막차 중 활성 알림의 최대 ID를 유지한다. 활성 알림이 없으면 전체 중 최대 ID를 유지한다. 나머지는 보관·비활성화한다.
 - 보관된 알림의 PENDING/SENDING 발송은 EXPIRED로 전환한다. 알림 행, 기존 이름, 완료된 발송 및 snapshot 이력은 삭제하지 않는다.
 - `notifications.name`은 일반 일정과 공용인 NOT NULL 컬럼이므로 유지한다. 새 첫차·막차는 내부 이름만 자동 지정하며, 전용 API에는 노출하지 않는다.
-- 새 등록은 사용자 행 잠금 아래에서 검증→이전 알림 보관 및 대기 발송 만료→새 ID 생성 순서로 처리한다. 검증 실패 시 이전 설정을 유지한다.
+- 새 등록은 사용자 행 잠금 아래에서 경로 JSON·입력값 검증→이전 동일 타입 알림 제거 및 대기 발송 만료→새 ID 생성 순서로 처리한다. 외부 시간표 T005/T006은 등록 검증 실패로 취급하지 않는다.
 - 이미 Firebase에 전달 중이거나 전달 완료된 푸시는 교체로 회수할 수 없다. 보관 상태는 새 발송을 획득할 때도 확인한다.
 - 서버 코드와 V20을 함께 배포하고 구버전 서버의 쓰기를 중단한 뒤 적용한다. 일반 일정의 이름·반복 요일·5개 제한은 유지한다.
