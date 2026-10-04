@@ -27,11 +27,13 @@ class NotificationServiceTest {
     }
 
     private final ArrivalNotificationRepository arrivals = mock(ArrivalNotificationRepository.class);
+    private final NotificationRepository notifications = mock(NotificationRepository.class);
+    private final NotificationDeliveryRepository deliveries = mock(NotificationDeliveryRepository.class);
     private final UserRepository users = mock(UserRepository.class);
     private final User user = mock(User.class);
     private final TransitApiService transit = mock(TransitApiService.class);
     private final NotificationService service = new NotificationService(arrivals,
-            mock(NotificationRepository.class), users, new RepeatDaysService(), transit, mock(NotificationDeliveryRepository.class));
+            notifications, users, new RepeatDaysService(), transit, deliveries);
 
     @ParameterizedTest
     @EnumSource(value = NotificationScheduleType.class, names = {"FIRST_TRANSIT", "LAST_TRANSIT"})
@@ -152,6 +154,44 @@ class NotificationServiceTest {
         assertThat(saved.getValue().getScheduleType()).isEqualTo(NotificationScheduleType.NORMAL);
         assertThat(saved.getValue().getTargetArrivalTime()).isEqualTo(LocalTime.of(9, 0));
         assertThat(saved.getValue().getRepeatDays()).isEqualTo(17);
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = NotificationScheduleType.class, names = {"FIRST_TRANSIT", "LAST_TRANSIT"})
+    void deletesOnlySelectedTransitNotificationById(NotificationScheduleType type) {
+        when(user.getId()).thenReturn(1L);
+        when(users.findByEmail("test@example.com")).thenReturn(Optional.of(user));
+        ArrivalNotification notification = new ArrivalNotification(
+                user, "대중교통 알림", List.of(10), 0, null, "{}", type);
+        org.springframework.test.util.ReflectionTestUtils.setField(notification, "id", 7L);
+        when(arrivals.findById(7L)).thenReturn(Optional.of(notification));
+
+        service.deleteTransitNotification("test@example.com", 7L);
+
+        verify(deliveries).expireReplacedTransitDeliveries(List.of(7L));
+        verify(notifications).deleteScheduleSnapshotsByIds(List.of(7L));
+        verify(notifications).deleteDeliveriesByIds(List.of(7L));
+        verify(notifications).deleteReminderOffsetsByIds(List.of(7L));
+        verify(notifications).deleteArrivalRowsByIds(List.of(7L));
+        verify(notifications).deleteRowsByIds(List.of(7L));
+    }
+
+    @Test
+    void transitDeleteRejectsNormalScheduleId() {
+        when(user.getId()).thenReturn(1L);
+        when(users.findByEmail("test@example.com")).thenReturn(Optional.of(user));
+        ArrivalNotification notification = new ArrivalNotification(
+                user, "내 일정", List.of(10), 0, LocalTime.of(9, 0), "{}",
+                NotificationScheduleType.NORMAL);
+        org.springframework.test.util.ReflectionTestUtils.setField(notification, "id", 8L);
+        when(arrivals.findById(8L)).thenReturn(Optional.of(notification));
+
+        assertThatThrownBy(() -> service.deleteTransitNotification("test@example.com", 8L))
+                .isInstanceOfSatisfying(GlobalException.class, e -> assertThat(e.getErrorCode())
+                        .isEqualTo(com.OnETA.common.error.ErrorCode.INVALID_INPUT_VALUE));
+
+        verifyNoInteractions(deliveries);
+        verifyNoInteractions(notifications);
     }
 
     @Test
