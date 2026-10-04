@@ -70,79 +70,52 @@ class TransitScheduleServiceTest {
     }
 
     @Test
-    void kakaoSubwayFallsBackToOdsayWhenTagoWeekendScheduleIsEmpty() {
+    void kakaoSubwayFallsBackToSeoulMetroWhenTagoWeekendScheduleIsEmpty() {
         TransitApiService transit = mock(TransitApiService.class);
         PublicDataTransitService publicData = mock(PublicDataTransitService.class);
         ScheduleSnapshotRepository snapshots = mock(ScheduleSnapshotRepository.class);
-        ObjectMapper mapper = new ObjectMapper();
-        RestTemplate rest = new RestTemplate();
-        MockRestServiceServer server = MockRestServiceServer.bindTo(rest).build();
-
-        server.expect(requestTo(org.hamcrest.Matchers.containsString("searchStation")))
-                .andExpect(queryParam("stationClass", "2"))
-                .andExpect(queryParam("CID", "1000"))
-                .andRespond(withSuccess("""
-                        {"result":{"station":[
-                          {"stationClass":2,"stationID":111,"stationName":"신도림","laneName":"1호선","x":126.8916,"y":37.5082},
-                          {"stationClass":2,"stationID":222,"stationName":"신도림","laneName":"2호선","x":126.8916,"y":37.5082}
-                        ]}}
-                        """, MediaType.APPLICATION_JSON));
-        server.expect(requestTo(org.hamcrest.Matchers.containsString("searchStation")))
-                .andExpect(queryParam("stationClass", "2"))
-                .andRespond(withSuccess("""
-                        {"result":{"station":[
-                          {"stationClass":2,"stationID":333,"stationName":"합정","laneName":"2호선","x":126.9144,"y":37.5499},
-                          {"stationClass":2,"stationID":444,"stationName":"합정","laneName":"6호선","x":126.9144,"y":37.5499}
-                        ]}}
-                        """, MediaType.APPLICATION_JSON));
-        server.expect(queryParam("SID", "222"))
-                .andExpect(queryParam("EID", "333"))
-                .andExpect(queryParam("MODE", "3"))
-                .andExpect(queryParam("DAY", "2"))
-                .andRespond(withSuccess("{\"result\":{\"startTime\":\"05:32\"}}", MediaType.APPLICATION_JSON));
-        server.expect(queryParam("SID", "222"))
-                .andExpect(queryParam("EID", "333"))
-                .andExpect(queryParam("MODE", "4"))
-                .andExpect(queryParam("DAY", "2"))
-                .andRespond(withSuccess("{\"result\":{\"endTime\":\"23:47\"}}", MediaType.APPLICATION_JSON));
-
         TransitScheduleService service = new TransitScheduleService(
-                transit, publicData, snapshots, mapper, rest);
-        ReflectionTestUtils.setField(service, "apiKey", "test");
-        ReflectionTestUtils.setField(service, "scheduleBaseUrl", "http://odsay/v1/api");
+                transit, publicData, snapshots, new ObjectMapper(), new RestTemplate());
+
         var tago = mock(TagoSubwayScheduleService.class);
         service.setTagoSubwayScheduleService(tago);
         when(tago.resolve(any(), any())).thenThrow(new com.OnETA.common.exception.GlobalException(
                 com.OnETA.common.error.ErrorCode.TRANSIT_SCHEDULE_UNSUPPORTED));
 
+        var seoulMetro = mock(SeoulMetroTrainScheduleService.class);
+        service.setSeoulMetroTrainScheduleService(seoulMetro);
         LocalDate saturday = LocalDate.of(2026, 10, 3);
-        var route = kakaoSubwayRoute();
+        when(seoulMetro.resolve(any(), eq(saturday))).thenReturn(
+                new SeoulBusScheduleService.Schedule(
+                        "신도림", "", "SEOUL_METRO:2호선",
+                        saturday.atTime(5, 32), saturday.plusDays(1).atTime(0, 18),
+                        0, "합정", 0));
+
         assertThat(service.previewDepartureForServiceDate(
-                route, NotificationScheduleType.FIRST_TRANSIT, saturday, new java.util.HashMap<>()))
+                kakaoSubwayRoute(), NotificationScheduleType.FIRST_TRANSIT,
+                saturday, new java.util.HashMap<>()))
                 .isEqualTo(saturday.atTime(5, 27));
 
-        server.verify();
+        verify(seoulMetro).resolve(any(), eq(saturday));
     }
 
     @Test
-    void kakaoSubwayOdsayQuotaFailureBecomesT006InsteadOfT005() {
+    void kakaoSubwaySeoulMetroFailureBecomesT006AfterTagoFailure() {
         TransitApiService transit = mock(TransitApiService.class);
         PublicDataTransitService publicData = mock(PublicDataTransitService.class);
         ScheduleSnapshotRepository snapshots = mock(ScheduleSnapshotRepository.class);
-        RestTemplate rest = new RestTemplate();
-        MockRestServiceServer server = MockRestServiceServer.bindTo(rest).build();
-        server.expect(requestTo(org.hamcrest.Matchers.containsString("searchStation")))
-                .andRespond(org.springframework.test.web.client.response.MockRestResponseCreators
-                        .withStatus(org.springframework.http.HttpStatus.TOO_MANY_REQUESTS));
-
         TransitScheduleService service = new TransitScheduleService(
-                transit, publicData, snapshots, new ObjectMapper(), rest);
-        ReflectionTestUtils.setField(service, "apiKey", "test");
-        ReflectionTestUtils.setField(service, "scheduleBaseUrl", "http://odsay/v1/api");
+                transit, publicData, snapshots, new ObjectMapper(), new RestTemplate());
+
         var tago = mock(TagoSubwayScheduleService.class);
         service.setTagoSubwayScheduleService(tago);
         when(tago.resolve(any(), any())).thenThrow(new com.OnETA.common.exception.GlobalException(
                 com.OnETA.common.error.ErrorCode.TRANSIT_SCHEDULE_UNSUPPORTED));
+
+        var seoulMetro = mock(SeoulMetroTrainScheduleService.class);
+        service.setSeoulMetroTrainScheduleService(seoulMetro);
+        when(seoulMetro.resolve(any(), any())).thenThrow(new com.OnETA.common.exception.GlobalException(
+                com.OnETA.common.error.ErrorCode.TRANSIT_SCHEDULE_UNAVAILABLE));
 
         assertThatThrownBy(() -> service.previewDepartureForServiceDate(
                 kakaoSubwayRoute(), NotificationScheduleType.FIRST_TRANSIT,
@@ -150,8 +123,6 @@ class TransitScheduleServiceTest {
                 .isInstanceOfSatisfying(com.OnETA.common.exception.GlobalException.class,
                         e -> assertThat(e.getErrorCode())
                                 .isEqualTo(com.OnETA.common.error.ErrorCode.TRANSIT_SCHEDULE_UNAVAILABLE));
-
-        server.verify();
     }
 
     @Test
