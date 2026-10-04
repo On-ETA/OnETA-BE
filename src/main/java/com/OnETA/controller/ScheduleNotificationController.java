@@ -50,9 +50,9 @@ public class ScheduleNotificationController {
         return ApiResponse.success(transitQueries.getCurrentNotifications(email(principal)));
     }
 
-    @DeleteMapping("/transit")
-    public ApiResponse<Void> deleteTransit(Principal principal) {
-        service.deleteCurrentTransitNotification(email(principal));
+    @DeleteMapping("/transit/{id}")
+    public ApiResponse<Void> deleteTransit(Principal principal, @PathVariable Long id) {
+        service.deleteTransitNotification(email(principal), id);
         return ApiResponse.success();
     }
 
