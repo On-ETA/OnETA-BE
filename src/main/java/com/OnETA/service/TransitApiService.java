@@ -2,6 +2,7 @@ package com.OnETA.service;
 
 import com.OnETA.common.error.ErrorCode;
 import com.OnETA.common.exception.GlobalException;
+import com.OnETA.dto.BusType;
 import com.OnETA.dto.TransitDto;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
@@ -396,6 +397,9 @@ public class TransitApiService {
                             .endStation(subPath.path("endName").asText(""))
                             .durationMinutes(subPath.path("sectionTime").asInt())
                             .transitName(transitName)
+                            .busType(trafficType == 2
+                                    ? BusType.fromOdsay(integerOrNull(lane, "type"))
+                                    : null)
                             .odsayStartStationId(textOrNull(subPath, "startID"))
                             .odsayEndStationId(textOrNull(subPath, "endID"))
                             .odsayRouteId(textOrNull(lane, "busID"))
@@ -467,6 +471,13 @@ public class TransitApiService {
     private static String textOrNull(JsonNode node, String field) {
         JsonNode value = node.get(field);
         return value == null || value.isNull() ? null : value.asText();
+    }
+
+    private static Integer integerOrNull(JsonNode node, String field) {
+        JsonNode value = node.get(field);
+        return value == null || value.isNull() || !value.isIntegralNumber()
+                ? null
+                : value.asInt();
     }
 
     private static Double doubleOrNull(JsonNode node, String field) {

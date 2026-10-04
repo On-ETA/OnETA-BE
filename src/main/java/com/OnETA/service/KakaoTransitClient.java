@@ -3,6 +3,7 @@ package com.OnETA.service;
 import com.OnETA.common.ExternalApiCallCounter;
 import com.OnETA.common.error.ErrorCode;
 import com.OnETA.common.exception.GlobalException;
+import com.OnETA.dto.BusType;
 import com.OnETA.dto.TransitDto;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -216,11 +217,15 @@ public class KakaoTransitClient {
         }
         JsonNode vehicles = props.path("vehicles");
         String name = vehicles.isArray() && !vehicles.isEmpty() ? vehicles.get(0).path("name").asText("") : "";
+        String vehicleType = vehicles.isArray() && !vehicles.isEmpty()
+                ? vehicles.get(0).path("type").asText("")
+                : "";
         if (!"WALK".equals(type) && (stations.size() < 2 || name.isBlank())) throw invalid();
         JsonNode points = step.path("path").path("points");
         JsonNode first = points.isArray() && !points.isEmpty() ? points.get(0) : null;
         JsonNode last = points.isArray() && !points.isEmpty() ? points.get(points.size() - 1) : null;
         return TransitDto.RouteSegment.builder().transitType(type).transitName(name)
+                .busType("BUS".equals(type) ? BusType.fromKakao(vehicleType) : null)
                 .durationMinutes(minutes(props, "time"))
                 .startStation(stations.isEmpty() ? "" : stations.get(0).getName())
                 .endStation(stations.isEmpty() ? "" : stations.get(stations.size() - 1).getName())

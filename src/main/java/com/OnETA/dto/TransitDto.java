@@ -62,6 +62,7 @@ public class TransitDto {
         private String endStation;
         private Integer durationMinutes;
         private String transitName;
+        private BusType busType;
         private List<RouteStation> stations;
 
         // ODsay identifiers and WGS84 coordinates
