@@ -226,6 +226,7 @@ public class KakaoTransitClient {
         JsonNode last = points.isArray() && !points.isEmpty() ? points.get(points.size() - 1) : null;
         return TransitDto.RouteSegment.builder().transitType(type).transitName(name)
                 .busType("BUS".equals(type) ? BusType.fromKakao(vehicleType) : null)
+                .nightBus("BUS".equals(type) && TransitRouteClassifier.isNightBusName(name))
                 .durationMinutes(minutes(props, "time"))
                 .startStation(stations.isEmpty() ? "" : stations.get(0).getName())
                 .endStation(stations.isEmpty() ? "" : stations.get(stations.size() - 1).getName())

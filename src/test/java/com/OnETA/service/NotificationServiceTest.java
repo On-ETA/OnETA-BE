@@ -39,7 +39,7 @@ class NotificationServiceTest {
         var route = com.OnETA.dto.TransitDto.RouteOptionResponse.builder()
                 .provider("KAKAO").routeId("KAKAO_test")
                 .segments(List.of(com.OnETA.dto.TransitDto.RouteSegment.builder()
-                        .transitType("BUS").transitName("N13").build()))
+                        .transitType("BUS").transitName("273").build()))
                 .build();
         when(transit.readSavedRoute("{}")).thenReturn(route);
         when(user.getId()).thenReturn(1L);
@@ -66,6 +66,28 @@ class NotificationServiceTest {
         verify(transit, never()).validateSeoulSchedule(any());
         assertThat(notification.getScheduleType()).isEqualTo(type);
         assertThat(notification.getTargetArrivalTime()).isNull();
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = NotificationScheduleType.class, names = {"FIRST_TRANSIT", "LAST_TRANSIT"})
+    void rejectsNightOnlyRouteForFirstLastSave(NotificationScheduleType type) {
+        var route = com.OnETA.dto.TransitDto.RouteOptionResponse.builder()
+                .provider("ODSAY").routeId("NIGHT_test")
+                .segments(List.of(
+                        com.OnETA.dto.TransitDto.RouteSegment.builder()
+                                .transitType("WALK").durationMinutes(3).build(),
+                        com.OnETA.dto.TransitDto.RouteSegment.builder()
+                                .transitType("BUS").transitName("N62").nightBus(true).durationMinutes(25).build(),
+                        com.OnETA.dto.TransitDto.RouteSegment.builder()
+                                .transitType("WALK").durationMinutes(3).build()))
+                .build();
+        when(transit.readSavedRoute("{}")).thenReturn(route);
+        when(users.findByEmail("test@example.com")).thenReturn(Optional.of(user));
+
+        assertThatThrownBy(() -> service.createArrivalNotification("test@example.com", request(type)))
+                .isInstanceOfSatisfying(GlobalException.class, e -> assertThat(e.getErrorCode())
+                        .isEqualTo(com.OnETA.common.error.ErrorCode.TRANSIT_NIGHT_ONLY_ROUTE));
+        verify(arrivals, never()).save(any());
     }
 
     @Test

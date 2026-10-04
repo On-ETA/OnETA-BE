@@ -2,6 +2,7 @@ package com.OnETA.service;
 
 import com.OnETA.common.error.ErrorCode;
 import com.OnETA.common.exception.GlobalException;
+import com.OnETA.dto.FirstLastRouteStatus;
 import com.OnETA.dto.TransitDto;
 import com.OnETA.entity.NotificationScheduleType;
 import org.junit.jupiter.api.Test;
@@ -107,6 +108,54 @@ class TransitRouteOptimizationServiceTest {
     }
 
     @Test
+    void nightOnlyRouteIsReturnedWithoutScheduleCalculation() {
+        TransitApiService api = mock(TransitApiService.class);
+        TransitScheduleService schedules = mock(TransitScheduleService.class);
+        var service = new TransitRouteOptimizationService(api, schedules);
+        var night = nightRoute("NIGHT_ONLY", "N62", 35);
+
+        when(api.searchScheduleCandidates(anyString(), anyDouble(), anyDouble(), any(), anyDouble(), anyDouble(), any(), eq(5)))
+                .thenReturn(List.of(night));
+
+        var result = service.search("user@test.com", 126.8, 37.5, null,
+                127.0, 37.6, null, NotificationScheduleType.LAST_TRANSIT);
+
+        assertThat(result).hasSize(1);
+        assertThat(result.get(0).getStatus()).isEqualTo(FirstLastRouteStatus.NIGHT_ONLY);
+        assertThat(result.get(0).getEstimatedDepartureAt()).isNull();
+        assertThat(result.get(0).getRoute().getRouteId()).isEqualTo("NIGHT_ONLY");
+        verifyNoInteractions(schedules);
+    }
+
+    @Test
+    void availableRouteIsRankedBeforeNightOnlyRoute() {
+        TransitApiService api = mock(TransitApiService.class);
+        TransitScheduleService schedules = mock(TransitScheduleService.class);
+        var service = new TransitRouteOptimizationService(api, schedules);
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "clock",
+                java.time.Clock.fixed(java.time.ZonedDateTime.parse("2026-10-02T20:00:00+09:00").toInstant(),
+                        java.time.ZoneId.of("Asia/Seoul")));
+        var available = route("AVAILABLE", "ODSAY", 30);
+        var night = nightRoute("NIGHT_ONLY", "N62", 20);
+
+        when(api.searchScheduleCandidates(anyString(), anyDouble(), anyDouble(), any(), anyDouble(), anyDouble(), any(), eq(5)))
+                .thenReturn(List.of(night, available));
+        when(schedules.previewDepartureForServiceDate(eq(available), eq(NotificationScheduleType.LAST_TRANSIT),
+                any(LocalDate.class), anyMap()))
+                .thenReturn(LocalDateTime.of(2026, 10, 2, 23, 10));
+
+        var result = service.search("user@test.com", 126.8, 37.5, null,
+                127.0, 37.6, null, NotificationScheduleType.LAST_TRANSIT);
+
+        assertThat(result).hasSize(2);
+        assertThat(result.get(0).getRoute().getRouteId()).isEqualTo("AVAILABLE");
+        assertThat(result.get(0).getStatus()).isEqualTo(FirstLastRouteStatus.AVAILABLE);
+        assertThat(result.get(1).getRoute().getRouteId()).isEqualTo("NIGHT_ONLY");
+        assertThat(result.get(1).getStatus()).isEqualTo(FirstLastRouteStatus.NIGHT_ONLY);
+        assertThat(result.get(1).getEstimatedDepartureAt()).isNull();
+    }
+
+    @Test
     void allFailedCandidatesPreferTransientUnavailableError() {
         TransitApiService api = mock(TransitApiService.class);
         TransitScheduleService schedules = mock(TransitScheduleService.class);
@@ -166,6 +215,20 @@ class TransitRouteOptimizationServiceTest {
                 .segments(List.of(TransitDto.RouteSegment.builder()
                         .transitType("SUBWAY").durationMinutes(duration)
                         .startStation("A").endStation("B").build()))
+                .build();
+    }
+
+    private TransitDto.RouteOptionResponse nightRoute(String id, String busName, int duration) {
+        return TransitDto.RouteOptionResponse.builder()
+                .routeId(id).provider("ODSAY").totalDurationMinutes(duration)
+                .segments(List.of(
+                        TransitDto.RouteSegment.builder()
+                                .transitType("WALK").durationMinutes(3).build(),
+                        TransitDto.RouteSegment.builder()
+                                .transitType("BUS").transitName(busName).nightBus(true)
+                                .durationMinutes(duration - 6).build(),
+                        TransitDto.RouteSegment.builder()
+                                .transitType("WALK").durationMinutes(3).build()))
                 .build();
     }
 }

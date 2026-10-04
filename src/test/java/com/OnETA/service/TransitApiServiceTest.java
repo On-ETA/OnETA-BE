@@ -120,6 +120,34 @@ class TransitApiServiceTest {
     }
 
     @Test
+    void marksOdsayNightBusByRouteName() {
+        RestTemplate restTemplate = new RestTemplate();
+        MockRestServiceServer server = MockRestServiceServer.bindTo(restTemplate).build();
+        TransitApiService service = new TransitApiService(
+                mock(PublicDataTransitService.class), new ObjectMapper(), restTemplate);
+        ReflectionTestUtils.setField(service, "odsayApiKey", "odsay-key");
+        ReflectionTestUtils.setField(service, "odsayApiUrl",
+                "https://api.odsay.com/v1/api/searchPubTransPathR");
+
+        server.expect(queryParam("SX", "127.0"))
+                .andRespond(withSuccess("""
+                        {"result":{"path":[{"info":{"totalTime":20,"payment":1400,"transitCount":0},
+                        "subPath":[
+                          {"trafficType":3,"sectionTime":3},
+                          {"trafficType":2,"sectionTime":14,"startName":"강남역","endName":"서울역",
+                           "startX":127.0276,"startY":37.4979,
+                           "lane":[{"busNo":"N62","busID":55,"type":11}]},
+                          {"trafficType":3,"sectionTime":3}
+                        ]}]}}
+                        """, MediaType.APPLICATION_JSON));
+
+        var route = service.searchScheduleCandidates(127.0, 37.5, 127.1, 37.6, 5).get(0);
+
+        assertThat(route.getSegments().get(1).isNightBus()).isTrue();
+        server.verify();
+    }
+
+    @Test
     void fallsBackToOdsayDurationWhenRealtimeLookupFails() {
         PublicDataTransitService publicData = mock(PublicDataTransitService.class);
         when(publicData.findArrival(any(), any(), any(), any(), any(), any(), any(), any()))
