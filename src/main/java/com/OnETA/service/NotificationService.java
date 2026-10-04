@@ -135,10 +135,23 @@ public class NotificationService {
     }
 
     @Transactional
-    public void deleteCurrentTransitNotification(String email) {
-        User user = userRepository.findForNotificationByEmail(email)
-                .orElseThrow(() -> new com.OnETA.common.exception.GlobalException(com.OnETA.common.error.ErrorCode.USER_NOT_FOUND));
-        deleteCurrentTransit(user.getId(), null);
+    public void deleteTransitNotification(String email, Long id) {
+        if (id == null) {
+            throw new com.OnETA.common.exception.GlobalException(
+                    com.OnETA.common.error.ErrorCode.INVALID_INPUT_VALUE,
+                    "삭제할 첫차·막차 알림 ID가 필요합니다.");
+        }
+
+        ArrivalNotification notification = getArrivalNotificationByEmailAndId(email, id);
+        if (!isTransit(notification.getScheduleType())) {
+            throw new com.OnETA.common.exception.GlobalException(
+                    com.OnETA.common.error.ErrorCode.INVALID_INPUT_VALUE,
+                    "첫차·막차 알림만 삭제할 수 있습니다.");
+        }
+
+        List<Long> targetIds = List.of(notification.getId());
+        deliveryRepository.expireReplacedTransitDeliveries(targetIds);
+        deleteNotificationRows(targetIds);
     }
 
     private void deleteCurrentTransit(Long userId, NotificationScheduleType scheduleType) {
