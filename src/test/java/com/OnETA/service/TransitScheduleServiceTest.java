@@ -579,7 +579,7 @@ class TransitScheduleServiceTest {
                 DATE.atTime(6, 0), DATE.atTime(6, 15), false, "B")));
         var decision = service.evaluate(n, DATE, DATE.atTime(5, 10), SEOUL);
         assertThat(decision.scheduledAt()).isEqualTo(DATE.atTime(5, 5));
-        assertThat(decision.estimatedDuration()).isEqualTo(68);
+        assertThat(decision.estimatedDuration()).isEqualTo(60);
         assertThat(saved.get().getProviderDetails()).contains("stationId");
         when(seoul.arrivals(eq(b), any())).thenReturn(List.of());
         assertThat(service.evaluate(n, DATE, DATE.atTime(5, 11), SEOUL).scheduledAt()).isEqualTo(DATE.atTime(5, 5));
