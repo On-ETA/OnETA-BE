@@ -151,9 +151,9 @@ class TransitScheduleServiceTest {
 
         assertThat(service.previewDepartureForServiceDate(
                 route, NotificationScheduleType.FIRST_TRANSIT, day, new java.util.HashMap<>()))
-                .isEqualTo(day.atTime(22, 17));
+                .isEqualTo(day.atTime(22, 22));
 
-        verify(metro).firstTripAtOrAfter(any(), eq(day), eq(day.atTime(22, 54)));
+        verify(metro).firstTripAtOrAfter(any(), eq(day), eq(day.atTime(22, 49)));
     }
 
     @Test
