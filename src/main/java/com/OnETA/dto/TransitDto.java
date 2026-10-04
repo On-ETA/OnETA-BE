@@ -49,6 +49,7 @@ public class TransitDto {
         private RouteOptionResponse route;
         private NotificationScheduleType scheduleType;
         private OffsetDateTime estimatedDepartureAt;
+        private FirstLastRouteStatus status;
     }
 
     @Getter
@@ -63,6 +64,7 @@ public class TransitDto {
         private Integer durationMinutes;
         private String transitName;
         private BusType busType;
+        private boolean nightBus;
         private List<RouteStation> stations;
 
         // ODsay identifiers and WGS84 coordinates
