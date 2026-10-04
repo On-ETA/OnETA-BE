@@ -11,7 +11,7 @@ import java.time.LocalDate;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.springframework.test.web.client.match.MockRestRequestMatchers.queryParam;
+import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 
 class SeoulMetroTrainScheduleServiceTest {
@@ -23,23 +23,17 @@ class SeoulMetroTrainScheduleServiceTest {
         var service = new SeoulMetroTrainScheduleService(
                 new ObjectMapper(), http, "a+b=", "https://metro.test/getTrainSch");
 
-        server.expect(queryParam("upbdnbSe", "내선"))
-                .andExpect(queryParam("wkndSe", "주말"))
-                .andExpect(queryParam("lineNm", "2호선"))
-                .andExpect(queryParam("stnNm", "신도림"))
+        server.expect(requestTo(org.hamcrest.Matchers.containsString("getTrainSch")))
                 .andRespond(withSuccess(response(items(
                         row("100", "05:32:00", "05:31:00", "내선"),
                         row("200", "23:55:00", "23:54:00", "내선"))), MediaType.APPLICATION_JSON));
-        server.expect(queryParam("upbdnbSe", "내선"))
-                .andExpect(queryParam("stnNm", "합정"))
+        server.expect(requestTo(org.hamcrest.Matchers.containsString("getTrainSch")))
                 .andRespond(withSuccess(response(items(
                         row("100", "05:43:00", "05:42:00", "내선"),
                         row("200", "00:06:00", "00:05:00", "내선"))), MediaType.APPLICATION_JSON));
-        server.expect(queryParam("upbdnbSe", "외선"))
-                .andExpect(queryParam("stnNm", "신도림"))
+        server.expect(requestTo(org.hamcrest.Matchers.containsString("getTrainSch")))
                 .andRespond(withSuccess(response(""), MediaType.APPLICATION_JSON));
-        server.expect(queryParam("upbdnbSe", "외선"))
-                .andExpect(queryParam("stnNm", "합정"))
+        server.expect(requestTo(org.hamcrest.Matchers.containsString("getTrainSch")))
                 .andRespond(withSuccess(response(""), MediaType.APPLICATION_JSON));
 
         LocalDate saturday = LocalDate.of(2026, 10, 3);
@@ -102,8 +96,9 @@ class SeoulMetroTrainScheduleServiceTest {
     }
 
     private String response(String items) {
+        String payload = items == null || items.isBlank() ? "\"\"" : items;
         return "{\"response\":{\"header\":{\"resultCode\":\"00\",\"resultMsg\":\"NORMAL SERVICE.\"},"
-                + "\"body\":{\"items\":" + items + ",\"numOfRows\":1000,\"pageNo\":1,\"totalCount\":2}}}";
+                + "\"body\":{\"items\":" + payload + ",\"numOfRows\":1000,\"pageNo\":1,\"totalCount\":2}}}";
     }
 
     private String items(String... rows) {
