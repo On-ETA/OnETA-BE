@@ -1,5 +1,6 @@
 package com.OnETA.service;
 
+import com.OnETA.dto.BusType;
 import com.OnETA.dto.TransitDto;
 import tools.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
@@ -86,7 +87,7 @@ class TransitApiServiceTest {
                              {"stationName":"중간 정거장","stationID":"2","x":127.15,"y":36.45},
                              {"stationName":"대전역","stationID":"3","x":127.2,"y":36.5}
                            ]},
-                           "lane":[{"busNo":"741","busID":55,"busCityCode":1000,
+                           "lane":[{"busNo":"741","busID":55,"type":11,"busCityCode":1000,
                                     "busLocalBlID":"123000010"}]}
                         ]}]}}
                         """, MediaType.APPLICATION_JSON));
@@ -97,6 +98,7 @@ class TransitApiServiceTest {
         assertThat(route.getRouteId()).startsWith("ROUTE_");
         assertThat(route.getRealTimeDurationMinutes()).isEqualTo(19);
         assertThat(route.getSegments().get(1).getLocalStationId()).isEqualTo("111000931");
+        assertThat(route.getSegments().get(1).getBusType()).isEqualTo(BusType.TRUNK);
         assertThat(route.getSegments().get(1).getStations()).extracting(TransitDto.RouteStation::getName)
                 .containsExactly("북대전농협", "중간 정거장", "대전역");
         server.verify();
