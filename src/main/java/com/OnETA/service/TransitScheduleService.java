@@ -26,7 +26,6 @@ import java.util.*;
 @Service
 @Slf4j
 public class TransitScheduleService {
-    private static final int FIRST_ACCESS_BUFFER_MINUTES = 5;
     private static final int FIRST_TRANSFER_BUFFER_MINUTES = 0;
     private static final int MAX_FIRST_TRANSFER_WAIT_MINUTES = 45;
 
@@ -333,7 +332,8 @@ public class TransitScheduleService {
             LocalDateTime alighting;
             if (departure == null) {
                 boarding = boundary.firstDeparture();
-                departure = boarding.minusMinutes(accessWalk + FIRST_ACCESS_BUFFER_MINUTES);
+                int accessSafetyMinutes = kakao ? 5 : 0;
+                departure = boarding.minusMinutes(accessWalk + accessSafetyMinutes);
                 alighting = boarding.plusMinutes(segment.getDurationMinutes());
             } else {
                 LocalDateTime earliestBoarding = ready.plusMinutes(FIRST_TRANSFER_BUFFER_MINUTES);
