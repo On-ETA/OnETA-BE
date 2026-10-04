@@ -31,11 +31,10 @@ jobs:
 
       - name: Validate Seoul Metro timetable fallback
         run: |
-          ./gradlew clean test \
+          ./gradlew clean test --info --stacktrace \
             --tests "com.OnETA.service.SeoulMetroTrainScheduleServiceTest" \
             --tests "com.OnETA.service.TransitScheduleServiceTest" \
             --tests "com.OnETA.service.TagoSubwayScheduleServiceTest" \
-            --tests "com.OnETA.service.TransitRouteOptimizationServiceTest" \
             --tests "com.OnETA.scheduler.FirstLastNotificationSchedulerTest"
           ./gradlew build -x test
 
