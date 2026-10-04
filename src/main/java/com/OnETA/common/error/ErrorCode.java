@@ -35,6 +35,7 @@ public enum ErrorCode {
     TRANSIT_SCHEDULE_UNSUPPORTED(HttpStatus.UNPROCESSABLE_ENTITY, "T005", "첫차·막차 시간표를 확인할 수 없는 경로입니다. 서울 버스·지하철 지원 범위를 확인해주세요."),
     TRANSIT_SCHEDULE_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "T006", "대중교통 시간표 조회에 실패했습니다. 잠시 후 다시 시도해주세요."),
     TRANSIT_CONNECTION_UNVERIFIED(HttpStatus.UNPROCESSABLE_ENTITY, "T007", "첫차·막차 시각만으로 환승 연결을 확인할 수 없습니다. 중간 운행편 시간표가 필요한 경로입니다."),
+    TRANSIT_NIGHT_ONLY_ROUTE(HttpStatus.UNPROCESSABLE_ENTITY, "T008", "심야버스로만 이동 가능한 경로는 첫차·막차 알림으로 등록할 수 없습니다."),
     DEVICE_TOKEN_CONFLICT(HttpStatus.CONFLICT, "N003", "이미 다른 사용자에게 등록된 디바이스 토큰입니다."),
     PUSH_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "N004", "푸시 발송에 실패했습니다. 서버 설정과 디바이스 토큰을 확인해주세요."),
 
