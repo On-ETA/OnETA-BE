@@ -12,6 +12,7 @@ import org.springframework.web.bind.annotation.*;
 import jakarta.validation.Valid;
 
 import java.security.Principal;
+import java.util.Map;
 
 @RestController
 @RequestMapping("/api/auth")
@@ -20,6 +21,7 @@ public class AuthController {
 
     private final AuthService authService;
     private final EmailService emailService;
+    private final OAuth2CodeStore oAuth2CodeStore;
 
     // POST /api/auth/signup (회원가입)
     @PostMapping("/signup")
@@ -94,6 +96,14 @@ public class AuthController {
         authService.resetPassword(request);
 
         return ResponseEntity.ok(ApiResponse.success());
+    }
+
+    @PostMapping("/oauth/google/exchange")
+    public ResponseEntity<ApiResponse<Map<String, Object>>> exchangeGoogleOAuthCode(@RequestBody OAuth2ExchangeRequestDto request) {
+
+        Map<String, Object> data = oAuth2CodeStore.consumeCode(request.getCode());
+
+        return ResponseEntity.ok(ApiResponse.success(data));
     }
 
 }

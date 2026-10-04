@@ -49,8 +49,24 @@ public class OAuth2FailureHandler implements AuthenticationFailureHandler {
         // Response에 쿠키 추가
         response.addCookie(errorCookie);
 
-        // 리디렉션할 메인 로그인 화면 URL 설정 및 클라이언트를 해당 URL로 강제 이동
+        // 쿠키에서 redirect_uri를 찾아서 거기로 보냄 (실패 시에도 앱으로 돌아가도록)
         String targetUrl = "https://on-eta.com";
+        Cookie[] cookies = request.getCookies();
+        if (cookies != null) {
+            for (Cookie cookie : cookies) {
+                if ("redirect_uri".equals(cookie.getName()) && cookie.getValue() != null) {
+                    String uri = cookie.getValue();
+                    if (uri.startsWith("oneta://") || uri.startsWith("http://localhost") || uri.startsWith("https://on-eta.com") || uri.startsWith("https://api.on-eta.com")) {
+                        targetUrl = uri;
+                    }
+                    break;
+                }
+            }
+        }
+
+        // 실패 파라미터 추가
+        targetUrl = targetUrl + (targetUrl.contains("?") ? "&" : "?") + "error=" + encodedErrorMessage;
+
         response.sendRedirect(targetUrl);
     }
 }
