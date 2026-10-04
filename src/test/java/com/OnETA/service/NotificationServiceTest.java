@@ -158,6 +158,24 @@ class NotificationServiceTest {
 
     @ParameterizedTest
     @EnumSource(value = NotificationScheduleType.class, names = {"FIRST_TRANSIT", "LAST_TRANSIT"})
+    void updatesOnlyReminderOffsetsForTransitNotification(NotificationScheduleType type) {
+        when(user.getId()).thenReturn(1L);
+        when(users.findByEmail("test@example.com")).thenReturn(Optional.of(user));
+        ArrivalNotification notification = new ArrivalNotification(
+                user, "대중교통 알림", List.of(10), 0, null, "{}", type);
+        when(arrivals.findById(7L)).thenReturn(Optional.of(notification));
+
+        var update = new NotificationDto.UpdateArrivalRequest();
+        update.setReminderOffsetMinutes(List.of(30, 5, 5));
+
+        service.updateArrivalNotification("test@example.com", 7L, update);
+
+        assertThat(notification.getReminderOffsetMinutesList()).containsExactly(5, 30);
+        assertThat(notification.getScheduleType()).isEqualTo(type);
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = NotificationScheduleType.class, names = {"FIRST_TRANSIT", "LAST_TRANSIT"})
     void deletesOnlySelectedTransitNotificationById(NotificationScheduleType type) {
         when(user.getId()).thenReturn(1L);
         when(users.findByEmail("test@example.com")).thenReturn(Optional.of(user));
