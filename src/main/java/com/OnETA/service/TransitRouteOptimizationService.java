@@ -146,10 +146,13 @@ public class TransitRouteOptimizationService {
             List<TransitDto.FirstLastRouteOptionResponse> available,
             List<TransitDto.RouteOptionResponse> nightOnlyRoutes,
             NotificationScheduleType scheduleType) {
-        int remaining = RESULT_LIMIT - available.size();
-        if (remaining <= 0 || nightOnlyRoutes.isEmpty()) return available;
+        if (nightOnlyRoutes.isEmpty()) return available;
 
-        List<TransitDto.FirstLastRouteOptionResponse> result = new ArrayList<>(available);
+        int availableLimit = Math.min(available.size(), RESULT_LIMIT - 1);
+        List<TransitDto.FirstLastRouteOptionResponse> result = new ArrayList<>(
+                available.subList(0, availableLimit));
+
+        int remaining = RESULT_LIMIT - result.size();
         result.addAll(nightOnlyResponses(nightOnlyRoutes, scheduleType, remaining));
         return result;
     }

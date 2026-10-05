@@ -156,6 +156,39 @@ class TransitRouteOptimizationServiceTest {
     }
 
     @Test
+    void reservesOneResultSlotForNightOnlyRouteWhenAvailableRoutesFillLimit() {
+        TransitApiService api = mock(TransitApiService.class);
+        TransitScheduleService schedules = mock(TransitScheduleService.class);
+        var service = new TransitRouteOptimizationService(api, schedules);
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "clock",
+                java.time.Clock.fixed(java.time.ZonedDateTime.parse("2026-10-02T20:00:00+09:00").toInstant(),
+                        java.time.ZoneId.of("Asia/Seoul")));
+
+        var a = route("A", "ODSAY", 30);
+        var b = route("B", "ODSAY", 25);
+        var c = route("C", "KAKAO", 20);
+        var night = nightRoute("NIGHT_ONLY", "N62", 15);
+
+        when(api.searchScheduleCandidates(anyString(), anyDouble(), anyDouble(), any(), anyDouble(), anyDouble(), any(), eq(5)))
+                .thenReturn(List.of(a, b, c, night));
+        when(schedules.previewDepartureForServiceDate(eq(a), eq(NotificationScheduleType.LAST_TRANSIT), any(), anyMap()))
+                .thenReturn(LocalDateTime.of(2026, 10, 2, 23, 10));
+        when(schedules.previewDepartureForServiceDate(eq(b), eq(NotificationScheduleType.LAST_TRANSIT), any(), anyMap()))
+                .thenReturn(LocalDateTime.of(2026, 10, 2, 23, 20));
+        when(schedules.previewDepartureForServiceDate(eq(c), eq(NotificationScheduleType.LAST_TRANSIT), any(), anyMap()))
+                .thenReturn(LocalDateTime.of(2026, 10, 2, 23, 30));
+
+        var result = service.search("user@test.com", 126.8, 37.5, null,
+                127.0, 37.6, null, NotificationScheduleType.LAST_TRANSIT);
+
+        assertThat(result).hasSize(3);
+        assertThat(result).extracting(r -> r.getRoute().getRouteId())
+                .containsExactly("C", "B", "NIGHT_ONLY");
+        assertThat(result.get(2).getStatus()).isEqualTo(FirstLastRouteStatus.NIGHT_ONLY);
+        assertThat(result.get(2).getEstimatedDepartureAt()).isNull();
+    }
+
+    @Test
     void allFailedCandidatesPreferTransientUnavailableError() {
         TransitApiService api = mock(TransitApiService.class);
         TransitScheduleService schedules = mock(TransitScheduleService.class);
