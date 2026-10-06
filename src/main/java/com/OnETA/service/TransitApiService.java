@@ -164,6 +164,7 @@ public class TransitApiService {
         int limit = Math.max(1, Math.min(maxCandidates, 10));
 
         List<TransitDto.RouteOptionResponse> primary;
+        boolean primaryFromKakao = false;
         try {
             primary = searchOdsayRoutes(originX, originY, destX, destY, limit, false);
         } catch (GlobalException e) {
@@ -171,37 +172,70 @@ public class TransitApiService {
                     || kakaoTransitClient == null || !kakaoTransitClient.isConfigured()) {
                 throw e;
             }
-            log.info("ODsay schedule candidate search failed ({}); trying Kakao", e.getErrorCode().getCode());
-            return kakaoTransitClient.searchScheduleCandidates(
-                    originX, originY, destX, destY, limit);
-        }
-
-        boolean hasNightOnly = primary.stream()
-                .anyMatch(TransitRouteClassifier::isNightOnlyRoute);
-        if (hasNightOnly || kakaoTransitClient == null || !kakaoTransitClient.isConfigured()) {
-            return primary;
-        }
-
-        try {
-            List<TransitDto.RouteOptionResponse> kakaoCandidates =
-                    kakaoTransitClient.searchScheduleCandidates(
-                            originX, originY, destX, destY, limit);
-            List<TransitDto.RouteOptionResponse> kakaoNightOnly = kakaoCandidates.stream()
-                    .filter(TransitRouteClassifier::isNightOnlyRoute)
-                    .toList();
-            if (kakaoNightOnly.isEmpty()) return primary;
-
-            List<TransitDto.RouteOptionResponse> combined = new ArrayList<>(primary);
-            combined.addAll(kakaoNightOnly);
-            log.info("Supplemented FIRST/LAST candidates with {} NIGHT_ONLY Kakao route(s)",
-                    kakaoNightOnly.size());
-            return combined;
-        } catch (GlobalException e) {
-            // ODsay already succeeded. A supplementary Kakao failure must not fail the search.
-            log.info("Kakao NIGHT_ONLY supplement unavailable ({}); keeping ODsay candidates",
+            log.info("ODsay schedule candidate search failed ({}); trying Kakao",
                     e.getErrorCode().getCode());
+            primary = kakaoTransitClient.searchScheduleCandidates(
+                    originX, originY, destX, destY, limit);
+            primaryFromKakao = true;
+        }
+
+        if (primary.stream().anyMatch(TransitRouteClassifier::isNightOnlyRoute)) {
             return primary;
         }
+
+        List<TransitDto.RouteOptionResponse> combined = new ArrayList<>(primary);
+
+        // Route planners may omit night buses during daytime searches. Try Kakao as a
+        // secondary planner first, with full endpoint walking legs restored.
+        if (!primaryFromKakao
+                && kakaoTransitClient != null
+                && kakaoTransitClient.isConfigured()) {
+            try {
+                List<TransitDto.RouteOptionResponse> kakaoNightOnly =
+                        kakaoTransitClient.searchScheduleCandidates(
+                                        originX, originY, destX, destY, limit)
+                                .stream()
+                                .filter(TransitRouteClassifier::isNightOnlyRoute)
+                                .toList();
+                if (!kakaoNightOnly.isEmpty()) {
+                    combined.addAll(kakaoNightOnly);
+                    log.info("Supplemented FIRST/LAST candidates with {} NIGHT_ONLY Kakao route(s)",
+                            kakaoNightOnly.size());
+                    return combined;
+                }
+            } catch (GlobalException e) {
+                log.info("Kakao NIGHT_ONLY supplement unavailable ({}); trying Seoul bus graph",
+                        e.getErrorCode().getCode());
+            }
+        }
+
+        // If both planners omit night service, discover a direct N* route from the
+        // Seoul bus station/route graph so the result is independent of current time.
+        if (seoulBusScheduleService != null) {
+            Optional<TransitDto.RouteOptionResponse> discovered =
+                    seoulBusScheduleService.discoverDirectNightRoute(
+                            originX, originY, destX, destY);
+            if (discovered.isPresent()) {
+                TransitDto.RouteOptionResponse nightRoute = discovered.get();
+                if (kakaoTransitClient != null && kakaoTransitClient.isConfigured()) {
+                    try {
+                        nightRoute = kakaoTransitClient.completeEndpointWalks(
+                                nightRoute, originX, originY, destX, destY);
+                    } catch (GlobalException e) {
+                        log.info("Night route walking supplement unavailable ({}); using bus-only fallback",
+                                e.getErrorCode().getCode());
+                    }
+                }
+                combined.add(nightRoute);
+                log.info("Supplemented FIRST/LAST candidates with direct Seoul NIGHT_ONLY route: {}",
+                        nightRoute.getSegments().stream()
+                                .filter(segment -> "BUS".equals(segment.getTransitType()))
+                                .map(TransitDto.RouteSegment::getTransitName)
+                                .findFirst().orElse("unknown"));
+            }
+        }
+
+        return combined;
     }
 
     private List<TransitDto.RouteOptionResponse> searchRoutes(
