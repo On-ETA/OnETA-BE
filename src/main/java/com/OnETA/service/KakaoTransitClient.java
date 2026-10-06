@@ -126,9 +126,22 @@ public class KakaoTransitClient {
             addEndpointWalk(segments, new WalkLeg(last.getEndX(), last.getEndY(), ex, ey),
                     last.getEndStation(), "", headers, walkingTimes);
         }
-        // Provider totalTime already accounts for more than the vehicle steps.
-        // Preserve it; adding the new walk times again would double-count them.
-        return route.toBuilder().segments(segments).build();
+        // Kakao's own totalTime already includes access/egress walking, so preserve it.
+        // Direct Seoul-night fallback routes are constructed from bus data only, therefore
+        // their total duration must be rebuilt after the Kakao walking legs are attached.
+        Integer totalDuration = route.getTotalDurationMinutes();
+        if ("SEOUL_NIGHT".equals(route.getProvider())) {
+            totalDuration = segments.stream()
+                    .map(TransitDto.RouteSegment::getDurationMinutes)
+                    .filter(java.util.Objects::nonNull)
+                    .mapToInt(Integer::intValue)
+                    .sum();
+        }
+        return route.toBuilder()
+                .segments(segments)
+                .totalDurationMinutes(totalDuration)
+                .realTimeDurationMinutes(totalDuration)
+                .build();
     }
 
     private void addEndpointWalk(List<TransitDto.RouteSegment> segments, WalkLeg leg,
