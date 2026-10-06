@@ -50,7 +50,7 @@ class SeoulBusScheduleServiceTest {
     }
     private void mapping(boolean reverse, String type) {
         nearby();
-        server.expect(requestTo("https://seoul.test/api/rest/stationinfo/getRouteByStation?ServiceKey=key&arsId=01001"))
+        server.expect(queryParam("strSrch", "603"))
                 .andRespond(withSuccess(xml("<itemList><busRouteId>100100088</busRouteId><busRouteNm>603</busRouteNm><busRouteType>"+type+"</busRouteType></itemList>"), MediaType.APPLICATION_XML));
         if (!"8".equals(type)) server.expect(queryParam("busRouteId", "100100088"))
                 .andRespond(withSuccess(xml("<itemList><seq>"+(reverse?2:1)+"</seq><station>100000001</station><stationNm>출발역</stationNm><transYn>N</transYn></itemList>"
@@ -63,7 +63,7 @@ class SeoulBusScheduleServiceTest {
     }
 
     @Test
-    void discoversDirectNightBusUsingActualNearbyStationFieldNames() {
+    void discoversDirectNightBusWithoutRouteByStationEndpoint() {
         // getStationByPos uses stId/stNm/tmX/tmY. The previous implementation
         // incorrectly expected stationId/stationNm/gpsX/gpsY and dropped every stop.
         String origin = "<itemList><stId>121000001</stId><arsId>17107</arsId>"
@@ -72,7 +72,7 @@ class SeoulBusScheduleServiceTest {
         server.expect(queryParam("tmX", "126.89170794296935"))
                 .andExpect(queryParam("radius", "1000"))
                 .andRespond(withSuccess(xml(origin), MediaType.APPLICATION_XML));
-        server.expect(requestTo("https://seoul.test/api/rest/stationinfo/getRouteByStation?ServiceKey=key&arsId=17107"))
+        server.expect(queryParam("strSrch", "N"))
                 .andRespond(withSuccess(xml(
                         "<itemList><busRouteId>100100051</busRouteId><busRouteNm>N51</busRouteNm>"
                                 + "<busRouteType>3</busRouteType></itemList>"),
