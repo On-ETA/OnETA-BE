@@ -83,14 +83,14 @@ public class SeoulBusScheduleService {
 
             Map<String, Element> destinationById = new HashMap<>();
             for (Element stop : destinationStops) {
-                destinationById.put(text(stop, "stationId"), stop);
+                destinationById.put(stationIdOf(stop), stop);
             }
 
             Map<String, List<Element>> routeStopsCache = new HashMap<>();
             List<NightRouteCandidate> matches = new ArrayList<>();
 
             for (Element originStop : originStops) {
-                String originStationId = text(originStop, "stationId");
+                String originStationId = stationIdOf(originStop);
                 String originArsId = text(originStop, "arsId");
                 if (originStationId.isBlank() || originArsId.isBlank()) continue;
 
@@ -117,19 +117,19 @@ public class SeoulBusScheduleService {
                     });
 
                     for (int startIndex = 0; startIndex < stops.size(); startIndex++) {
-                        if (!originStationId.equals(text(stops.get(startIndex), "station"))) continue;
+                        if (!originStationId.equals(stationIdOf(stops.get(startIndex)))) continue;
 
                         for (int endIndex = startIndex + 1; endIndex < stops.size(); endIndex++) {
                             Element destinationStop =
-                                    destinationById.get(text(stops.get(endIndex), "station"));
+                                    destinationById.get(stationIdOf(stops.get(endIndex)));
                             if (destinationStop == null) continue;
 
                             double originWalkMeters = distance(
                                     originX, originY,
-                                    text(originStop, "gpsX"), text(originStop, "gpsY"));
+                                    stationXOf(originStop), stationYOf(originStop));
                             double destinationWalkMeters = distance(
                                     destX, destY,
-                                    text(destinationStop, "gpsX"), text(destinationStop, "gpsY"));
+                                    stationXOf(destinationStop), stationYOf(destinationStop));
                             int riddenStops = endIndex - startIndex;
                             double score = originWalkMeters + destinationWalkMeters + (riddenStops * 40.0);
 
@@ -315,11 +315,11 @@ public class SeoulBusScheduleService {
         for (int i = candidate.startIndex(); i <= candidate.endIndex(); i++) {
             Element stop = candidate.routeStops().get(i);
             stations.add(TransitDto.RouteStation.builder()
-                    .name(text(stop, "stationNm"))
+                    .name(stationNameOf(stop))
                     .sequence(stations.size() + 1)
                     .stationId(text(stop, "station"))
-                    .x(doubleText(stop, "gpsX"))
-                    .y(doubleText(stop, "gpsY"))
+                    .x(parseDouble(stationXOf(stop)))
+                    .y(parseDouble(stationYOf(stop)))
                     .arsId(text(stop, "arsId"))
                     .build());
         }
@@ -334,25 +334,25 @@ public class SeoulBusScheduleService {
                 .busType(BusType.TRUNK)
                 .nightBus(true)
                 .durationMinutes(busMinutes)
-                .startStation(text(startRouteStop, "stationNm"))
-                .endStation(text(endRouteStop, "stationNm"))
-                .startX(doubleText(candidate.originStop(), "gpsX"))
-                .startY(doubleText(candidate.originStop(), "gpsY"))
-                .endX(doubleText(candidate.destinationStop(), "gpsX"))
-                .endY(doubleText(candidate.destinationStop(), "gpsY"))
+                .startStation(stationNameOf(startRouteStop))
+                .endStation(stationNameOf(endRouteStop))
+                .startX(parseDouble(stationXOf(candidate.originStop())))
+                .startY(parseDouble(stationYOf(candidate.originStop())))
+                .endX(parseDouble(stationXOf(candidate.destinationStop())))
+                .endY(parseDouble(stationYOf(candidate.destinationStop())))
                 .stations(stations)
-                .odsayStartStationId(text(startRouteStop, "station"))
-                .odsayEndStationId(text(endRouteStop, "station"))
+                .odsayStartStationId(stationIdOf(startRouteStop))
+                .odsayEndStationId(stationIdOf(endRouteStop))
                 .odsayRouteId(candidate.routeId())
                 .localCityCode("1000")
-                .localStationId(text(startRouteStop, "station"))
+                .localStationId(stationIdOf(startRouteStop))
                 .localRouteId(candidate.routeId())
                 .arsId(text(candidate.originStop(), "arsId"))
                 .build();
 
         return TransitDto.RouteOptionResponse.builder()
                 .routeId("SEOUL_NIGHT_" + candidate.routeId() + "_"
-                        + text(startRouteStop, "station") + "_" + text(endRouteStop, "station"))
+                        + stationIdOf(startRouteStop) + "_" + stationIdOf(endRouteStop))
                 .provider("SEOUL_NIGHT")
                 .totalDurationMinutes(busMinutes)
                 .realTimeDurationMinutes(busMinutes)
@@ -381,10 +381,33 @@ public class SeoulBusScheduleService {
                 .toList();
     }
 
-    private static Double doubleText(Element element, String name) {
-        try {
+    private static String stationIdOf(Element element) {
+        return firstNonBlankText(element, "stationId", "stId", "station");
+    }
+
+    private static String stationNameOf(Element element) {
+        return firstNonBlankText(element, "stationNm", "stNm");
+    }
+
+    private static String stationXOf(Element element) {
+        return firstNonBlankText(element, "gpsX", "tmX");
+    }
+
+    private static String stationYOf(Element element) {
+        return firstNonBlankText(element, "gpsY", "tmY");
+    }
+
+    private static String firstNonBlankText(Element element, String... names) {
+        for (String name : names) {
             String value = text(element, name);
-            return value.isBlank() ? null : Double.parseDouble(value);
+            if (!value.isBlank()) return value;
+        }
+        return "";
+    }
+
+    private static Double parseDouble(String value) {
+        try {
+            return value == null || value.isBlank() ? null : Double.parseDouble(value);
         } catch (RuntimeException e) {
             return null;
         }
