@@ -63,18 +63,13 @@ public class KakaoTransitClient {
 
     public List<TransitDto.RouteOptionResponse> search(
             double sx, double sy, double ex, double ey, int maxCandidates) {
-        if (!isConfigured()) throw new GlobalException(ErrorCode.TRANSIT_API_UNAVAILABLE);
-        var uri = UriComponentsBuilder.fromUriString(URL)
-                .queryParam("start_x", sx).queryParam("start_y", sy)
-                .queryParam("end_x", ex).queryParam("end_y", ey).build().toUri();
-        HttpHeaders headers = new HttpHeaders();
-        headers.set(HttpHeaders.AUTHORIZATION, "KakaoAK " + key);
+        HttpHeaders headers = authorizationHeaders();
         try {
-            ExternalApiCallCounter.record("KAKAO", "publictraffic");
-            var response = restTemplate.exchange(uri, HttpMethod.GET, new HttpEntity<>(headers), String.class);
+            List<TransitDto.RouteOptionResponse> routes =
+                    requestTransitRoutes(sx, sy, ex, ey, maxCandidates, headers);
             // Different alternatives often share the same access or egress walk.
             Map<WalkLeg, Integer> walkingTimes = new HashMap<>();
-            return parse(response.getBody(), maxCandidates).stream()
+            return routes.stream()
                     .map(route -> completeEndpointWalks(route, sx, sy, ex, ey, headers, walkingTimes))
                     .toList();
         } catch (GlobalException e) {
@@ -83,6 +78,38 @@ public class KakaoTransitClient {
             log.warn("Kakao transit request failed: {}", e.getClass().getSimpleName());
             throw new GlobalException(ErrorCode.TRANSIT_API_UNAVAILABLE);
         }
+    }
+
+    public List<TransitDto.RouteOptionResponse> searchScheduleCandidates(
+            double sx, double sy, double ex, double ey, int maxCandidates) {
+        HttpHeaders headers = authorizationHeaders();
+        try {
+            // FIRST/LAST candidate discovery only needs transit legs. Avoid extra walking API
+            // calls here because endpoint walks do not affect NIGHT_ONLY classification.
+            return requestTransitRoutes(sx, sy, ex, ey, maxCandidates, headers);
+        } catch (GlobalException e) {
+            throw e;
+        } catch (Exception e) {
+            log.warn("Kakao schedule candidate request failed: {}", e.getClass().getSimpleName());
+            throw new GlobalException(ErrorCode.TRANSIT_API_UNAVAILABLE);
+        }
+    }
+
+    private HttpHeaders authorizationHeaders() {
+        if (!isConfigured()) throw new GlobalException(ErrorCode.TRANSIT_API_UNAVAILABLE);
+        HttpHeaders headers = new HttpHeaders();
+        headers.set(HttpHeaders.AUTHORIZATION, "KakaoAK " + key);
+        return headers;
+    }
+
+    private List<TransitDto.RouteOptionResponse> requestTransitRoutes(
+            double sx, double sy, double ex, double ey, int maxCandidates, HttpHeaders headers) {
+        var uri = UriComponentsBuilder.fromUriString(URL)
+                .queryParam("start_x", sx).queryParam("start_y", sy)
+                .queryParam("end_x", ex).queryParam("end_y", ey).build().toUri();
+        ExternalApiCallCounter.record("KAKAO", "publictraffic");
+        var response = restTemplate.exchange(uri, HttpMethod.GET, new HttpEntity<>(headers), String.class);
+        return parse(response.getBody(), maxCandidates);
     }
 
     private TransitDto.RouteOptionResponse completeEndpointWalks(TransitDto.RouteOptionResponse route,

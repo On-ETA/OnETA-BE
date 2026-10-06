@@ -160,7 +160,48 @@ public class TransitApiService {
 
     public List<TransitDto.RouteOptionResponse> searchScheduleCandidates(
             Double originX, Double originY, Double destX, Double destY, int maxCandidates) {
-        return searchRoutes(originX, originY, destX, destY, maxCandidates, false);
+        validateCoordinates(originX, originY, destX, destY);
+        int limit = Math.max(1, Math.min(maxCandidates, 10));
+
+        List<TransitDto.RouteOptionResponse> primary;
+        try {
+            primary = searchOdsayRoutes(originX, originY, destX, destY, limit, false);
+        } catch (GlobalException e) {
+            if (e.getErrorCode() == ErrorCode.INVALID_INPUT_VALUE
+                    || kakaoTransitClient == null || !kakaoTransitClient.isConfigured()) {
+                throw e;
+            }
+            log.info("ODsay schedule candidate search failed ({}); trying Kakao", e.getErrorCode().getCode());
+            return kakaoTransitClient.searchScheduleCandidates(
+                    originX, originY, destX, destY, limit);
+        }
+
+        boolean hasNightOnly = primary.stream()
+                .anyMatch(TransitRouteClassifier::isNightOnlyRoute);
+        if (hasNightOnly || kakaoTransitClient == null || !kakaoTransitClient.isConfigured()) {
+            return primary;
+        }
+
+        try {
+            List<TransitDto.RouteOptionResponse> kakaoCandidates =
+                    kakaoTransitClient.searchScheduleCandidates(
+                            originX, originY, destX, destY, limit);
+            List<TransitDto.RouteOptionResponse> kakaoNightOnly = kakaoCandidates.stream()
+                    .filter(TransitRouteClassifier::isNightOnlyRoute)
+                    .toList();
+            if (kakaoNightOnly.isEmpty()) return primary;
+
+            List<TransitDto.RouteOptionResponse> combined = new ArrayList<>(primary);
+            combined.addAll(kakaoNightOnly);
+            log.info("Supplemented FIRST/LAST candidates with {} NIGHT_ONLY Kakao route(s)",
+                    kakaoNightOnly.size());
+            return combined;
+        } catch (GlobalException e) {
+            // ODsay already succeeded. A supplementary Kakao failure must not fail the search.
+            log.info("Kakao NIGHT_ONLY supplement unavailable ({}); keeping ODsay candidates",
+                    e.getErrorCode().getCode());
+            return primary;
+        }
     }
 
     private List<TransitDto.RouteOptionResponse> searchRoutes(

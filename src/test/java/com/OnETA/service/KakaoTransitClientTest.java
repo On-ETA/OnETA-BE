@@ -103,6 +103,68 @@ class KakaoTransitClientTest {
     }
 
     @Test
+    void supplementsScheduleCandidatesWithKakaoNightOnlyWhenOdsayHasNoNightRoute() {
+        configure();
+
+        String odsay = """
+                {"result":{"path":[{"info":{"totalTime":25,"payment":1400,"transitCount":0},
+                "subPath":[
+                  {"trafficType":3,"sectionTime":5},
+                  {"trafficType":2,"sectionTime":15,"startName":"신도림","endName":"홍대입구",
+                   "startX":126.89,"startY":37.51,
+                   "lane":[{"busNo":"5712","busID":55,"type":12}]},
+                  {"trafficType":3,"sectionTime":5}
+                ]}]}}
+                """;
+        String nightRoute = """
+                {"properties":{"totalTime":2400,"transfers":0},"steps":[
+                  {"properties":{"type":"WALKING","time":180}},
+                  {"properties":{"type":"BUS","time":2040,
+                    "stops":[{"name":"신도림"},{"name":"홍대입구"}],
+                    "vehicles":[{"name":"N62","type":"간선"}]},
+                   "path":{"points":[[126.89,37.51],[126.92,37.56]]}},
+                  {"properties":{"type":"WALKING","time":180}}
+                ]}
+                """;
+        String kakaoBody = "{\"status\":\"OK\",\"routes\":[" + nightRoute + "]}";
+
+        server.expect(queryParam("SX", "126.89"))
+                .andRespond(withSuccess(odsay, MediaType.APPLICATION_JSON));
+        server.expect(queryParam("start_x", "126.89"))
+                .andExpect(header("Authorization", "KakaoAK test-key"))
+                .andRespond(withSuccess(kakaoBody, MediaType.APPLICATION_JSON));
+
+        var routes = service.searchScheduleCandidates(126.89, 37.51, 126.92, 37.56, 10);
+
+        assertThat(routes).hasSize(2);
+        assertThat(routes.get(0).getProvider()).isEqualTo("ODSAY");
+        assertThat(routes.get(1).getProvider()).isEqualTo("KAKAO");
+        assertThat(TransitRouteClassifier.isNightOnlyRoute(routes.get(1))).isTrue();
+        server.verify();
+    }
+
+    @Test
+    void keepsOdsayScheduleCandidatesWhenKakaoNightSupplementFails() {
+        configure();
+
+        String odsay = """
+                {"result":{"path":[{"info":{"totalTime":25,"payment":1400,"transitCount":0},
+                "subPath":[{"trafficType":3,"sectionTime":25}]}]}}
+                """;
+
+        server.expect(queryParam("SX", "126.89"))
+                .andRespond(withSuccess(odsay, MediaType.APPLICATION_JSON));
+        server.expect(queryParam("start_x", "126.89"))
+                .andRespond(withStatus(HttpStatus.TOO_MANY_REQUESTS));
+
+        var routes = service.searchScheduleCandidates(126.89, 37.51, 126.92, 37.56, 10);
+
+        assertThat(routes).hasSize(1);
+        assertThat(routes.get(0).getProvider()).isEqualTo("ODSAY");
+        server.verify();
+    }
+
+    @Test
     void networkFailureFallsBackAndBothProviderFailureIsUnavailable() {
         configure();
         server.expect(queryParam("SX", "127.1"))
