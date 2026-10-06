@@ -32,6 +32,9 @@ public class SeoulBusScheduleService {
     private final String key;
     private final String baseUrl;
     private final Clock clock;
+    private static final int NIGHT_ORIGIN_RADIUS_METERS = 1000;
+    private static final int NIGHT_DESTINATION_RADIUS_METERS = 1200;
+
     private Instant retryAfter = Instant.EPOCH;
     private final Map<String, Cached> cache = new HashMap<>();
     private final Map<String, LiveCache> liveCache = new HashMap<>();
@@ -77,17 +80,16 @@ public class SeoulBusScheduleService {
         if (key.isBlank() || retryAfter.isAfter(clock.instant())) return Optional.empty();
 
         try {
-            List<Element> originStops = nearbyByPosition(originX, originY, 1000);
-            List<Element> destinationStops = nearbyByPosition(destX, destY, 1000);
-            if (originStops.isEmpty() || destinationStops.isEmpty()) return Optional.empty();
-
-            Map<String, Element> destinationById = new HashMap<>();
-            for (Element stop : destinationStops) {
-                destinationById.put(stationIdOf(stop), stop);
+            List<Element> originStops =
+                    nearbyByPosition(originX, originY, NIGHT_ORIGIN_RADIUS_METERS);
+            if (originStops.isEmpty()) {
+                log.info("Direct night-bus discovery found no origin stops");
+                return Optional.empty();
             }
 
             Map<String, List<Element>> routeStopsCache = new HashMap<>();
             List<NightRouteCandidate> matches = new ArrayList<>();
+            int nightRoutesSeen = 0;
 
             for (Element originStop : originStops) {
                 String originStationId = stationIdOf(originStop);
@@ -106,6 +108,7 @@ public class SeoulBusScheduleService {
                             || !routeId.matches("[0-9]{9}")) {
                         continue;
                     }
+                    nightRoutesSeen++;
 
                     List<Element> stops = routeStopsCache.computeIfAbsent(routeId, ignored -> {
                         List<Element> loaded = request(
@@ -119,19 +122,31 @@ public class SeoulBusScheduleService {
                     for (int startIndex = 0; startIndex < stops.size(); startIndex++) {
                         if (!originStationId.equals(stationIdOf(stops.get(startIndex)))) continue;
 
-                        for (int endIndex = startIndex + 1; endIndex < stops.size(); endIndex++) {
-                            Element destinationStop =
-                                    destinationById.get(stationIdOf(stops.get(endIndex)));
-                            if (destinationStop == null) continue;
+                        double originWalkMeters = distance(
+                                originX, originY,
+                                stationXOf(originStop), stationYOf(originStop));
+                        if (!Double.isFinite(originWalkMeters)
+                                || originWalkMeters > NIGHT_ORIGIN_RADIUS_METERS) {
+                            continue;
+                        }
 
-                            double originWalkMeters = distance(
-                                    originX, originY,
-                                    stationXOf(originStop), stationYOf(originStop));
+                        // Do not depend on a separately truncated destination-stop search.
+                        // Scan every downstream stop of the matched night route and choose
+                        // stops that are walkable from the requested destination.
+                        for (int endIndex = startIndex + 1; endIndex < stops.size(); endIndex++) {
+                            Element destinationStop = stops.get(endIndex);
                             double destinationWalkMeters = distance(
                                     destX, destY,
                                     stationXOf(destinationStop), stationYOf(destinationStop));
+                            if (!Double.isFinite(destinationWalkMeters)
+                                    || destinationWalkMeters > NIGHT_DESTINATION_RADIUS_METERS) {
+                                continue;
+                            }
+
                             int riddenStops = endIndex - startIndex;
-                            double score = originWalkMeters + destinationWalkMeters + (riddenStops * 40.0);
+                            double score = originWalkMeters
+                                    + destinationWalkMeters
+                                    + (riddenStops * 40.0);
 
                             matches.add(new NightRouteCandidate(
                                     routeId, routeName, originStop, destinationStop,
@@ -141,9 +156,18 @@ public class SeoulBusScheduleService {
                 }
             }
 
-            return matches.stream()
+            Optional<TransitDto.RouteOptionResponse> selected = matches.stream()
                     .min(Comparator.comparingDouble(NightRouteCandidate::score))
                     .map(this::toNightRoute);
+
+            log.info("Direct night-bus discovery: originStops={}, nightRoutesSeen={}, matches={}, selected={}",
+                    originStops.size(), nightRoutesSeen, matches.size(),
+                    selected.flatMap(route -> route.getSegments().stream()
+                                    .filter(segment -> "BUS".equals(segment.getTransitType()))
+                                    .map(TransitDto.RouteSegment::getTransitName)
+                                    .findFirst())
+                            .orElse("none"));
+            return selected;
         } catch (GlobalException e) {
             log.info("Direct night-bus discovery unavailable: {}", e.getErrorCode().getCode());
             return Optional.empty();
@@ -373,11 +397,11 @@ public class SeoulBusScheduleService {
                 "night-nearby-stations").stream()
                 .filter(e -> text(e, "arsId").matches("[0-9]{5}")
                         && !"00000".equals(text(e, "arsId")))
-                .filter(e -> text(e, "stationId").matches("[0-9]{9}"))
-                .filter(e -> distance(x, y, text(e, "gpsX"), text(e, "gpsY")) <= radiusMeters)
+                .filter(e -> stationIdOf(e).matches("[0-9]{9}"))
+                .filter(e -> distance(x, y, stationXOf(e), stationYOf(e)) <= radiusMeters)
                 .sorted(Comparator.comparingDouble(
-                        e -> distance(x, y, text(e, "gpsX"), text(e, "gpsY"))))
-                .limit(20)
+                        e -> distance(x, y, stationXOf(e), stationYOf(e))))
+                .limit(50)
                 .toList();
     }
 
