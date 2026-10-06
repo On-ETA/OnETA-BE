@@ -82,17 +82,16 @@ public class KakaoTransitClient {
 
     public List<TransitDto.RouteOptionResponse> searchScheduleCandidates(
             double sx, double sy, double ex, double ey, int maxCandidates) {
+        // FIRST/LAST 결과도 일반 경로 검색과 동일하게 출발/도착 도보 구간을 완성한다.
+        return search(sx, sy, ex, ey, maxCandidates);
+    }
+
+    TransitDto.RouteOptionResponse completeEndpointWalks(
+            TransitDto.RouteOptionResponse route,
+            double sx, double sy, double ex, double ey) {
         HttpHeaders headers = authorizationHeaders();
-        try {
-            // FIRST/LAST candidate discovery only needs transit legs. Avoid extra walking API
-            // calls here because endpoint walks do not affect NIGHT_ONLY classification.
-            return requestTransitRoutes(sx, sy, ex, ey, maxCandidates, headers);
-        } catch (GlobalException e) {
-            throw e;
-        } catch (Exception e) {
-            log.warn("Kakao schedule candidate request failed: {}", e.getClass().getSimpleName());
-            throw new GlobalException(ErrorCode.TRANSIT_API_UNAVAILABLE);
-        }
+        Map<WalkLeg, Integer> walkingTimes = new HashMap<>();
+        return completeEndpointWalks(route, sx, sy, ex, ey, headers, walkingTimes);
     }
 
     private HttpHeaders authorizationHeaders() {
@@ -127,9 +126,22 @@ public class KakaoTransitClient {
             addEndpointWalk(segments, new WalkLeg(last.getEndX(), last.getEndY(), ex, ey),
                     last.getEndStation(), "", headers, walkingTimes);
         }
-        // Provider totalTime already accounts for more than the vehicle steps.
-        // Preserve it; adding the new walk times again would double-count them.
-        return route.toBuilder().segments(segments).build();
+        // Kakao's own totalTime already includes access/egress walking, so preserve it.
+        // Direct Seoul-night fallback routes are constructed from bus data only, therefore
+        // their total duration must be rebuilt after the Kakao walking legs are attached.
+        Integer totalDuration = route.getTotalDurationMinutes();
+        if ("SEOUL_NIGHT".equals(route.getProvider())) {
+            totalDuration = segments.stream()
+                    .map(TransitDto.RouteSegment::getDurationMinutes)
+                    .filter(java.util.Objects::nonNull)
+                    .mapToInt(Integer::intValue)
+                    .sum();
+        }
+        return route.toBuilder()
+                .segments(segments)
+                .totalDurationMinutes(totalDuration)
+                .realTimeDurationMinutes(totalDuration)
+                .build();
     }
 
     private void addEndpointWalk(List<TransitDto.RouteSegment> segments, WalkLeg leg,

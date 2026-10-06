@@ -3,6 +3,7 @@ package com.OnETA.service;
 import com.OnETA.common.ExternalApiCallCounter;
 import com.OnETA.common.error.ErrorCode;
 import com.OnETA.common.exception.GlobalException;
+import com.OnETA.dto.BusType;
 import com.OnETA.dto.TransitDto;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
@@ -66,6 +67,91 @@ public class SeoulBusScheduleService {
     }
 
     public LocalDate today() { return LocalDate.now(clock); }
+
+    /**
+     * Finds a direct Seoul night-bus route independently of daytime route-planner rankings.
+     * This is used only as a NIGHT_ONLY fallback for FIRST/LAST route discovery.
+     */
+    public Optional<TransitDto.RouteOptionResponse> discoverDirectNightRoute(
+            double originX, double originY, double destX, double destY) {
+        if (key.isBlank() || retryAfter.isAfter(clock.instant())) return Optional.empty();
+
+        try {
+            List<Element> originStops = nearbyByPosition(originX, originY, 1000);
+            List<Element> destinationStops = nearbyByPosition(destX, destY, 1000);
+            if (originStops.isEmpty() || destinationStops.isEmpty()) return Optional.empty();
+
+            Map<String, Element> destinationById = new HashMap<>();
+            for (Element stop : destinationStops) {
+                destinationById.put(stationIdOf(stop), stop);
+            }
+
+            Map<String, List<Element>> routeStopsCache = new HashMap<>();
+            List<NightRouteCandidate> matches = new ArrayList<>();
+
+            for (Element originStop : originStops) {
+                String originStationId = stationIdOf(originStop);
+                String originArsId = text(originStop, "arsId");
+                if (originStationId.isBlank() || originArsId.isBlank()) continue;
+
+                List<Element> routes = request(
+                        "/stationinfo/getRouteByStation",
+                        Map.of("arsId", originArsId),
+                        "night-routes");
+
+                for (Element route : routes) {
+                    String routeName = text(route, "busRouteNm");
+                    String routeId = text(route, "busRouteId");
+                    if (!TransitRouteClassifier.isNightBusName(routeName)
+                            || !routeId.matches("[0-9]{9}")) {
+                        continue;
+                    }
+
+                    List<Element> stops = routeStopsCache.computeIfAbsent(routeId, ignored -> {
+                        List<Element> loaded = request(
+                                "/busRouteInfo/getStaionByRoute",
+                                Map.of("busRouteId", routeId),
+                                "night-route-stations");
+                        loaded.sort(Comparator.comparingInt(this::sequence));
+                        return loaded;
+                    });
+
+                    for (int startIndex = 0; startIndex < stops.size(); startIndex++) {
+                        if (!originStationId.equals(stationIdOf(stops.get(startIndex)))) continue;
+
+                        for (int endIndex = startIndex + 1; endIndex < stops.size(); endIndex++) {
+                            Element destinationStop =
+                                    destinationById.get(stationIdOf(stops.get(endIndex)));
+                            if (destinationStop == null) continue;
+
+                            double originWalkMeters = distance(
+                                    originX, originY,
+                                    stationXOf(originStop), stationYOf(originStop));
+                            double destinationWalkMeters = distance(
+                                    destX, destY,
+                                    stationXOf(destinationStop), stationYOf(destinationStop));
+                            int riddenStops = endIndex - startIndex;
+                            double score = originWalkMeters + destinationWalkMeters + (riddenStops * 40.0);
+
+                            matches.add(new NightRouteCandidate(
+                                    routeId, routeName, originStop, destinationStop,
+                                    stops, startIndex, endIndex, score));
+                        }
+                    }
+                }
+            }
+
+            return matches.stream()
+                    .min(Comparator.comparingDouble(NightRouteCandidate::score))
+                    .map(this::toNightRoute);
+        } catch (GlobalException e) {
+            log.info("Direct night-bus discovery unavailable: {}", e.getErrorCode().getCode());
+            return Optional.empty();
+        } catch (RuntimeException e) {
+            log.warn("Direct night-bus discovery failed: {}", e.getClass().getSimpleName());
+            return Optional.empty();
+        }
+    }
 
     public List<Schedule> resolveRoute(TransitDto.RouteOptionResponse route, LocalDate day) {
         validateRoute(route);
@@ -224,6 +310,109 @@ public class SeoulBusScheduleService {
         return bus;
     }
 
+    private TransitDto.RouteOptionResponse toNightRoute(NightRouteCandidate candidate) {
+        List<TransitDto.RouteStation> stations = new ArrayList<>();
+        for (int i = candidate.startIndex(); i <= candidate.endIndex(); i++) {
+            Element stop = candidate.routeStops().get(i);
+            stations.add(TransitDto.RouteStation.builder()
+                    .name(stationNameOf(stop))
+                    .sequence(stations.size() + 1)
+                    .stationId(text(stop, "station"))
+                    .x(parseDouble(stationXOf(stop)))
+                    .y(parseDouble(stationYOf(stop)))
+                    .arsId(text(stop, "arsId"))
+                    .build());
+        }
+
+        Element startRouteStop = candidate.routeStops().get(candidate.startIndex());
+        Element endRouteStop = candidate.routeStops().get(candidate.endIndex());
+        int busMinutes = Math.max(5, (candidate.endIndex() - candidate.startIndex()) * 2);
+
+        TransitDto.RouteSegment bus = TransitDto.RouteSegment.builder()
+                .transitType("BUS")
+                .transitName(candidate.routeName())
+                .busType(BusType.TRUNK)
+                .nightBus(true)
+                .durationMinutes(busMinutes)
+                .startStation(stationNameOf(startRouteStop))
+                .endStation(stationNameOf(endRouteStop))
+                .startX(parseDouble(stationXOf(candidate.originStop())))
+                .startY(parseDouble(stationYOf(candidate.originStop())))
+                .endX(parseDouble(stationXOf(candidate.destinationStop())))
+                .endY(parseDouble(stationYOf(candidate.destinationStop())))
+                .stations(stations)
+                .odsayStartStationId(stationIdOf(startRouteStop))
+                .odsayEndStationId(stationIdOf(endRouteStop))
+                .odsayRouteId(candidate.routeId())
+                .localCityCode("1000")
+                .localStationId(stationIdOf(startRouteStop))
+                .localRouteId(candidate.routeId())
+                .arsId(text(candidate.originStop(), "arsId"))
+                .build();
+
+        return TransitDto.RouteOptionResponse.builder()
+                .routeId("SEOUL_NIGHT_" + candidate.routeId() + "_"
+                        + stationIdOf(startRouteStop) + "_" + stationIdOf(endRouteStop))
+                .provider("SEOUL_NIGHT")
+                .totalDurationMinutes(busMinutes)
+                .realTimeDurationMinutes(busMinutes)
+                .transferCount(0)
+                .segments(List.of(bus))
+                .build();
+    }
+
+    private List<Element> nearbyByPosition(double x, double y, int radiusMeters) {
+        if (!Double.isFinite(x) || !Double.isFinite(y)
+                || x < 126.7 || x > 127.3 || y < 37.4 || y > 37.75) {
+            return List.of();
+        }
+        return request(
+                "/stationinfo/getStationByPos",
+                Map.of("tmX", Double.toString(x), "tmY", Double.toString(y),
+                        "radius", Integer.toString(radiusMeters)),
+                "night-nearby-stations").stream()
+                .filter(e -> text(e, "arsId").matches("[0-9]{5}")
+                        && !"00000".equals(text(e, "arsId")))
+                .filter(e -> text(e, "stationId").matches("[0-9]{9}"))
+                .filter(e -> distance(x, y, text(e, "gpsX"), text(e, "gpsY")) <= radiusMeters)
+                .sorted(Comparator.comparingDouble(
+                        e -> distance(x, y, text(e, "gpsX"), text(e, "gpsY"))))
+                .limit(20)
+                .toList();
+    }
+
+    private static String stationIdOf(Element element) {
+        return firstNonBlankText(element, "stationId", "stId", "station");
+    }
+
+    private static String stationNameOf(Element element) {
+        return firstNonBlankText(element, "stationNm", "stNm");
+    }
+
+    private static String stationXOf(Element element) {
+        return firstNonBlankText(element, "gpsX", "tmX");
+    }
+
+    private static String stationYOf(Element element) {
+        return firstNonBlankText(element, "gpsY", "tmY");
+    }
+
+    private static String firstNonBlankText(Element element, String... names) {
+        for (String name : names) {
+            String value = text(element, name);
+            if (!value.isBlank()) return value;
+        }
+        return "";
+    }
+
+    private static Double parseDouble(String value) {
+        try {
+            return value == null || value.isBlank() ? null : Double.parseDouble(value);
+        } catch (RuntimeException e) {
+            return null;
+        }
+    }
+
     private List<Element> nearby(String name, Double x, Double y) {
         if (x == null || y == null || !Double.isFinite(x) || !Double.isFinite(y)
                 || x < 126.7 || x > 127.3 || y < 37.4 || y > 37.75) throw unsupported();
@@ -316,6 +505,15 @@ public class SeoulBusScheduleService {
     private static GlobalException unsupported() { return new GlobalException(ErrorCode.TRANSIT_SCHEDULE_UNSUPPORTED); }
     private static GlobalException unavailable() { return new GlobalException(ErrorCode.TRANSIT_SCHEDULE_UNAVAILABLE); }
     private record Binding(String stationId, String arsId, String routeId, int order, String endStationId, int endOrder) { }
+    private record NightRouteCandidate(
+            String routeId,
+            String routeName,
+            Element originStop,
+            Element destinationStop,
+            List<Element> routeStops,
+            int startIndex,
+            int endIndex,
+            double score) { }
     private record Cached(Schedule schedule, Instant expires) { }
     private record LiveCache(List<Element> items, Instant expires) { }
     public record LiveBus(LocalDateTime boarding, LocalDateTime alighting, boolean last, String vehicleId) { }

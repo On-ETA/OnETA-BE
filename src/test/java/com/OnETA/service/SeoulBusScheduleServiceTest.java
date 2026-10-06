@@ -63,6 +63,54 @@ class SeoulBusScheduleServiceTest {
     }
 
     @Test
+    void discoversDirectNightBusFromNearbyStationGraph() {
+        String origin = "<itemList><stationId>121000001</stationId><arsId>17107</arsId>"
+                + "<stationNm>거리공원</stationNm><gpsX>126.8920</gpsX><gpsY>37.5025</gpsY></itemList>";
+        String destination = "<itemList><stationId>121000099</stationId><arsId>14999</arsId>"
+                + "<stationNm>홍대입구역</stationNm><gpsX>126.9239</gpsX><gpsY>37.5500</gpsY></itemList>";
+
+        server.expect(queryParam("tmX", "126.89170794296935"))
+                .andExpect(queryParam("radius", "1000"))
+                .andRespond(withSuccess(xml(origin), MediaType.APPLICATION_XML));
+        server.expect(queryParam("tmX", "126.92463186895164"))
+                .andExpect(queryParam("radius", "1000"))
+                .andRespond(withSuccess(xml(destination), MediaType.APPLICATION_XML));
+        server.expect(requestTo("https://seoul.test/api/rest/stationinfo/getRouteByStation?serviceKey=key&arsId=17107"))
+                .andRespond(withSuccess(xml(
+                        "<itemList><busRouteId>100100051</busRouteId><busRouteNm>N51</busRouteNm>"
+                                + "<busRouteType>3</busRouteType></itemList>"),
+                        MediaType.APPLICATION_XML));
+        server.expect(queryParam("busRouteId", "100100051"))
+                .andRespond(withSuccess(xml(
+                        "<itemList><seq>1</seq><station>121000001</station><stationNm>거리공원</stationNm>"
+                                + "<arsId>17107</arsId><gpsX>126.8920</gpsX><gpsY>37.5025</gpsY>"
+                                + "<transYn>N</transYn></itemList>"
+                                + "<itemList><seq>2</seq><station>121000050</station><stationNm>중간정류장</stationNm>"
+                                + "<arsId>14500</arsId><gpsX>126.9100</gpsX><gpsY>37.5300</gpsY>"
+                                + "<transYn>N</transYn></itemList>"
+                                + "<itemList><seq>3</seq><station>121000099</station><stationNm>홍대입구역</stationNm>"
+                                + "<arsId>14999</arsId><gpsX>126.9239</gpsX><gpsY>37.5500</gpsY>"
+                                + "<transYn>N</transYn></itemList>"),
+                        MediaType.APPLICATION_XML));
+
+        var route = service.discoverDirectNightRoute(
+                126.89170794296935, 37.50215130939319,
+                126.92463186895164, 37.550164265498864).orElseThrow();
+
+        assertThat(route.getProvider()).isEqualTo("SEOUL_NIGHT");
+        assertThat(route.getSegments()).hasSize(1);
+        var bus = route.getSegments().get(0);
+        assertThat(bus.getTransitName()).isEqualTo("N51");
+        assertThat(bus.isNightBus()).isTrue();
+        assertThat(bus.getStartStation()).isEqualTo("거리공원");
+        assertThat(bus.getEndStation()).isEqualTo("홍대입구역");
+        assertThat(bus.getStations()).extracting(TransitDto.RouteStation::getName)
+                .containsExactly("거리공원", "중간정류장", "홍대입구역");
+        assertThat(TransitRouteClassifier.isNightOnlyRoute(route)).isTrue();
+        server.verify();
+    }
+
+    @Test
     void resolvesExactDirectionAndCachesCurrentDaySchedule() {
         mapping(false, "3"); times("20260918053000", "20260919003000");
         var schedule = service.resolve(route(), DAY);
