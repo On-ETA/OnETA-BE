@@ -148,11 +148,11 @@ class TransitRouteOptimizationServiceTest {
                 127.0, 37.6, null, NotificationScheduleType.LAST_TRANSIT);
 
         assertThat(result).hasSize(2);
-        assertThat(result.get(0).getRoute().getRouteId()).isEqualTo("AVAILABLE");
-        assertThat(result.get(0).getStatus()).isEqualTo(FirstLastRouteStatus.AVAILABLE);
-        assertThat(result.get(1).getRoute().getRouteId()).isEqualTo("NIGHT_ONLY");
-        assertThat(result.get(1).getStatus()).isEqualTo(FirstLastRouteStatus.NIGHT_ONLY);
-        assertThat(result.get(1).getEstimatedDepartureAt()).isNull();
+        assertThat(result.get(0).getRoute().getRouteId()).isEqualTo("NIGHT_ONLY");
+        assertThat(result.get(0).getStatus()).isEqualTo(FirstLastRouteStatus.NIGHT_ONLY);
+        assertThat(result.get(0).getEstimatedDepartureAt()).isNull();
+        assertThat(result.get(1).getRoute().getRouteId()).isEqualTo("AVAILABLE");
+        assertThat(result.get(1).getStatus()).isEqualTo(FirstLastRouteStatus.AVAILABLE);
     }
 
     @Test
@@ -183,9 +183,9 @@ class TransitRouteOptimizationServiceTest {
 
         assertThat(result).hasSize(3);
         assertThat(result).extracting(r -> r.getRoute().getRouteId())
-                .containsExactly("C", "B", "NIGHT_ONLY");
-        assertThat(result.get(2).getStatus()).isEqualTo(FirstLastRouteStatus.NIGHT_ONLY);
-        assertThat(result.get(2).getEstimatedDepartureAt()).isNull();
+                .containsExactly("NIGHT_ONLY", "C", "B");
+        assertThat(result.get(0).getStatus()).isEqualTo(FirstLastRouteStatus.NIGHT_ONLY);
+        assertThat(result.get(0).getEstimatedDepartureAt()).isNull();
     }
 
     @Test
@@ -226,10 +226,41 @@ class TransitRouteOptimizationServiceTest {
 
         assertThat(result).hasSize(3);
         assertThat(result).extracting(r -> r.getRoute().getRouteId())
-                .containsExactly("C", "B", "NIGHT_SIXTH");
-        assertThat(result.get(2).getStatus()).isEqualTo(FirstLastRouteStatus.NIGHT_ONLY);
+                .containsExactly("NIGHT_SIXTH", "C", "B");
+        assertThat(result.get(0).getStatus()).isEqualTo(FirstLastRouteStatus.NIGHT_ONLY);
         verify(schedules, times(5)).previewDepartureForServiceDate(
                 any(), eq(NotificationScheduleType.LAST_TRANSIT), any(LocalDate.class), anyMap());
+    }
+
+    @Test
+    void noNightRouteDoesNotReserveAResultSlot() {
+        TransitApiService api = mock(TransitApiService.class);
+        TransitScheduleService schedules = mock(TransitScheduleService.class);
+        var service = new TransitRouteOptimizationService(api, schedules);
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "clock",
+                java.time.Clock.fixed(java.time.ZonedDateTime.parse("2026-10-02T20:00:00+09:00").toInstant(),
+                        java.time.ZoneId.of("Asia/Seoul")));
+
+        var a = route("A", "ODSAY", 30);
+        var b = route("B", "ODSAY", 25);
+        var c = route("C", "KAKAO", 20);
+
+        when(api.searchScheduleCandidates(anyString(), anyDouble(), anyDouble(), any(),
+                anyDouble(), anyDouble(), any(), eq(10)))
+                .thenReturn(List.of(a, b, c));
+        when(schedules.previewDepartureForServiceDate(eq(a), eq(NotificationScheduleType.LAST_TRANSIT), any(), anyMap()))
+                .thenReturn(LocalDateTime.of(2026, 10, 2, 23, 10));
+        when(schedules.previewDepartureForServiceDate(eq(b), eq(NotificationScheduleType.LAST_TRANSIT), any(), anyMap()))
+                .thenReturn(LocalDateTime.of(2026, 10, 2, 23, 20));
+        when(schedules.previewDepartureForServiceDate(eq(c), eq(NotificationScheduleType.LAST_TRANSIT), any(), anyMap()))
+                .thenReturn(LocalDateTime.of(2026, 10, 2, 23, 30));
+
+        var result = service.search("user@test.com", 126.8, 37.5, null,
+                127.0, 37.6, null, NotificationScheduleType.LAST_TRANSIT);
+
+        assertThat(result).hasSize(3);
+        assertThat(result).extracting(r -> r.getRoute().getRouteId())
+                .containsExactly("C", "B", "A");
     }
 
     @Test
