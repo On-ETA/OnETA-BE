@@ -82,17 +82,16 @@ public class KakaoTransitClient {
 
     public List<TransitDto.RouteOptionResponse> searchScheduleCandidates(
             double sx, double sy, double ex, double ey, int maxCandidates) {
+        // FIRST/LAST 결과도 일반 경로 검색과 동일하게 출발/도착 도보 구간을 완성한다.
+        return search(sx, sy, ex, ey, maxCandidates);
+    }
+
+    TransitDto.RouteOptionResponse completeEndpointWalks(
+            TransitDto.RouteOptionResponse route,
+            double sx, double sy, double ex, double ey) {
         HttpHeaders headers = authorizationHeaders();
-        try {
-            // FIRST/LAST candidate discovery only needs transit legs. Avoid extra walking API
-            // calls here because endpoint walks do not affect NIGHT_ONLY classification.
-            return requestTransitRoutes(sx, sy, ex, ey, maxCandidates, headers);
-        } catch (GlobalException e) {
-            throw e;
-        } catch (Exception e) {
-            log.warn("Kakao schedule candidate request failed: {}", e.getClass().getSimpleName());
-            throw new GlobalException(ErrorCode.TRANSIT_API_UNAVAILABLE);
-        }
+        Map<WalkLeg, Integer> walkingTimes = new HashMap<>();
+        return completeEndpointWalks(route, sx, sy, ex, ey, headers, walkingTimes);
     }
 
     private HttpHeaders authorizationHeaders() {
