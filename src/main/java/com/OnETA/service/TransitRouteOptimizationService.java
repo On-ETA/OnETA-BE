@@ -24,7 +24,8 @@ import java.util.Map;
 @RequiredArgsConstructor
 @Slf4j
 public class TransitRouteOptimizationService {
-    private static final int CANDIDATE_LIMIT = 5;
+    private static final int SEARCH_CANDIDATE_LIMIT = 10;
+    private static final int SCHEDULE_CANDIDATE_LIMIT = 5;
     private static final int RESULT_LIMIT = 3;
     private static final ZoneId SEOUL = ZoneId.of("Asia/Seoul");
 
@@ -40,12 +41,13 @@ public class TransitRouteOptimizationService {
         validateScheduleType(scheduleType);
 
         List<TransitDto.RouteOptionResponse> routes = transitApiService.searchScheduleCandidates(
-                email, originX, originY, originAddress, destX, destY, destAddress, CANDIDATE_LIMIT);
+                email, originX, originY, originAddress, destX, destY, destAddress, SEARCH_CANDIDATE_LIMIT);
         List<TransitDto.RouteOptionResponse> nightOnlyRoutes = routes.stream()
                 .filter(TransitRouteClassifier::isNightOnlyRoute)
                 .toList();
         List<TransitDto.RouteOptionResponse> schedulableRoutes = routes.stream()
                 .filter(route -> !TransitRouteClassifier.isNightOnlyRoute(route))
+                .limit(SCHEDULE_CANDIDATE_LIMIT)
                 .toList();
 
         LocalDateTime now = LocalDateTime.now(clock.withZone(SEOUL));
@@ -146,14 +148,29 @@ public class TransitRouteOptimizationService {
             List<TransitDto.FirstLastRouteOptionResponse> available,
             List<TransitDto.RouteOptionResponse> nightOnlyRoutes,
             NotificationScheduleType scheduleType) {
-        if (nightOnlyRoutes.isEmpty()) return available;
+        if (nightOnlyRoutes.isEmpty()) return available.stream()
+                .limit(RESULT_LIMIT)
+                .toList();
 
-        int availableLimit = Math.min(available.size(), RESULT_LIMIT - 1);
-        List<TransitDto.FirstLastRouteOptionResponse> result = new ArrayList<>(
-                available.subList(0, availableLimit));
+        List<TransitDto.FirstLastRouteOptionResponse> nightResponses =
+                nightOnlyResponses(nightOnlyRoutes, scheduleType, RESULT_LIMIT);
 
+        List<TransitDto.FirstLastRouteOptionResponse> result = new ArrayList<>();
+
+        // NIGHT_ONLY가 존재하면 가장 짧은 심야 경로 1개를 최우선으로 포함한다.
+        result.add(nightResponses.get(0));
+
+        // 남은 자리는 AVAILABLE 경로로 우선 채운다.
+        int availableLimit = Math.min(available.size(), RESULT_LIMIT - result.size());
+        result.addAll(available.subList(0, availableLimit));
+
+        // AVAILABLE이 부족하면 추가 NIGHT_ONLY 경로로 남은 자리를 채운다.
         int remaining = RESULT_LIMIT - result.size();
-        result.addAll(nightOnlyResponses(nightOnlyRoutes, scheduleType, remaining));
+        if (remaining > 0 && nightResponses.size() > 1) {
+            result.addAll(nightResponses.subList(
+                    1, Math.min(nightResponses.size(), 1 + remaining)));
+        }
+
         return result;
     }
 
