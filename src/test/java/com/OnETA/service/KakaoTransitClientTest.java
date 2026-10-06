@@ -165,6 +165,54 @@ class KakaoTransitClientTest {
     }
 
     @Test
+    void completesWalkingLegsForDiscoveredSeoulNightRoute() {
+        var route = TransitDto.RouteOptionResponse.builder()
+                .provider("SEOUL_NIGHT")
+                .routeId("SEOUL_NIGHT_test")
+                .totalDurationMinutes(20)
+                .realTimeDurationMinutes(20)
+                .transferCount(0)
+                .segments(java.util.List.of(
+                        TransitDto.RouteSegment.builder()
+                                .transitType("BUS")
+                                .transitName("N51")
+                                .nightBus(true)
+                                .durationMinutes(20)
+                                .startStation("거리공원")
+                                .endStation("홍대입구역")
+                                .startX(126.8920).startY(37.5025)
+                                .endX(126.9239).endY(37.5500)
+                                .stations(java.util.List.of(
+                                        TransitDto.RouteStation.builder().name("거리공원").build(),
+                                        TransitDto.RouteStation.builder().name("홍대입구역").build()))
+                                .build()))
+                .build();
+
+        server.expect(queryParam("start_x", "126.89170794296935"))
+                .andExpect(queryParam("end_x", "126.892"))
+                .andRespond(withSuccess(
+                        "{\"status\":\"OK\",\"route\":{\"properties\":{\"totalTime\":180}}}",
+                        MediaType.APPLICATION_JSON));
+        server.expect(queryParam("start_x", "126.9239"))
+                .andExpect(queryParam("end_x", "126.92463186895164"))
+                .andRespond(withSuccess(
+                        "{\"status\":\"OK\",\"route\":{\"properties\":{\"totalTime\":240}}}",
+                        MediaType.APPLICATION_JSON));
+
+        var completed = kakao.completeEndpointWalks(
+                route,
+                126.89170794296935, 37.50215130939319,
+                126.92463186895164, 37.550164265498864);
+
+        assertThat(completed.getSegments()).extracting(TransitDto.RouteSegment::getTransitType)
+                .containsExactly("WALK", "BUS", "WALK");
+        assertThat(completed.getSegments()).extracting(TransitDto.RouteSegment::getDurationMinutes)
+                .containsExactly(3, 20, 4);
+        assertThat(completed.getTotalDurationMinutes()).isEqualTo(27);
+        server.verify();
+    }
+
+    @Test
     void networkFailureFallsBackAndBothProviderFailureIsUnavailable() {
         configure();
         server.expect(queryParam("SX", "127.1"))
