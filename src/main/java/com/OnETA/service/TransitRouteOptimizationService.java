@@ -24,7 +24,8 @@ import java.util.Map;
 @RequiredArgsConstructor
 @Slf4j
 public class TransitRouteOptimizationService {
-    private static final int CANDIDATE_LIMIT = 5;
+    private static final int SEARCH_CANDIDATE_LIMIT = 10;
+    private static final int SCHEDULE_CANDIDATE_LIMIT = 5;
     private static final int RESULT_LIMIT = 3;
     private static final ZoneId SEOUL = ZoneId.of("Asia/Seoul");
 
@@ -40,12 +41,13 @@ public class TransitRouteOptimizationService {
         validateScheduleType(scheduleType);
 
         List<TransitDto.RouteOptionResponse> routes = transitApiService.searchScheduleCandidates(
-                email, originX, originY, originAddress, destX, destY, destAddress, CANDIDATE_LIMIT);
+                email, originX, originY, originAddress, destX, destY, destAddress, SEARCH_CANDIDATE_LIMIT);
         List<TransitDto.RouteOptionResponse> nightOnlyRoutes = routes.stream()
                 .filter(TransitRouteClassifier::isNightOnlyRoute)
                 .toList();
         List<TransitDto.RouteOptionResponse> schedulableRoutes = routes.stream()
                 .filter(route -> !TransitRouteClassifier.isNightOnlyRoute(route))
+                .limit(SCHEDULE_CANDIDATE_LIMIT)
                 .toList();
 
         LocalDateTime now = LocalDateTime.now(clock.withZone(SEOUL));
