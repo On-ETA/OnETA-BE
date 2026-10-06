@@ -50,7 +50,7 @@ class SeoulBusScheduleServiceTest {
     }
     private void mapping(boolean reverse, String type) {
         nearby();
-        server.expect(requestTo("https://seoul.test/api/rest/stationinfo/getRouteByStation?serviceKey=key&arsId=01001"))
+        server.expect(requestTo("https://seoul.test/api/rest/stationinfo/getRouteByStation?ServiceKey=key&arsId=01001"))
                 .andRespond(withSuccess(xml("<itemList><busRouteId>100100088</busRouteId><busRouteNm>603</busRouteNm><busRouteType>"+type+"</busRouteType></itemList>"), MediaType.APPLICATION_XML));
         if (!"8".equals(type)) server.expect(queryParam("busRouteId", "100100088"))
                 .andRespond(withSuccess(xml("<itemList><seq>"+(reverse?2:1)+"</seq><station>100000001</station><stationNm>출발역</stationNm><transYn>N</transYn></itemList>"
@@ -72,7 +72,7 @@ class SeoulBusScheduleServiceTest {
         server.expect(queryParam("tmX", "126.89170794296935"))
                 .andExpect(queryParam("radius", "1000"))
                 .andRespond(withSuccess(xml(origin), MediaType.APPLICATION_XML));
-        server.expect(requestTo("https://seoul.test/api/rest/stationinfo/getRouteByStation?serviceKey=key&arsId=17107"))
+        server.expect(requestTo("https://seoul.test/api/rest/stationinfo/getRouteByStation?ServiceKey=key&arsId=17107"))
                 .andRespond(withSuccess(xml(
                         "<itemList><busRouteId>100100051</busRouteId><busRouteNm>N51</busRouteNm>"
                                 + "<busRouteType>3</busRouteType></itemList>"),
@@ -214,7 +214,7 @@ class SeoulBusScheduleServiceTest {
                 + "<vehId2>222</vehId2><exps2>900</exps2><full2>1</full2></itemList>";
         String end = "<itemList><stId>100000002</stId><staOrd>20</staOrd><mkTm>2026-09-18 12:00:00.0</mkTm>"
                 + "<vehId1>111</vehId1><exps1>1200</exps1></itemList>";
-        server.expect(requestTo("https://seoul.test/api/rest/arrive/getArrInfoByRouteAll?serviceKey=key&busRouteId=100100088"))
+        server.expect(requestTo("https://seoul.test/api/rest/arrive/getArrInfoByRouteAll?ServiceKey=key&busRouteId=100100088"))
                 .andRespond(withSuccess(xml(start + end), MediaType.APPLICATION_XML));
         var arrivals = service.arrivals(schedule, DAY.atTime(12, 0));
         assertThat(arrivals).hasSize(1);
@@ -235,7 +235,7 @@ class SeoulBusScheduleServiceTest {
     void preservesReservedCharactersInRawAndEncodedServiceKeys(String key) {
         var client = new SeoulBusScheduleService(http, key, "https://seoul.test",
                 Clock.fixed(DAY.atStartOfDay(ZoneId.of("Asia/Seoul")).toInstant(), ZoneId.of("Asia/Seoul")));
-        server.expect(request -> assertThat(request.getURI().getRawQuery()).contains("serviceKey=a%2Bb%2Fc%3D%3D"))
+        server.expect(request -> assertThat(request.getURI().getRawQuery()).contains("ServiceKey=a%2Bb%2Fc%3D%3D"))
                 .andRespond(withStatus(HttpStatus.UNAUTHORIZED));
         assertThatThrownBy(() -> client.resolve(route(), DAY)).isInstanceOf(GlobalException.class);
         server.verify();

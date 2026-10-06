@@ -451,7 +451,7 @@ public class SeoulBusScheduleService {
     }
 
     private List<Element> request(String path, Map<String, String> params, String group) {
-        var builder = UriComponentsBuilder.fromUriString(baseUrl + "/api/rest" + path).queryParam("serviceKey", "{serviceKey}");
+        var builder = UriComponentsBuilder.fromUriString(baseUrl + "/api/rest" + path).queryParam("ServiceKey", "{serviceKey}");
         params.forEach(builder::queryParam);
         try {
             ExternalApiCallCounter.record("SEOUL_BUS", group);
