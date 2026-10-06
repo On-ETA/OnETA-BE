@@ -230,10 +230,10 @@ public class SeoulBusScheduleService {
                 List<Element> stops = request("/busRouteInfo/getStaionByRoute", Map.of("busRouteId", routeId), "route-stations");
                 stops.sort(Comparator.comparingInt(this::sequence));
                 for (int i = 0; i < stops.size(); i++) {
-                    if (!text(stops.get(i), "station").equals(text(start, "stationId"))) continue;
+                    if (!stationIdOf(stops.get(i)).equals(stationIdOf(start))) continue;
                     for (Element end : ends) {
                         int last = i + bus.getStations().size() - 1;
-                        if (last >= stops.size() || !text(stops.get(last), "station").equals(text(end, "stationId"))) continue;
+                        if (last >= stops.size() || !stationIdOf(stops.get(last)).equals(stationIdOf(end))) continue;
                         boolean same = true;
                         for (int j = i; j <= last; j++) {
                             if (!normalize(text(stops.get(j), "stationNm"))
@@ -241,8 +241,8 @@ public class SeoulBusScheduleService {
                                     || (j > i && sequence(stops.get(j)) != sequence(stops.get(j - 1)) + 1)
                                     || (j > i && j < last && "Y".equals(text(stops.get(j), "transYn")))) same = false;
                         }
-                        if (same) matches.add(new Binding(text(start, "stationId"), ars, routeId,
-                                sequence(stops.get(i)), text(end, "stationId"), sequence(stops.get(last))));
+                        if (same) matches.add(new Binding(stationIdOf(start), ars, routeId,
+                                sequence(stops.get(i)), stationIdOf(end), sequence(stops.get(last))));
                     }
                 }
             }
@@ -341,7 +341,7 @@ public class SeoulBusScheduleService {
             stations.add(TransitDto.RouteStation.builder()
                     .name(stationNameOf(stop))
                     .sequence(stations.size() + 1)
-                    .stationId(text(stop, "station"))
+                    .stationId(stationIdOf(stop))
                     .x(parseDouble(stationXOf(stop)))
                     .y(parseDouble(stationYOf(stop)))
                     .arsId(text(stop, "arsId"))
@@ -442,10 +442,10 @@ public class SeoulBusScheduleService {
                 || x < 126.7 || x > 127.3 || y < 37.4 || y > 37.75) throw unsupported();
         var result = request("/stationinfo/getStationByPos",
                 Map.of("tmX", x.toString(), "tmY", y.toString(), "radius", "100"), "stations").stream()
-                .filter(e -> normalize(text(e, "stationNm")).equals(normalize(name)))
+                .filter(e -> normalize(stationNameOf(e)).equals(normalize(name)))
                 .filter(e -> text(e, "arsId").matches("[0-9]{5}") && !"00000".equals(text(e, "arsId")))
-                .filter(e -> text(e, "stationId").matches("[0-9]{9}"))
-                .filter(e -> distance(x, y, text(e, "gpsX"), text(e, "gpsY")) <= 100).toList();
+                .filter(e -> stationIdOf(e).matches("[0-9]{9}"))
+                .filter(e -> distance(x, y, stationXOf(e), stationYOf(e)) <= 100).toList();
         if (result.isEmpty() || result.size() > 4) throw unsupported();
         return result;
     }
