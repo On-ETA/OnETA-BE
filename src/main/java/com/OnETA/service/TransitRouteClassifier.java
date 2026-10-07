@@ -17,6 +17,13 @@ public final class TransitRouteClassifier {
         return SEOUL_NIGHT_BUS_NAME.matcher(normalized).matches();
     }
 
+    public static boolean containsNightBus(TransitDto.RouteOptionResponse route) {
+        if (route == null || route.getSegments() == null) return false;
+        return route.getSegments().stream().anyMatch(segment -> segment != null
+                && "BUS".equals(segment.getTransitType())
+                && (segment.isNightBus() || isNightBusName(segment.getTransitName())));
+    }
+
     public static boolean isNightOnlyRoute(TransitDto.RouteOptionResponse route) {
         if (route == null || route.getSegments() == null || route.getSegments().isEmpty()) return false;
 
