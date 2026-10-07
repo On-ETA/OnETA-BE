@@ -17,6 +17,7 @@ import java.util.HashMap;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.*;
+import static org.mockito.Mockito.mock;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.*;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 
@@ -72,7 +73,7 @@ class TransitDepartureTimeTest {
                 .andRespond(withSuccess("""
                         {"result":{"path":[{"info":{"departureTime":"%s","arrivalTime":"%s"}}]}}
                         """.formatted(departure, arrival), MediaType.APPLICATION_JSON));
-        var service = new TransitScheduleService(null, null, null, new ObjectMapper(), rest);
+        var service = new TransitScheduleService(mock(TransitApiService.class), null, null, new ObjectMapper(), rest);
         ReflectionTestUtils.setField(service, "apiKey", "test");
         ReflectionTestUtils.setField(service, "scheduleBaseUrl", "http://odsay/v1/api");
         return new Fixture(service, server);
