@@ -76,12 +76,16 @@ public class TransitScheduleService {
     public Decision evaluate(ArrivalNotification notification, LocalDate date, LocalDateTime now, ZoneId zone) {
         NotificationScheduleType type = notification.getScheduleType();
         String details = notification.getRouteDetails();
-        String hash = hash(details);
+        String hash = hash(details, type);
         Optional<ScheduleSnapshot> existing = snapshotRepository
                 .findForUpdate(notification.getId(), date, type, hash);
+        if (existing.isEmpty() && type == NotificationScheduleType.LAST_TRANSIT && date.isBefore(now.toLocalDate())) {
+            // Preserve valid pre-upgrade snapshots from an interval crossing midnight.
+            existing = snapshotRepository.findForUpdate(notification.getId(), date, type, hash(details));
+        }
         // Previous-day Seoul schedules may only use a snapshot already fetched that day.
         if (existing.isEmpty() && date.isBefore(now.toLocalDate())) return null;
-        ScheduleSnapshot snapshot = existing.orElseGet(() -> createSnapshot(notification, date, type, hash, zone));
+        ScheduleSnapshot snapshot = existing.orElseGet(() -> createSnapshot(notification, date, type, hash, zone, now));
         if (snapshot.getEvaluationMode() == ScheduleEvaluationMode.FINISHED) return null;
 
         int offset = notification.getReminderOffsetMinutesList().stream()
@@ -148,7 +152,7 @@ public class TransitScheduleService {
 
     @Transactional
     public void markRecoveryDeliveryCreated(ArrivalNotification notification, LocalDate date) {
-        String hash = hash(notification.getRouteDetails());
+        String hash = hash(notification.getRouteDetails(), notification.getScheduleType());
         snapshotRepository.findForUpdate(notification.getId(), date, notification.getScheduleType(), hash)
                 .ifPresent(snapshot -> { snapshot.markRecoveryDeliveryCreated(); snapshotRepository.save(snapshot); });
     }
@@ -158,7 +162,7 @@ public class TransitScheduleService {
                                                  LocalDateTime now) {
         if (notification.getRepeatDays() != null && notification.getRepeatDays() != 0) return false;
 
-        String routeHash = hash(notification.getRouteDetails());
+        String routeHash = hash(notification.getRouteDetails(), notification.getScheduleType());
         var snapshot = snapshotRepository
                 .findByNotificationIdAndServiceDateAndScheduleTypeAndRouteHash(
                         notification.getId(), serviceDate, notification.getScheduleType(), routeHash)
@@ -185,14 +189,17 @@ public class TransitScheduleService {
     }
 
     private ScheduleSnapshot createSnapshot(ArrivalNotification n, LocalDate date,
-                                             NotificationScheduleType type, String hash, ZoneId zone) {
-        return snapshotRepository.save(buildSnapshot(n, date, type, hash, zone));
+                                             NotificationScheduleType type, String hash, ZoneId zone, LocalDateTime now) {
+        return snapshotRepository.save(buildSnapshot(n, date, type, hash, zone, now));
     }
 
     private ScheduleSnapshot buildSnapshot(ArrivalNotification n, LocalDate date,
-                                             NotificationScheduleType type, String hash, ZoneId zone) {
+                                             NotificationScheduleType type, String hash, ZoneId zone, LocalDateTime now) {
         TransitDto.RouteOptionResponse route = transitApiService.readSavedRoute(n.getRouteDetails());
-        RouteSchedulePlan plan = calculateRoutePlan(route, type, date, null);
+        Map<String, LocalDateTime> cache = new HashMap<>();
+        RouteSchedulePlan plan = type == NotificationScheduleType.LAST_TRANSIT && date.equals(now.toLocalDate())
+                ? calculateCurrentLastPlan(route, now, cache) : null;
+        if (plan == null) plan = calculateRoutePlan(route, type, date, cache);
         int offset = n.getReminderOffsetMinutesList().stream()
                 .max(Integer::compareTo).orElse(n.getReminderOffsetMinutes());
         LocalDateTime scheduled = plan.departure().minusMinutes(offset);
@@ -223,7 +230,7 @@ public class TransitScheduleService {
             return calculateConnectedFirstPlan(route, date, scheduleCache);
         }
 
-        if (SeoulBusScheduleService.isKakao(route)) {
+        if (SeoulBusScheduleService.usesSeoulBusSchedules(route)) {
             long rides = route.getSegments().stream().filter(s -> !"WALK".equals(s.getTransitType())).count();
             if (rides > 1 || route.getSegments().stream().anyMatch(s -> "SUBWAY".equals(s.getTransitType()))) {
                 boolean hasSubway = route.getSegments().stream()
@@ -455,6 +462,114 @@ public class TransitScheduleService {
         }
     }
 
+    /** Latest estimated connected departure in an operating interval already in progress. */
+    public LocalDateTime previewCurrentLastDeparture(TransitDto.RouteOptionResponse route,
+                                                    LocalDateTime now,
+                                                    Map<String, LocalDateTime> scheduleCache) {
+        try {
+            RouteSchedulePlan plan = calculateCurrentLastPlan(route, now, scheduleCache);
+            return plan == null ? null : plan.departure();
+        } catch (com.OnETA.common.exception.GlobalException e) {
+            throw e;
+        } catch (RuntimeException e) {
+            throw new com.OnETA.common.exception.GlobalException(
+                    com.OnETA.common.error.ErrorCode.TRANSIT_SCHEDULE_UNAVAILABLE);
+        }
+    }
+
+    private RouteSchedulePlan calculateCurrentLastPlan(TransitDto.RouteOptionResponse route,
+                                                       LocalDateTime now,
+                                                       Map<String, LocalDateTime> scheduleCache) {
+        if (route == null || route.getSegments() == null || route.getSegments().isEmpty()) {
+            throw new com.OnETA.common.exception.GlobalException(
+                    com.OnETA.common.error.ErrorCode.TRANSIT_SCHEDULE_UNSUPPORTED);
+        }
+        boolean seoul = SeoulBusScheduleService.usesSeoulBusSchedules(route);
+        boolean singleBus = route.getSegments().stream()
+                .filter(segment -> segment != null && !"WALK".equals(segment.getTransitType())).count() == 1
+                && route.getSegments().stream().anyMatch(segment -> segment != null && "BUS".equals(segment.getTransitType()));
+        List<TransitOperatingWindow> windows = new ArrayList<>();
+        List<SeoulBusScheduleService.Schedule> bindings = new ArrayList<>();
+        for (var segment : route.getSegments()) {
+            if (segment == null || segment.getDurationMinutes() == null || segment.getDurationMinutes() < 0) {
+                throw connectionUnverified();
+            }
+            if ("WALK".equals(segment.getTransitType())) continue;
+            TransitOperatingWindow window;
+            if (seoul) {
+                var binding = "SUBWAY".equals(segment.getTransitType())
+                        ? resolveKakaoSubwaySchedule(segment, now.toLocalDate())
+                        : seoulBusScheduleService.resolve(singleBus ? route : route.toBuilder().transferCount(0)
+                                .segments(List.of(segment)).build(), now.toLocalDate());
+                window = new TransitOperatingWindow(binding.first(), binding.last());
+                if ("BUS".equals(segment.getTransitType())) {
+                    window = window.at(now);
+                } else if (now.isBefore(window.first())) {
+                    // Subway APIs accept a service date: use the actual preceding
+                    // weekday timetable instead of shifting today's timetable.
+                    var preceding = resolveKakaoSubwaySchedule(segment, now.toLocalDate().minusDays(1));
+                    var previousWindow = new TransitOperatingWindow(preceding.first(), preceding.last());
+                    if (previousWindow.contains(now)) {
+                        binding = preceding;
+                        window = previousWindow;
+                    }
+                }
+                bindings.add(new SeoulBusScheduleService.Schedule(binding.stationId(), binding.arsId(),
+                        binding.routeId(), window.first(), window.last(), binding.order(),
+                        binding.endStationId(), binding.endOrder()));
+            } else {
+                LocalDate date = now.toLocalDate();
+                LocalDateTime first = serviceTimeCached(segment, NotificationScheduleType.FIRST_TRANSIT, date, scheduleCache);
+                if (first == null) throw new com.OnETA.common.exception.GlobalException(
+                        com.OnETA.common.error.ErrorCode.TRANSIT_SCHEDULE_UNSUPPORTED);
+                LocalDateTime last = serviceTimeCached(segment, NotificationScheduleType.LAST_TRANSIT, date, scheduleCache);
+                if (last == null) throw new com.OnETA.common.exception.GlobalException(
+                        com.OnETA.common.error.ErrorCode.TRANSIT_SCHEDULE_UNSUPPORTED);
+                window = new TransitOperatingWindow(first, last);
+                if ("BUS".equals(segment.getTransitType())) {
+                    window = window.at(now);
+                } else if ("SUBWAY".equals(segment.getTransitType()) && now.isBefore(first)) {
+                    var previousFirst = serviceTimeCached(segment, NotificationScheduleType.FIRST_TRANSIT,
+                            date.minusDays(1), scheduleCache);
+                    var previousLast = serviceTimeCached(segment, NotificationScheduleType.LAST_TRANSIT,
+                            date.minusDays(1), scheduleCache);
+                    if (previousFirst != null && previousLast != null) {
+                        var previousWindow = new TransitOperatingWindow(previousFirst, previousLast);
+                        if (previousWindow.contains(now)) window = previousWindow;
+                    }
+                }
+            }
+            if (!window.last().isAfter(window.first())) throw connectionUnverified();
+            windows.add(window);
+        }
+        if (windows.isEmpty()) throw connectionUnverified();
+        // The origin ride must be running now. Later rides may open by the time
+        // we reach them, but every projected boarding must fit its operating interval.
+        if (!windows.get(0).contains(now)) return null;
+        List<LocalDateTime> lastTimes = windows.stream().map(TransitOperatingWindow::last).toList();
+        var plan = windows.size() == 1
+                ? TransitScheduleCalculator.calculate(route.getSegments(), lastTimes, NotificationScheduleType.LAST_TRANSIT)
+                : TransitScheduleCalculator.conservative(route.getSegments(), lastTimes, NotificationScheduleType.LAST_TRANSIT);
+        if (!plan.departure().isAfter(now)) return null;
+        int prefix = 0, ride = 0;
+        for (var segment : route.getSegments()) {
+            if (!"WALK".equals(segment.getTransitType())) {
+                var window = windows.get(ride++);
+                LocalDateTime boarding = plan.departure().plusMinutes(prefix + (windows.size() > 1 ? 5 : 0));
+                if (boarding.isBefore(window.first()) || boarding.isAfter(window.last())) return null;
+                if (windows.size() > 1) {
+                    prefix += Math.max(3, (int) Math.ceil(segment.getDurationMinutes() * 0.25));
+                    if (ride < windows.size()) prefix += 10;
+                }
+            }
+            prefix += segment.getDurationMinutes();
+        }
+        String source = seoul ? (singleBus ? "SEOUL_BUS" : "SEOUL_BUS_TRANSFER") : "ODSAY";
+        return new RouteSchedulePlan(plan.departure(), plan.durationMinutes(), source,
+                seoul && !singleBus ? objectMapper.writeValueAsString(bindings) : null,
+                !singleBus ? Math.max(60, prefix) : 0);
+    }
+
     public LocalDateTime previewDepartureForServiceDate(TransitDto.RouteOptionResponse route,
                                                         NotificationScheduleType type,
                                                         LocalDate serviceDate,
@@ -495,6 +610,11 @@ public class TransitScheduleService {
         com.OnETA.common.exception.GlobalException unsupported = null;
         LocalDate today = now.toLocalDate();
 
+        if (type == NotificationScheduleType.LAST_TRANSIT) {
+            LocalDateTime current = previewCurrentLastDeparture(route, now, scheduleCache);
+            if (current != null) return current;
+        }
+
         for (LocalDate day = today; !day.isAfter(today.plusDays(1)); day = day.plusDays(1)) {
             try {
                 RouteSchedulePlan plan = calculateRoutePlan(route, type, day, scheduleCache);
@@ -522,7 +642,7 @@ public class TransitScheduleService {
 
     /** Read-only display estimate: never runs realtime polling, recovery, or delivery creation. */
     public LocalDateTime estimateDeparture(ArrivalNotification notification, LocalDateTime now, ZoneId zone) {
-        String routeHash = hash(notification.getRouteDetails());
+        String routeHash = hash(notification.getRouteDetails(), notification.getScheduleType());
         var type = notification.getScheduleType();
 
         // Reuse a persisted snapshot only while it is still in the future. If the latest
@@ -532,6 +652,12 @@ public class TransitScheduleService {
                 .findFirstByNotificationIdAndScheduleTypeAndRouteHashOrderByServiceDateDesc(
                         notification.getId(), type, routeHash);
         LocalDate today = now.toLocalDate();
+        if (saved.isEmpty() && type == NotificationScheduleType.LAST_TRANSIT) {
+            saved = snapshotRepository.findFirstByNotificationIdAndScheduleTypeAndRouteHashOrderByServiceDateDesc(
+                    notification.getId(), type, hash(notification.getRouteDetails()))
+                    .filter(snapshot -> snapshot.getServiceDate().isBefore(today)
+                            && snapshot.getEffectiveDepartureAt().isAfter(now));
+        }
         LocalDate startDay = today;
         if (saved.isPresent()) {
             LocalDateTime departure = saved.get().getEffectiveDepartureAt();
@@ -551,7 +677,7 @@ public class TransitScheduleService {
 
         LocalDate endDay = today.plusDays(1);
         for (LocalDate day = startDay; !day.isAfter(endDay); day = day.plusDays(1)) {
-            ScheduleSnapshot snapshot = buildSnapshot(notification, day, type, routeHash, zone);
+            ScheduleSnapshot snapshot = buildSnapshot(notification, day, type, routeHash, zone, now);
             LocalDateTime departure = snapshot.getEffectiveDepartureAt();
             if (departure.isAfter(now)) {
                 return departure;
@@ -662,17 +788,20 @@ public class TransitScheduleService {
                                             NotificationScheduleType type,
                                             LocalDate serviceDate,
                                             Map<String, LocalDateTime> scheduleCache) {
-        if (scheduleCache == null) return serviceTime(segment, type, serviceDate);
-        String key = type + "|" + serviceDate + "|" + segment.getTransitType() + "|"
+        if (scheduleCache == null) return serviceTime(segment, type, serviceDate, null);
+        String key = scheduleKey(segment, type, serviceDate);
+        if (scheduleCache.containsKey(key)) return scheduleCache.get(key);
+        LocalDateTime resolved = serviceTime(segment, type, serviceDate, scheduleCache);
+        if (resolved != null) scheduleCache.put(key, resolved);
+        return resolved;
+    }
+
+    private String scheduleKey(TransitDto.RouteSegment segment, NotificationScheduleType type, LocalDate serviceDate) {
+        return type + "|" + serviceDate + "|" + segment.getTransitType() + "|"
                 + Objects.toString(segment.getOdsayStartStationId(), "") + "|"
                 + Objects.toString(segment.getOdsayEndStationId(), "") + "|"
                 + Objects.toString(segment.getOdsayRouteId(), "") + "|"
                 + Objects.toString(segment.getLocalRouteId(), "");
-        LocalDateTime cached = scheduleCache.get(key);
-        if (cached != null) return cached;
-        LocalDateTime resolved = serviceTime(segment, type, serviceDate);
-        if (resolved != null) scheduleCache.put(key, resolved);
-        return resolved;
     }
 
     private String odsayDay(LocalDate serviceDate) {
@@ -683,7 +812,8 @@ public class TransitScheduleService {
         };
     }
 
-    private LocalDateTime serviceTime(TransitDto.RouteSegment s, NotificationScheduleType type, LocalDate serviceDate) {
+    private LocalDateTime serviceTime(TransitDto.RouteSegment s, NotificationScheduleType type, LocalDate serviceDate,
+                                     Map<String, LocalDateTime> scheduleCache) {
         if ("BUS".equals(s.getTransitType())) {
             JsonNode response = request("/busStationInfo", Map.of("stationID", s.getOdsayStartStationId()));
             logBusStationInfoResponse(response, s.getOdsayStartStationId());
@@ -697,6 +827,15 @@ public class TransitScheduleService {
                 if (same(lane.path("busID"), s.getOdsayRouteId())
                         || same(lane.path("busLocalBlID"), s.getLocalRouteId())) {
                     matched = true;
+                    // FIRST and LAST come from the same busStationInfo response.
+                    // Cache both boundaries so current-window checks do not double API calls.
+                    LocalDateTime busFirst = parseTime(lane.path("busFirstTime").asText(null), serviceDate);
+                    LocalDateTime busLast = parseTime(lane.path("busLastTime").asText(null), serviceDate);
+                    if (scheduleCache != null) {
+                        if (busFirst != null && busLast != null && busLast.isBefore(busFirst)) busLast = busLast.plusDays(1);
+                        scheduleCache.put(scheduleKey(s, NotificationScheduleType.FIRST_TRANSIT, serviceDate), busFirst);
+                        scheduleCache.put(scheduleKey(s, NotificationScheduleType.LAST_TRANSIT, serviceDate), busLast);
+                    }
                     String field = type == NotificationScheduleType.FIRST_TRANSIT ? "busFirstTime" : "busLastTime";
                     serviceTime = parseTime(lane.path(field).asText(null), serviceDate);
                     if (type == NotificationScheduleType.LAST_TRANSIT && serviceTime != null) {
@@ -879,6 +1018,15 @@ public class TransitScheduleService {
         } catch (Exception e) { return null; }
     }
     private boolean same(JsonNode n, String value) { return value != null && !n.isMissingNode() && value.equals(n.asText()); }
+    private String hash(String v, NotificationScheduleType type) {
+        if (type != NotificationScheduleType.LAST_TRANSIT) return hash(v);
+        try {
+            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
+                    .digest(("last-current-window-v1:" + hash(v)).getBytes(StandardCharsets.UTF_8)));
+        } catch (Exception e) {
+            throw new IllegalStateException(e);
+        }
+    }
     private String hash(String v) { try { return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(((SeoulBusScheduleService.isKakao(transitApiService.readSavedRoute(v)) ? "schedule-v6:" : "schedule-v4:") + (v==null?"":v)).getBytes(StandardCharsets.UTF_8))); } catch(Exception e){throw new IllegalStateException(e);} }
     public record Decision(LocalDateTime scheduledAt, LocalDateTime hardDeadlineAt, DeliveryPhase phase, LocalDateTime baseDepartureAt, LocalDateTime effectiveDepartureAt, boolean recovery, int estimatedDuration) {}
     private record RouteSchedulePlan(LocalDateTime departure, int durationMinutes, String source,

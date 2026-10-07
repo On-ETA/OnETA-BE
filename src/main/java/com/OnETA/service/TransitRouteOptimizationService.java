@@ -12,7 +12,6 @@ import org.springframework.stereotype.Service;
 import java.time.Clock;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
-import java.time.LocalTime;
 import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -42,6 +41,9 @@ public class TransitRouteOptimizationService {
 
         List<TransitDto.RouteOptionResponse> routes = transitApiService.searchScheduleCandidates(
                 email, originX, originY, originAddress, destX, destY, destAddress, SEARCH_CANDIDATE_LIMIT);
+        if (scheduleType == NotificationScheduleType.LAST_TRANSIT) {
+            return searchLast(routes, LocalDateTime.now(clock.withZone(SEOUL)));
+        }
         List<TransitDto.RouteOptionResponse> nightOnlyRoutes = routes.stream()
                 .filter(TransitRouteClassifier::isNightOnlyRoute)
                 .toList();
@@ -54,13 +56,7 @@ public class TransitRouteOptimizationService {
         Map<String, LocalDateTime> scheduleCache = new HashMap<>();
         FailureState failures = new FailureState();
 
-        List<LocalDate> serviceDays = new ArrayList<>();
-        if (scheduleType == NotificationScheduleType.LAST_TRANSIT
-                && now.toLocalTime().isBefore(LocalTime.of(4, 0))) {
-            serviceDays.add(now.toLocalDate().minusDays(1));
-        }
-        serviceDays.add(now.toLocalDate());
-        serviceDays.add(now.toLocalDate().plusDays(1));
+        List<LocalDate> serviceDays = List.of(now.toLocalDate(), now.toLocalDate().plusDays(1));
 
         for (LocalDate serviceDate : serviceDays) {
             boolean futureOnly = scheduleType != NotificationScheduleType.FIRST_TRANSIT;
@@ -86,6 +82,50 @@ public class TransitRouteOptimizationService {
         if (failures.unavailable) throw new GlobalException(ErrorCode.TRANSIT_SCHEDULE_UNAVAILABLE);
         if (failures.unsupported) throw new GlobalException(ErrorCode.TRANSIT_SCHEDULE_UNSUPPORTED);
         throw new GlobalException(ErrorCode.TRANSIT_ROUTE_NOT_FOUND);
+    }
+
+    private List<TransitDto.FirstLastRouteOptionResponse> searchLast(
+            List<TransitDto.RouteOptionResponse> routes, LocalDateTime now) {
+        // Keep the existing daytime API budget, but always evaluate discovered night routes.
+        List<TransitDto.RouteOptionResponse> selected = new ArrayList<>(routes.stream()
+                .filter(route -> !TransitRouteClassifier.isNightOnlyRoute(route))
+                .limit(SCHEDULE_CANDIDATE_LIMIT).toList());
+        selected.addAll(routes.stream().filter(TransitRouteClassifier::isNightOnlyRoute).toList());
+        Map<String, LocalDateTime> cache = new HashMap<>();
+        FailureState failures = new FailureState();
+        List<Candidate> active = new ArrayList<>();
+        for (var route : selected) {
+            try {
+                LocalDateTime departure = transitScheduleService.previewCurrentLastDeparture(route, now, cache);
+                if (departure != null && departure.isAfter(now)) active.add(new Candidate(route, departure));
+            } catch (GlobalException e) {
+                recordFailure(failures, e);
+            } catch (RuntimeException e) {
+                failures.unavailable = true;
+                log.warn("Current LAST window lookup failed: routeId={}, type={}",
+                        route.getRouteId(), e.getClass().getSimpleName());
+            }
+        }
+        if (!active.isEmpty()) return rank(active, NotificationScheduleType.LAST_TRANSIT);
+        // An API outage is not evidence that the current operating interval ended.
+        if (failures.unavailable) throw new GlobalException(ErrorCode.TRANSIT_SCHEDULE_UNAVAILABLE);
+
+        // Only when no current interval is catchable, show the next operating cycle.
+        for (var day : List.of(now.toLocalDate(), now.toLocalDate().plusDays(1))) {
+            var upcoming = evaluateCandidates(selected, NotificationScheduleType.LAST_TRANSIT,
+                    day, now, cache, failures, true);
+            if (!upcoming.isEmpty()) return rank(upcoming, NotificationScheduleType.LAST_TRANSIT);
+        }
+        if (failures.unavailable) throw new GlobalException(ErrorCode.TRANSIT_SCHEDULE_UNAVAILABLE);
+        if (failures.unsupported) throw new GlobalException(ErrorCode.TRANSIT_SCHEDULE_UNSUPPORTED);
+        throw new GlobalException(ErrorCode.TRANSIT_ROUTE_NOT_FOUND);
+    }
+
+    private void recordFailure(FailureState failures, GlobalException e) {
+        if (e.getErrorCode() == ErrorCode.TRANSIT_SCHEDULE_UNAVAILABLE) failures.unavailable = true;
+        else if (e.getErrorCode() == ErrorCode.TRANSIT_SCHEDULE_UNSUPPORTED
+                || e.getErrorCode() == ErrorCode.TRANSIT_CONNECTION_UNVERIFIED) failures.unsupported = true;
+        else throw e;
     }
 
     private List<Candidate> evaluateCandidates(

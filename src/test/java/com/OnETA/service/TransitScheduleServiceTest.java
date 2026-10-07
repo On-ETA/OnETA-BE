@@ -55,6 +55,133 @@ class TransitScheduleServiceTest {
         verify(snapshotRepo(service), never()).save(any());
     }
 
+    @Test
+    void midnightSeoulOrdinaryLastUsesCurrentIntervalForPreviewDisplayAndDelivery() {
+        var service = service("0530", "2330");
+        var seoul = mock(SeoulBusScheduleService.class);
+        ReflectionTestUtils.setField(service, "seoulBusScheduleService", seoul);
+        var route = SeoulBusScheduleServiceTest.route();
+        when(serviceApi(service).readSavedRoute("route")).thenReturn(route);
+        when(seoul.resolve(any(), eq(DATE))).thenReturn(new SeoulBusScheduleService.Schedule(
+                "1", "01001", "bus", DATE.atTime(4, 30), DATE.plusDays(1).atTime(0, 20)));
+        var now = DATE.atTime(0, 2);
+        // Ten minutes of access walking must leave time to catch the 00:20 bus.
+        assertThat(service.previewCurrentLastDeparture(route, now, new java.util.HashMap<>()))
+                .isEqualTo(DATE.atTime(0, 10));
+        assertThat(service.previewNextDeparture(route, NotificationScheduleType.LAST_TRANSIT, now, SEOUL))
+                .isEqualTo(DATE.atTime(0, 10));
+        var n = notification(NotificationScheduleType.LAST_TRANSIT, 5);
+        assertThat(service.estimateDeparture(n, now, SEOUL)).isEqualTo(DATE.atTime(0, 10));
+        var decision = service.evaluate(n, DATE, now, SEOUL);
+        assertThat(decision.baseDepartureAt()).isEqualTo(DATE.atTime(0, 10));
+        assertThat(decision.scheduledAt()).isEqualTo(DATE.atTime(0, 5));
+        verify(seoul, never()).resolve(any(), eq(DATE.minusDays(1)));
+    }
+
+    @Test
+    void seoulNightProviderIsScheduledAndCanRemainActiveAfterFourAm() {
+        var service = service("0530", "2330");
+        var seoul = mock(SeoulBusScheduleService.class);
+        ReflectionTestUtils.setField(service, "seoulBusScheduleService", seoul);
+        var base = SeoulBusScheduleServiceTest.route();
+        var route = base.toBuilder().provider("SEOUL_NIGHT")
+                .segments(List.of(base.getSegments().get(1).toBuilder().transitName("N62").nightBus(true).build()))
+                .build();
+        when(seoul.resolve(any(), eq(DATE))).thenReturn(new SeoulBusScheduleService.Schedule(
+                "1", "01001", "night", DATE.atTime(23, 30), DATE.plusDays(1).atTime(5, 10)));
+        assertThat(service.previewCurrentLastDeparture(route, DATE.atTime(4, 5), new java.util.HashMap<>()))
+                .isEqualTo(DATE.atTime(5, 10));
+        assertThat(service.previewCurrentLastDeparture(route, DATE.atTime(12, 0), new java.util.HashMap<>())).isNull();
+        verifyNoInteractions(publicData(service));
+    }
+
+    @Test
+    void currentBusLastIsExcludedWhenAccessWalkWouldMissIt() {
+        var service = service("0530", "2330");
+        var seoul = mock(SeoulBusScheduleService.class);
+        ReflectionTestUtils.setField(service, "seoulBusScheduleService", seoul);
+        when(seoul.resolve(any(), eq(DATE))).thenReturn(new SeoulBusScheduleService.Schedule(
+                "1", "01001", "bus", DATE.atTime(4, 30), DATE.plusDays(1).atTime(0, 20)));
+        assertThat(service.previewCurrentLastDeparture(SeoulBusScheduleServiceTest.route(),
+                DATE.atTime(0, 15), new java.util.HashMap<>())).isNull();
+    }
+
+    @Test
+    void currentNightBusDoesNotConnectToSubwayThatOnlyReopensInMorning() {
+        var service = service("0530", "2330");
+        var seoul = mock(SeoulBusScheduleService.class);
+        var tago = mock(TagoSubwayScheduleService.class);
+        ReflectionTestUtils.setField(service, "seoulBusScheduleService", seoul);
+        service.setTagoSubwayScheduleService(tago);
+        var bus = SeoulBusScheduleServiceTest.route().getSegments().get(1);
+        var subway = bus.toBuilder().transitType("SUBWAY").durationMinutes(15).build();
+        var route = SeoulBusScheduleServiceTest.route().toBuilder().transferCount(1)
+                .segments(List.of(bus, subway)).build();
+        when(seoul.resolve(any(), eq(DATE))).thenReturn(new SeoulBusScheduleService.Schedule(
+                "1", "01001", "night", DATE.atTime(23, 30), DATE.plusDays(1).atTime(3, 10)));
+        when(tago.resolve(eq(subway), any())).thenAnswer(i -> {
+            LocalDate date = i.getArgument(1);
+            return new SeoulBusScheduleService.Schedule("2", "", "subway", date.atTime(5, 30), date.atTime(23, 50));
+        });
+        assertThat(service.previewCurrentLastDeparture(route, DATE.atTime(0, 2), new java.util.HashMap<>())).isNull();
+    }
+
+    @Test
+    void upgradeRebuildsLegacyTonightsSnapshotUsingCurrentBusInterval() {
+        var service = service("0530", "2330");
+        var seoul = mock(SeoulBusScheduleService.class);
+        ReflectionTestUtils.setField(service, "seoulBusScheduleService", seoul);
+        var route = SeoulBusScheduleServiceTest.route();
+        when(serviceApi(service).readSavedRoute("route")).thenReturn(route);
+        when(seoul.resolve(any(), eq(DATE))).thenReturn(new SeoulBusScheduleService.Schedule(
+                "1", "01001", "bus", DATE.atTime(4, 30), DATE.plusDays(1).atTime(0, 20)));
+        var n = notification(NotificationScheduleType.LAST_TRANSIT, 5);
+        String oldHash = ReflectionTestUtils.invokeMethod(service, "hash", "route");
+        var old = new ScheduleSnapshot(n, DATE, NotificationScheduleType.LAST_TRANSIT, oldHash,
+                DATE.atTime(23, 6), DATE.atTime(23, 1), DATE.atTime(22, 0), DATE.atStartOfDay(), 30);
+        when(snapshotRepo(service).findFirstByNotificationIdAndScheduleTypeAndRouteHashOrderByServiceDateDesc(any(), any(), any()))
+                .thenAnswer(i -> oldHash.equals(i.getArgument(2)) ? Optional.of(old) : Optional.empty());
+        assertThat(service.estimateDeparture(n, DATE.atTime(0, 2), SEOUL)).isEqualTo(DATE.atTime(0, 10));
+        verify(snapshotRepo(service), never()).save(any());
+    }
+
+    @Test
+    void upgradePreservesLegacySnapshotThatIsStillValidAfterMidnight() {
+        var service = service("0530", "2330");
+        var seoul = mock(SeoulBusScheduleService.class);
+        ReflectionTestUtils.setField(service, "seoulBusScheduleService", seoul);
+        when(serviceApi(service).readSavedRoute("route")).thenReturn(SeoulBusScheduleServiceTest.route());
+        var n = notification(NotificationScheduleType.LAST_TRANSIT, 5);
+        String oldHash = ReflectionTestUtils.invokeMethod(service, "hash", "route");
+        var old = new ScheduleSnapshot(n, DATE.minusDays(1), NotificationScheduleType.LAST_TRANSIT, oldHash,
+                DATE.atTime(0, 20), DATE.atTime(0, 15), DATE.minusDays(1).atTime(23, 0), DATE.atStartOfDay(), 30);
+        old.useSeoulBusSource();
+        when(snapshotRepo(service).findForUpdate(any(), any(), any(), any()))
+                .thenAnswer(i -> oldHash.equals(i.getArgument(3)) ? Optional.of(old) : Optional.empty());
+        when(snapshotRepo(service).findFirstByNotificationIdAndScheduleTypeAndRouteHashOrderByServiceDateDesc(any(), any(), any()))
+                .thenAnswer(i -> oldHash.equals(i.getArgument(2)) ? Optional.of(old) : Optional.empty());
+        assertThat(service.evaluate(n, DATE.minusDays(1), DATE.atTime(0, 2), SEOUL).hardDeadlineAt())
+                .isEqualTo(DATE.atTime(0, 20));
+        assertThat(service.estimateDeparture(n, DATE.atTime(0, 2), SEOUL)).isEqualTo(DATE.atTime(0, 20));
+        verifyNoInteractions(seoul);
+    }
+
+    @Test
+    void currentOdsayBusWindowUsesBothBoundariesFromOneApiResponse() {
+        var service = service("23:30", "03:10");
+        var route = route(10, 20, "1");
+        assertThat(service.previewCurrentLastDeparture(route, DATE.atTime(0, 2), new java.util.HashMap<>()))
+                .isEqualTo(DATE.atTime(3, 0));
+    }
+
+    @Test
+    void endedOdsayBusAdvancesOnlyAfterCurrentWindowHasBeenChecked() {
+        var service = service("05:30", "23:06");
+        var route = route(10, 20, "1");
+        assertThat(service.previewNextDeparture(route, NotificationScheduleType.LAST_TRANSIT,
+                DATE.atTime(0, 2), SEOUL)).isEqualTo(DATE.atTime(22, 56));
+    }
+
     private static final LocalDate DATE = LocalDate.of(2026, 8, 27);
     private static final ZoneId SEOUL = ZoneId.of("Asia/Seoul");
 

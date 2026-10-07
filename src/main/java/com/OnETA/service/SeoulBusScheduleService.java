@@ -80,6 +80,10 @@ public class SeoulBusScheduleService {
                 || (route.getRouteId() != null && route.getRouteId().startsWith("KAKAO_")));
     }
 
+    public static boolean usesSeoulBusSchedules(TransitDto.RouteOptionResponse route) {
+        return isKakao(route) || (route != null && "SEOUL_NIGHT".equals(route.getProvider()));
+    }
+
     public LocalDate today() { return LocalDate.now(clock); }
 
     /**
@@ -140,7 +144,9 @@ public class SeoulBusScheduleService {
 
                         matches.add(new NightRouteCandidate(
                                 route.routeId(), route.routeName(), originStop, destinationStop,
-                                stops, startIndex, endIndex, score));
+                                stops, startIndex, endIndex, score,
+                                (int) Math.ceil(originWalkMeters / 60.0),
+                                (int) Math.ceil(destinationWalkMeters / 60.0)));
                     }
                 }
             }
@@ -174,7 +180,7 @@ public class SeoulBusScheduleService {
     }
 
     private void validateRoute(TransitDto.RouteOptionResponse route) {
-        if (!isKakao(route) || route.getSegments() == null || route.getSegments().isEmpty()
+        if (!usesSeoulBusSchedules(route) || route.getSegments() == null || route.getSegments().isEmpty()
                 || route.getSegments().size() > 30 || route.getTotalDurationMinutes() == null
                 || route.getTotalDurationMinutes() <= 0) throw unsupported();
         int buses = 0;
@@ -309,7 +315,7 @@ public class SeoulBusScheduleService {
     }
 
     private TransitDto.RouteSegment singleBus(TransitDto.RouteOptionResponse route) {
-        if (!isKakao(route) || route.getSegments() == null || route.getSegments().isEmpty()
+        if (!usesSeoulBusSchedules(route) || route.getSegments() == null || route.getSegments().isEmpty()
                 || (route.getTransferCount() != null && route.getTransferCount() != 0)
                 || route.getTotalDurationMinutes() == null || route.getTotalDurationMinutes() <= 0) throw unsupported();
         var rides = route.getSegments().stream().filter(s -> !"WALK".equals(s.getTransitType())).toList();
@@ -368,10 +374,19 @@ public class SeoulBusScheduleService {
                 .routeId("SEOUL_NIGHT_" + candidate.routeId() + "_"
                         + stationIdOf(startRouteStop) + "_" + stationIdOf(endRouteStop))
                 .provider("SEOUL_NIGHT")
-                .totalDurationMinutes(busMinutes)
-                .realTimeDurationMinutes(busMinutes)
+                .totalDurationMinutes(busMinutes + candidate.accessWalkMinutes() + candidate.egressWalkMinutes())
+                .realTimeDurationMinutes(busMinutes + candidate.accessWalkMinutes() + candidate.egressWalkMinutes())
                 .transferCount(0)
-                .segments(List.of(bus))
+                // Estimated walking at 60 m/min is essential when this discovery
+                // route is now used for an actual LAST notification.
+                .segments(List.of(
+                        TransitDto.RouteSegment.builder().transitType("WALK")
+                                .durationMinutes(candidate.accessWalkMinutes())
+                                .startStation("출발지").endStation(bus.getStartStation()).build(),
+                        bus,
+                        TransitDto.RouteSegment.builder().transitType("WALK")
+                                .durationMinutes(candidate.egressWalkMinutes())
+                                .startStation(bus.getEndStation()).endStation("도착지").build()))
                 .build();
     }
 
@@ -576,7 +591,9 @@ public class SeoulBusScheduleService {
             List<Element> routeStops,
             int startIndex,
             int endIndex,
-            double score) { }
+            double score,
+            int accessWalkMinutes,
+            int egressWalkMinutes) { }
     private record Cached(Schedule schedule, Instant expires) { }
     private record LiveCache(List<Element> items, Instant expires) { }
     public record LiveBus(LocalDateTime boarding, LocalDateTime alighting, boolean last, String vehicleId) { }

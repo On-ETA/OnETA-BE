@@ -71,8 +71,8 @@ class NotificationServiceTest {
     }
 
     @ParameterizedTest
-    @EnumSource(value = NotificationScheduleType.class, names = {"FIRST_TRANSIT", "LAST_TRANSIT"})
-    void rejectsNightOnlyRouteForFirstLastSave(NotificationScheduleType type) {
+    @EnumSource(value = NotificationScheduleType.class, names = {"FIRST_TRANSIT"})
+    void rejectsNightOnlyRouteForFirstSave(NotificationScheduleType type) {
         var route = com.OnETA.dto.TransitDto.RouteOptionResponse.builder()
                 .provider("ODSAY").routeId("NIGHT_test")
                 .segments(List.of(
@@ -90,6 +90,21 @@ class NotificationServiceTest {
                 .isInstanceOfSatisfying(GlobalException.class, e -> assertThat(e.getErrorCode())
                         .isEqualTo(com.OnETA.common.error.ErrorCode.TRANSIT_NIGHT_ONLY_ROUTE));
         verify(arrivals, never()).save(any());
+    }
+
+    @Test
+    void savesNightBusLastNotificationWithoutLiveTimetableValidation() {
+        var route = com.OnETA.dto.TransitDto.RouteOptionResponse.builder()
+                .provider("SEOUL_NIGHT").routeId("NIGHT_test")
+                .segments(List.of(com.OnETA.dto.TransitDto.RouteSegment.builder()
+                        .transitType("BUS").transitName("N62").nightBus(true).durationMinutes(25).build())).build();
+        when(transit.readSavedRoute("{}")).thenReturn(route);
+        when(user.getId()).thenReturn(1L);
+        when(users.findByEmail("test@example.com")).thenReturn(Optional.of(user));
+        when(arrivals.save(any())).thenAnswer(i -> i.getArgument(0));
+        service.createArrivalNotification("test@example.com", request(NotificationScheduleType.LAST_TRANSIT));
+        verify(arrivals).save(any());
+        verify(transit, never()).validateSeoulSchedule(any());
     }
 
     @Test

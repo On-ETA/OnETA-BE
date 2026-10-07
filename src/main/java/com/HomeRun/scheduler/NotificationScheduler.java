@@ -132,7 +132,7 @@ public class NotificationScheduler {
     private void processScheduledTransit(ArrivalNotification notification, LocalDate today,
                                          LocalDateTime now, ZoneId zoneId) {
         var route = transitApiService.readSavedRoute(notification.getRouteDetails());
-        if (com.OnETA.service.SeoulBusScheduleService.isKakao(route)) {
+        if (com.OnETA.service.SeoulBusScheduleService.usesSeoulBusSchedules(route)) {
             processScheduledServiceDay(notification, today.minusDays(1), now, zoneId);
             if (Boolean.FALSE.equals(notification.getIsActive())) return;
         }
