@@ -95,8 +95,12 @@ class SeoulBusScheduleServiceTest {
                 126.92463186895164, 37.550164265498864).orElseThrow();
 
         assertThat(route.getProvider()).isEqualTo("SEOUL_NIGHT");
-        assertThat(route.getSegments()).hasSize(1);
-        var bus = route.getSegments().get(0);
+        assertThat(route.getSegments()).extracting(TransitDto.RouteSegment::getTransitType)
+                .containsExactly("WALK", "BUS", "WALK");
+        assertThat(route.getSegments().get(0).getDurationMinutes()).isPositive();
+        assertThat(route.getTotalDurationMinutes()).isEqualTo(route.getSegments().stream()
+                .mapToInt(TransitDto.RouteSegment::getDurationMinutes).sum());
+        var bus = route.getSegments().get(1);
         assertThat(bus.getTransitName()).isEqualTo("N51");
         assertThat(bus.isNightBus()).isTrue();
         assertThat(bus.getStartStation()).isEqualTo("거리공원");

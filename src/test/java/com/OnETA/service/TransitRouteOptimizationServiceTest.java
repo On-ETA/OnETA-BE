@@ -108,128 +108,83 @@ class TransitRouteOptimizationServiceTest {
     }
 
     @Test
-    void nightOnlyRouteIsReturnedWithoutScheduleCalculation() {
-        TransitApiService api = mock(TransitApiService.class);
-        TransitScheduleService schedules = mock(TransitScheduleService.class);
+    void firstNightOnlyRouteKeepsExistingDiscoveryPolicy() {
+        var api = mock(TransitApiService.class);
+        var schedules = mock(TransitScheduleService.class);
         var service = new TransitRouteOptimizationService(api, schedules);
-        var night = nightRoute("NIGHT_ONLY", "N62", 35);
-
-        when(api.searchScheduleCandidates(anyString(), anyDouble(), anyDouble(), any(), anyDouble(), anyDouble(), any(), eq(10)))
-                .thenReturn(List.of(night));
-
+        var night = nightRoute("NIGHT", "N62", 35);
+        when(api.searchScheduleCandidates(anyString(), anyDouble(), anyDouble(), any(),
+                anyDouble(), anyDouble(), any(), eq(10))).thenReturn(List.of(night));
         var result = service.search("user@test.com", 126.8, 37.5, null,
-                127.0, 37.6, null, NotificationScheduleType.LAST_TRANSIT);
-
-        assertThat(result).hasSize(1);
+                127.0, 37.6, null, NotificationScheduleType.FIRST_TRANSIT);
         assertThat(result.get(0).getStatus()).isEqualTo(FirstLastRouteStatus.NIGHT_ONLY);
         assertThat(result.get(0).getEstimatedDepartureAt()).isNull();
-        assertThat(result.get(0).getRoute().getRouteId()).isEqualTo("NIGHT_ONLY");
         verifyNoInteractions(schedules);
     }
 
     @Test
-    void availableRouteIsRankedBeforeNightOnlyRoute() {
-        TransitApiService api = mock(TransitApiService.class);
-        TransitScheduleService schedules = mock(TransitScheduleService.class);
+    void midnightRanksActiveNightAndOrdinaryBusesWithoutMixingTonight() {
+        var api = mock(TransitApiService.class);
+        var schedules = mock(TransitScheduleService.class);
         var service = new TransitRouteOptimizationService(api, schedules);
+        var now = LocalDateTime.of(2026, 10, 7, 0, 2);
         org.springframework.test.util.ReflectionTestUtils.setField(service, "clock",
-                java.time.Clock.fixed(java.time.ZonedDateTime.parse("2026-10-02T20:00:00+09:00").toInstant(),
+                java.time.Clock.fixed(now.atZone(java.time.ZoneId.of("Asia/Seoul")).toInstant(),
                         java.time.ZoneId.of("Asia/Seoul")));
-        var available = route("AVAILABLE", "ODSAY", 30);
-        var night = nightRoute("NIGHT_ONLY", "N62", 20);
-
-        when(api.searchScheduleCandidates(anyString(), anyDouble(), anyDouble(), any(), anyDouble(), anyDouble(), any(), eq(10)))
-                .thenReturn(List.of(night, available));
-        when(schedules.previewDepartureForServiceDate(eq(available), eq(NotificationScheduleType.LAST_TRANSIT),
-                any(LocalDate.class), anyMap()))
-                .thenReturn(LocalDateTime.of(2026, 10, 2, 23, 10));
-
-        var result = service.search("user@test.com", 126.8, 37.5, null,
-                127.0, 37.6, null, NotificationScheduleType.LAST_TRANSIT);
-
-        assertThat(result).hasSize(2);
-        assertThat(result.get(0).getRoute().getRouteId()).isEqualTo("NIGHT_ONLY");
-        assertThat(result.get(0).getStatus()).isEqualTo(FirstLastRouteStatus.NIGHT_ONLY);
-        assertThat(result.get(0).getEstimatedDepartureAt()).isNull();
-        assertThat(result.get(1).getRoute().getRouteId()).isEqualTo("AVAILABLE");
-        assertThat(result.get(1).getStatus()).isEqualTo(FirstLastRouteStatus.AVAILABLE);
-    }
-
-    @Test
-    void reservesOneResultSlotForNightOnlyRouteWhenAvailableRoutesFillLimit() {
-        TransitApiService api = mock(TransitApiService.class);
-        TransitScheduleService schedules = mock(TransitScheduleService.class);
-        var service = new TransitRouteOptimizationService(api, schedules);
-        org.springframework.test.util.ReflectionTestUtils.setField(service, "clock",
-                java.time.Clock.fixed(java.time.ZonedDateTime.parse("2026-10-02T20:00:00+09:00").toInstant(),
-                        java.time.ZoneId.of("Asia/Seoul")));
-
-        var a = route("A", "ODSAY", 30);
-        var b = route("B", "ODSAY", 25);
-        var c = route("C", "KAKAO", 20);
-        var night = nightRoute("NIGHT_ONLY", "N62", 15);
-
-        when(api.searchScheduleCandidates(anyString(), anyDouble(), anyDouble(), any(), anyDouble(), anyDouble(), any(), eq(10)))
-                .thenReturn(List.of(a, b, c, night));
-        when(schedules.previewDepartureForServiceDate(eq(a), eq(NotificationScheduleType.LAST_TRANSIT), any(), anyMap()))
-                .thenReturn(LocalDateTime.of(2026, 10, 2, 23, 10));
-        when(schedules.previewDepartureForServiceDate(eq(b), eq(NotificationScheduleType.LAST_TRANSIT), any(), anyMap()))
-                .thenReturn(LocalDateTime.of(2026, 10, 2, 23, 20));
-        when(schedules.previewDepartureForServiceDate(eq(c), eq(NotificationScheduleType.LAST_TRANSIT), any(), anyMap()))
-                .thenReturn(LocalDateTime.of(2026, 10, 2, 23, 30));
-
-        var result = service.search("user@test.com", 126.8, 37.5, null,
-                127.0, 37.6, null, NotificationScheduleType.LAST_TRANSIT);
-
-        assertThat(result).hasSize(3);
-        assertThat(result).extracting(r -> r.getRoute().getRouteId())
-                .containsExactly("NIGHT_ONLY", "C", "B");
-        assertThat(result.get(0).getStatus()).isEqualTo(FirstLastRouteStatus.NIGHT_ONLY);
-        assertThat(result.get(0).getEstimatedDepartureAt()).isNull();
-    }
-
-    @Test
-    void findsNightOnlyRouteEvenWhenItIsSixthProviderCandidate() {
-        TransitApiService api = mock(TransitApiService.class);
-        TransitScheduleService schedules = mock(TransitScheduleService.class);
-        var service = new TransitRouteOptimizationService(api, schedules);
-        org.springframework.test.util.ReflectionTestUtils.setField(service, "clock",
-                java.time.Clock.fixed(java.time.ZonedDateTime.parse("2026-10-02T20:00:00+09:00").toInstant(),
-                        java.time.ZoneId.of("Asia/Seoul")));
-
-        var a = route("A", "ODSAY", 30);
-        var b = route("B", "ODSAY", 25);
-        var c = route("C", "ODSAY", 20);
-        var d = route("D", "ODSAY", 35);
-        var e = route("E", "ODSAY", 40);
-        var night = nightRoute("NIGHT_SIXTH", "N62", 15);
-
+        var ended = route("ENDED", "KAKAO", 20);
+        var ordinary = route("ORDINARY", "KAKAO", 25);
+        var night = nightRoute("NIGHT", "N62", 35);
         when(api.searchScheduleCandidates(anyString(), anyDouble(), anyDouble(), any(),
-                anyDouble(), anyDouble(), any(), eq(10)))
-                .thenReturn(List.of(a, b, c, d, e, night));
-
-        when(schedules.previewDepartureForServiceDate(any(), eq(NotificationScheduleType.LAST_TRANSIT),
-                any(LocalDate.class), anyMap())).thenAnswer(invocation -> {
-            TransitDto.RouteOptionResponse route = invocation.getArgument(0);
-            return switch (route.getRouteId()) {
-                case "A" -> LocalDateTime.of(2026, 10, 2, 23, 10);
-                case "B" -> LocalDateTime.of(2026, 10, 2, 23, 20);
-                case "C" -> LocalDateTime.of(2026, 10, 2, 23, 30);
-                case "D" -> LocalDateTime.of(2026, 10, 2, 23, 5);
-                case "E" -> LocalDateTime.of(2026, 10, 2, 22, 55);
-                default -> throw new AssertionError("NIGHT_ONLY must not be schedule-evaluated");
-            };
-        });
-
+                anyDouble(), anyDouble(), any(), eq(10))).thenReturn(List.of(ended, ordinary, night));
+        when(schedules.previewCurrentLastDeparture(eq(ordinary), eq(now), anyMap()))
+                .thenReturn(now.toLocalDate().atTime(0, 20));
+        when(schedules.previewCurrentLastDeparture(eq(night), eq(now), anyMap()))
+                .thenReturn(now.toLocalDate().atTime(3, 10));
         var result = service.search("user@test.com", 126.8, 37.5, null,
                 127.0, 37.6, null, NotificationScheduleType.LAST_TRANSIT);
+        assertThat(result).extracting(r -> r.getRoute().getRouteId()).containsExactly("NIGHT", "ORDINARY");
+        assertThat(result).allSatisfy(r -> {
+            assertThat(r.getStatus()).isEqualTo(FirstLastRouteStatus.AVAILABLE);
+            assertThat(r.getEstimatedDepartureAt().toLocalDate()).isEqualTo(now.toLocalDate());
+        });
+        verify(schedules, never()).previewDepartureForServiceDate(any(), any(), any(), anyMap());
+    }
 
-        assertThat(result).hasSize(3);
-        assertThat(result).extracting(r -> r.getRoute().getRouteId())
-                .containsExactly("NIGHT_SIXTH", "C", "B");
-        assertThat(result.get(0).getStatus()).isEqualTo(FirstLastRouteStatus.NIGHT_ONLY);
-        verify(schedules, times(5)).previewDepartureForServiceDate(
-                any(), eq(NotificationScheduleType.LAST_TRANSIT), any(LocalDate.class), anyMap());
+    @Test
+    void evaluatesNightBusEvenWhenItIsSixthProviderCandidate() {
+        var api = mock(TransitApiService.class);
+        var schedules = mock(TransitScheduleService.class);
+        var service = new TransitRouteOptimizationService(api, schedules);
+        var routes = new java.util.ArrayList<TransitDto.RouteOptionResponse>();
+        for (int i = 0; i < 5; i++) routes.add(route("DAY" + i, "ODSAY", 20));
+        var night = nightRoute("NIGHT_SIXTH", "N62", 35);
+        routes.add(night);
+        when(api.searchScheduleCandidates(anyString(), anyDouble(), anyDouble(), any(),
+                anyDouble(), anyDouble(), any(), eq(10))).thenReturn(routes);
+        when(schedules.previewCurrentLastDeparture(eq(night), any(), anyMap()))
+                .thenAnswer(i -> ((LocalDateTime) i.getArgument(1)).plusHours(2));
+        var result = service.search("user@test.com", 126.8, 37.5, null,
+                127.0, 37.6, null, NotificationScheduleType.LAST_TRANSIT);
+        assertThat(result).extracting(r -> r.getRoute().getRouteId()).containsExactly("NIGHT_SIXTH");
+        assertThat(result.get(0).getStatus()).isEqualTo(FirstLastRouteStatus.AVAILABLE);
+        verify(schedules, times(6)).previewCurrentLastDeparture(any(), any(), anyMap());
+    }
+
+    @Test
+    void currentWindowOutageDoesNotSilentlyJumpToTonightsLast() {
+        var api = mock(TransitApiService.class);
+        var schedules = mock(TransitScheduleService.class);
+        var service = new TransitRouteOptimizationService(api, schedules);
+        var route = route("BUS", "KAKAO", 20);
+        when(api.searchScheduleCandidates(anyString(), anyDouble(), anyDouble(), any(),
+                anyDouble(), anyDouble(), any(), eq(10))).thenReturn(List.of(route));
+        when(schedules.previewCurrentLastDeparture(eq(route), any(), anyMap()))
+                .thenThrow(new GlobalException(ErrorCode.TRANSIT_SCHEDULE_UNAVAILABLE));
+        assertThatThrownBy(() -> service.search("user@test.com", 126.8, 37.5, null,
+                127.0, 37.6, null, NotificationScheduleType.LAST_TRANSIT))
+                .isInstanceOfSatisfying(GlobalException.class,
+                        e -> assertThat(e.getErrorCode()).isEqualTo(ErrorCode.TRANSIT_SCHEDULE_UNAVAILABLE));
+        verify(schedules, never()).previewDepartureForServiceDate(any(), any(), any(), anyMap());
     }
 
     @Test
