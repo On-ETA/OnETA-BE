@@ -18,6 +18,18 @@ baseScheduledAt = baseDepartureAt - reminderOffset
 
 `prefixDuration`는 해당 transit 구간 이전의 `sectionTime` 합계이며 해당 구간 자체의 시간이나 `scheduledWaitMinutes`를 중복해서 더하지 않는다.
 
+## 경로 검색 시간 범위
+
+`GET /api/transit/routes/first-last/search`는 한국 시간 기준 **예상 출발 시각**으로 후보를 제한한다. 출발지에서 승차역까지의 도보를 차감한 시각이며, 알림 발송 시각이나 목적지 도착 시각을 기준으로 삼지 않는다.
+
+- `FIRST_TRANSIT`: 03:00:00 이상, 09:00:00 이하.
+- `LAST_TRANSIT`: 21:00:00 이상 또는 06:00:00 이하. 자정을 넘어 운행하는 경로를 포함한다.
+- 출발 시각을 확인할 수 없는 `NIGHT_ONLY` 경로는 시간 범위를 검증할 수 없어 검색 결과에서 제외한다. 심야버스도 출발 시각을 계산할 수 있으면 같은 조건으로 반환한다.
+- 현재 운행과 다음 운행 주기를 검증할 때 모두 같은 범위를 적용한다. 모든 후보가 범위 밖이면 경로 없음 오류를 반환한다.
+- 일반 `NORMAL` 경로 검색에는 이 범위를 적용하지 않는다.
+
+ODsay `subwayPathSchedule`은 첫차/막차 모드 모두 `result.path[].info.departureTime`을 승차 경계로 사용한다. `arrivalTime`은 하차 시각이므로 출발 시각 계산에 사용하지 않는다. 막차의 `00:xx`와 `24:xx`는 동일하게 운행일 다음 날의 새벽으로 처리한다.
+
 ## 흐름
 
 ```text

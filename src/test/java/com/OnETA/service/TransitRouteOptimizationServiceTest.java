@@ -28,7 +28,7 @@ class TransitRouteOptimizationServiceTest {
         var a = route("A", "ODSAY", 30);
         var b = route("B", "KAKAO", 40);
         var c = route("C", "ODSAY", 20);
-        when(api.searchScheduleCandidates(anyString(), anyDouble(), anyDouble(), any(), anyDouble(), anyDouble(), any(), eq(10)))
+        when(api.searchScheduleCandidates(anyString(), anyDouble(), anyDouble(), any(), anyDouble(), anyDouble(), any(), eq(Integer.MAX_VALUE)))
                 .thenReturn(List.of(a, b, c));
         when(schedules.previewDepartureForServiceDate(eq(a), eq(NotificationScheduleType.LAST_TRANSIT), any(), anyMap()))
                 .thenReturn(LocalDateTime.of(2026, 10, 2, 23, 10));
@@ -56,7 +56,7 @@ class TransitRouteOptimizationServiceTest {
         var unsupported = route("X", "KAKAO", 10);
         var early = route("EARLY", "ODSAY", 35);
         var late = route("LATE", "ODSAY", 20);
-        when(api.searchScheduleCandidates(anyString(), anyDouble(), anyDouble(), any(), anyDouble(), anyDouble(), any(), eq(10)))
+        when(api.searchScheduleCandidates(anyString(), anyDouble(), anyDouble(), any(), anyDouble(), anyDouble(), any(), eq(Integer.MAX_VALUE)))
                 .thenReturn(List.of(unsupported, late, early));
         when(schedules.previewDepartureForServiceDate(eq(unsupported), eq(NotificationScheduleType.FIRST_TRANSIT), any(), anyMap()))
                 .thenThrow(new GlobalException(ErrorCode.TRANSIT_SCHEDULE_UNSUPPORTED));
@@ -79,7 +79,7 @@ class TransitRouteOptimizationServiceTest {
         var service = new TransitRouteOptimizationService(api, schedules);
         var morning = route("MORNING", "ODSAY", 60);
         var night = route("NIGHT", "ODSAY", 90);
-        when(api.searchScheduleCandidates(anyString(), anyDouble(), anyDouble(), any(), anyDouble(), anyDouble(), any(), eq(10)))
+        when(api.searchScheduleCandidates(anyString(), anyDouble(), anyDouble(), any(), anyDouble(), anyDouble(), any(), eq(Integer.MAX_VALUE)))
                 .thenReturn(List.of(morning, night));
 
         when(schedules.previewDepartureForServiceDate(eq(morning), eq(NotificationScheduleType.FIRST_TRANSIT),
@@ -108,18 +108,17 @@ class TransitRouteOptimizationServiceTest {
     }
 
     @Test
-    void firstNightOnlyRouteKeepsExistingDiscoveryPolicy() {
+    void unknownNightDepartureCannotBypassFirstSearchWindow() {
         var api = mock(TransitApiService.class);
         var schedules = mock(TransitScheduleService.class);
         var service = new TransitRouteOptimizationService(api, schedules);
         var night = nightRoute("NIGHT", "N62", 35);
         when(api.searchScheduleCandidates(anyString(), anyDouble(), anyDouble(), any(),
-                anyDouble(), anyDouble(), any(), eq(10))).thenReturn(List.of(night));
-        var result = service.search("user@test.com", 126.8, 37.5, null,
-                127.0, 37.6, null, NotificationScheduleType.FIRST_TRANSIT);
-        assertThat(result.get(0).getStatus()).isEqualTo(FirstLastRouteStatus.NIGHT_ONLY);
-        assertThat(result.get(0).getEstimatedDepartureAt()).isNull();
-        verifyNoInteractions(schedules);
+                anyDouble(), anyDouble(), any(), eq(Integer.MAX_VALUE))).thenReturn(List.of(night));
+        assertThatThrownBy(() -> service.search("user@test.com", 126.8, 37.5, null,
+                127.0, 37.6, null, NotificationScheduleType.FIRST_TRANSIT))
+                .isInstanceOfSatisfying(GlobalException.class,
+                        e -> assertThat(e.getErrorCode()).isEqualTo(ErrorCode.TRANSIT_ROUTE_NOT_FOUND));
     }
 
     @Test
@@ -135,7 +134,7 @@ class TransitRouteOptimizationServiceTest {
         var ordinary = route("ORDINARY", "KAKAO", 25);
         var night = nightRoute("NIGHT", "N62", 35);
         when(api.searchScheduleCandidates(anyString(), anyDouble(), anyDouble(), any(),
-                anyDouble(), anyDouble(), any(), eq(10))).thenReturn(List.of(ended, ordinary, night));
+                anyDouble(), anyDouble(), any(), eq(Integer.MAX_VALUE))).thenReturn(List.of(ended, ordinary, night));
         when(schedules.previewCurrentLastDeparture(eq(ordinary), eq(now), anyMap()))
                 .thenReturn(now.toLocalDate().atTime(0, 20));
         when(schedules.previewCurrentLastDeparture(eq(night), eq(now), anyMap()))
@@ -155,12 +154,13 @@ class TransitRouteOptimizationServiceTest {
         var api = mock(TransitApiService.class);
         var schedules = mock(TransitScheduleService.class);
         var service = new TransitRouteOptimizationService(api, schedules);
+        setClock(service, LocalDateTime.of(2026, 10, 7, 0, 2));
         var routes = new java.util.ArrayList<TransitDto.RouteOptionResponse>();
         for (int i = 0; i < 5; i++) routes.add(route("DAY" + i, "ODSAY", 20));
         var night = nightRoute("NIGHT_SIXTH", "N62", 35);
         routes.add(night);
         when(api.searchScheduleCandidates(anyString(), anyDouble(), anyDouble(), any(),
-                anyDouble(), anyDouble(), any(), eq(10))).thenReturn(routes);
+                anyDouble(), anyDouble(), any(), eq(Integer.MAX_VALUE))).thenReturn(routes);
         when(schedules.previewCurrentLastDeparture(eq(night), any(), anyMap()))
                 .thenAnswer(i -> ((LocalDateTime) i.getArgument(1)).plusHours(2));
         var result = service.search("user@test.com", 126.8, 37.5, null,
@@ -177,7 +177,7 @@ class TransitRouteOptimizationServiceTest {
         var service = new TransitRouteOptimizationService(api, schedules);
         var route = route("BUS", "KAKAO", 20);
         when(api.searchScheduleCandidates(anyString(), anyDouble(), anyDouble(), any(),
-                anyDouble(), anyDouble(), any(), eq(10))).thenReturn(List.of(route));
+                anyDouble(), anyDouble(), any(), eq(Integer.MAX_VALUE))).thenReturn(List.of(route));
         when(schedules.previewCurrentLastDeparture(eq(route), any(), anyMap()))
                 .thenThrow(new GlobalException(ErrorCode.TRANSIT_SCHEDULE_UNAVAILABLE));
         assertThatThrownBy(() -> service.search("user@test.com", 126.8, 37.5, null,
@@ -201,7 +201,7 @@ class TransitRouteOptimizationServiceTest {
         var c = route("C", "KAKAO", 20);
 
         when(api.searchScheduleCandidates(anyString(), anyDouble(), anyDouble(), any(),
-                anyDouble(), anyDouble(), any(), eq(10)))
+                anyDouble(), anyDouble(), any(), eq(Integer.MAX_VALUE)))
                 .thenReturn(List.of(a, b, c));
         when(schedules.previewDepartureForServiceDate(eq(a), eq(NotificationScheduleType.LAST_TRANSIT), any(), anyMap()))
                 .thenReturn(LocalDateTime.of(2026, 10, 2, 23, 10));
@@ -225,7 +225,7 @@ class TransitRouteOptimizationServiceTest {
         var service = new TransitRouteOptimizationService(api, schedules);
         var unsupported = route("X", "KAKAO", 10);
         var unavailable = route("Y", "ODSAY", 10);
-        when(api.searchScheduleCandidates(anyString(), anyDouble(), anyDouble(), any(), anyDouble(), anyDouble(), any(), eq(10)))
+        when(api.searchScheduleCandidates(anyString(), anyDouble(), anyDouble(), any(), anyDouble(), anyDouble(), any(), eq(Integer.MAX_VALUE)))
                 .thenReturn(List.of(unsupported, unavailable));
         when(schedules.previewDepartureForServiceDate(eq(unsupported), any(), any(), anyMap()))
                 .thenThrow(new GlobalException(ErrorCode.TRANSIT_SCHEDULE_UNSUPPORTED));
@@ -245,7 +245,7 @@ class TransitRouteOptimizationServiceTest {
         var service = new TransitRouteOptimizationService(api, schedules);
         var alreadyEnded = route("ENDED", "ODSAY", 30);
         var stillRunning = route("RUNNING", "ODSAY", 30);
-        when(api.searchScheduleCandidates(anyString(), anyDouble(), anyDouble(), any(), anyDouble(), anyDouble(), any(), eq(10)))
+        when(api.searchScheduleCandidates(anyString(), anyDouble(), anyDouble(), any(), anyDouble(), anyDouble(), any(), eq(Integer.MAX_VALUE)))
                 .thenReturn(List.of(alreadyEnded, stillRunning));
 
         when(schedules.previewDepartureForServiceDate(eq(alreadyEnded), eq(NotificationScheduleType.LAST_TRANSIT),
@@ -270,6 +270,81 @@ class TransitRouteOptimizationServiceTest {
                 .containsExactly("RUNNING");
         assertThat(result.get(0).getEstimatedDepartureAt().toLocalDate())
                 .isEqualTo(LocalDate.of(2026, 10, 2));
+    }
+
+    @Test
+    void firstSearchIncludesThreeAndNineButExcludesTimesOutsideWindow() {
+        var api = mock(TransitApiService.class);
+        var schedules = mock(TransitScheduleService.class);
+        var service = new TransitRouteOptimizationService(api, schedules);
+        var day = LocalDate.of(2026, 10, 8);
+        setClock(service, day.atTime(0, 3));
+        var times = List.of(day.atTime(2, 59), day.atTime(3, 0), day.atTime(8, 59),
+                day.atTime(9, 0), day.atTime(9, 1), day.atTime(19, 27));
+        var routes = new java.util.ArrayList<TransitDto.RouteOptionResponse>();
+        for (int i = 0; i < times.size(); i++) {
+            var route = route("R" + i, "ODSAY", 30);
+            routes.add(route);
+            when(schedules.previewDepartureForServiceDate(eq(route), eq(NotificationScheduleType.FIRST_TRANSIT),
+                    eq(day), anyMap())).thenReturn(times.get(i));
+        }
+        when(api.searchScheduleCandidates(anyString(), anyDouble(), anyDouble(), any(),
+                anyDouble(), anyDouble(), any(), eq(Integer.MAX_VALUE))).thenReturn(routes);
+        assertThat(service.search("user@test.com", 126.8, 37.5, null,
+                127.0, 37.6, null, NotificationScheduleType.FIRST_TRANSIT))
+                .extracting(r -> r.getRoute().getRouteId()).containsExactly("R1", "R2", "R3");
+    }
+
+    @Test
+    void lastSearchAppliesWindowToUpcomingCycleBeforeChoosingServiceDay() {
+        var api = mock(TransitApiService.class);
+        var schedules = mock(TransitScheduleService.class);
+        var service = new TransitRouteOptimizationService(api, schedules);
+        var day = LocalDate.of(2026, 10, 8);
+        setClock(service, day.atTime(20, 0));
+        var route = route("R", "ODSAY", 30);
+        when(api.searchScheduleCandidates(anyString(), anyDouble(), anyDouble(), any(),
+                anyDouble(), anyDouble(), any(), eq(Integer.MAX_VALUE))).thenReturn(List.of(route));
+        when(schedules.previewDepartureForServiceDate(eq(route), eq(NotificationScheduleType.LAST_TRANSIT),
+                eq(day), anyMap())).thenReturn(day.atTime(20, 30));
+        when(schedules.previewDepartureForServiceDate(eq(route), eq(NotificationScheduleType.LAST_TRANSIT),
+                eq(day.plusDays(1)), anyMap())).thenReturn(day.plusDays(1).atTime(21, 0));
+        var result = service.search("user@test.com", 126.8, 37.5, null,
+                127.0, 37.6, null, NotificationScheduleType.LAST_TRANSIT);
+        assertThat(result).hasSize(1);
+        assertThat(result.get(0).getEstimatedDepartureAt().toLocalDateTime())
+                .isEqualTo(day.plusDays(1).atTime(21, 0));
+    }
+
+    @Test
+    void activeLastSearchIncludesSixAndTwentyOneAndExcludesOutsideWindow() {
+        var api = mock(TransitApiService.class);
+        var schedules = mock(TransitScheduleService.class);
+        var service = new TransitRouteOptimizationService(api, schedules);
+        var day = LocalDate.of(2026, 10, 8);
+        var now = day.atTime(0, 3);
+        setClock(service, now);
+        var times = List.of(day.atTime(5, 59), day.atTime(6, 0), day.atTime(6, 1),
+                day.atTime(19, 27), day.atTime(20, 59), day.atTime(21, 0), day.atTime(23, 59));
+        var routes = new java.util.ArrayList<TransitDto.RouteOptionResponse>();
+        for (int i = 0; i < times.size(); i++) {
+            var route = route("R" + i, "ODSAY", 30);
+            routes.add(route);
+            when(schedules.previewCurrentLastDeparture(eq(route), eq(now), anyMap())).thenReturn(times.get(i));
+        }
+        var unknownNight = nightRoute("UNKNOWN", "N62", 35);
+        routes.add(unknownNight);
+        when(api.searchScheduleCandidates(anyString(), anyDouble(), anyDouble(), any(),
+                anyDouble(), anyDouble(), any(), eq(Integer.MAX_VALUE))).thenReturn(routes);
+        assertThat(service.search("user@test.com", 126.8, 37.5, null,
+                127.0, 37.6, null, NotificationScheduleType.LAST_TRANSIT))
+                .extracting(r -> r.getRoute().getRouteId()).containsExactly("R6", "R5", "R1", "R0");
+    }
+
+    private void setClock(TransitRouteOptimizationService service, LocalDateTime now) {
+        var zone = java.time.ZoneId.of("Asia/Seoul");
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "clock",
+                java.time.Clock.fixed(now.atZone(zone).toInstant(), zone));
     }
 
     private TransitDto.RouteOptionResponse route(String id, String provider, int duration) {

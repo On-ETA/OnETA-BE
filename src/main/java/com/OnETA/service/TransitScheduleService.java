@@ -998,9 +998,19 @@ public class TransitScheduleService {
         return uri.getScheme() + "://" + uri.getAuthority();
     }
     private LocalDateTime findTime(JsonNode node, boolean first, LocalDate serviceDate) {
-        String[] names = first ? new String[]{"startTime","departureTime","firstTime"} : new String[]{"endTime","arrivalTime","lastTime"};
-        if (node.isObject()) for (String name : names) { LocalDateTime t = parseTime(node.path(name).asText(null), serviceDate); if (t != null) return t; }
-        if (node.isObject() || node.isArray()) for (JsonNode child : node) { LocalDateTime t = findTime(child, first, serviceDate); if (t != null) return t; }
+        // subwayPathSchedule returns both departures and arrivals. MODE=3/4 selects
+        // the first/last journey, but its boarding boundary is always departureTime.
+        JsonNode paths = node.path("result").path("path");
+        if (!paths.isArray()) return null;
+        for (JsonNode path : paths) {
+            LocalDateTime departure = parseTime(path.path("info").path("departureTime").asText(null), serviceDate);
+            if (departure == null) continue;
+            // ODsay may encode after-midnight service as either 00:xx or 24:xx.
+            if (!first && departure.toLocalDate().equals(serviceDate) && departure.getHour() < 3) {
+                departure = departure.plusDays(1);
+            }
+            return departure;
+        }
         return null;
     }
     private LocalDateTime parseTime(String v, LocalDate serviceDate) {
@@ -1022,7 +1032,7 @@ public class TransitScheduleService {
         if (type != NotificationScheduleType.LAST_TRANSIT) return hash(v);
         try {
             return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
-                    .digest(("last-current-window-v1:" + hash(v)).getBytes(StandardCharsets.UTF_8)));
+                    .digest(("last-departure-time-v2:" + hash(v)).getBytes(StandardCharsets.UTF_8)));
         } catch (Exception e) {
             throw new IllegalStateException(e);
         }
