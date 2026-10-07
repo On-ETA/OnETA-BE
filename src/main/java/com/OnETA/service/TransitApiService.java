@@ -156,13 +156,13 @@ public class TransitApiService {
 
     public List<TransitDto.RouteOptionResponse> searchRoutes(
             Double originX, Double originY, Double destX, Double destY) {
-        return searchRoutes(originX, originY, destX, destY, 3, true);
+        return searchRoutes(originX, originY, destX, destY, Integer.MAX_VALUE, true);
     }
 
     public List<TransitDto.RouteOptionResponse> searchScheduleCandidates(
             Double originX, Double originY, Double destX, Double destY, int maxCandidates) {
         validateCoordinates(originX, originY, destX, destY);
-        int limit = Math.max(1, Math.min(maxCandidates, 10));
+        int limit = Math.max(1, maxCandidates);
 
         List<TransitDto.RouteOptionResponse> primary;
         boolean primaryFromKakao = false;
@@ -243,7 +243,7 @@ public class TransitApiService {
             Double originX, Double originY, Double destX, Double destY,
             int maxCandidates, boolean enrichRealtime) {
         validateCoordinates(originX, originY, destX, destY);
-        int limit = Math.max(1, Math.min(maxCandidates, 10));
+        int limit = Math.max(1, maxCandidates);
         try {
             return searchOdsayRoutes(originX, originY, destX, destY, limit, enrichRealtime);
         } catch (GlobalException e) {
@@ -411,7 +411,7 @@ public class TransitApiService {
     }
 
     private List<TransitDto.RouteOptionResponse> parseOdsayResponse(String jsonString) {
-        return parseOdsayResponse(jsonString, 3);
+        return parseOdsayResponse(jsonString, Integer.MAX_VALUE);
     }
 
     private List<TransitDto.RouteOptionResponse> parseOdsayResponse(String jsonString, int maxCandidates) {
@@ -510,7 +510,7 @@ public class TransitApiService {
                         .segments(segments)
                         .build());
 
-                if (results.size() >= Math.max(1, Math.min(maxCandidates, 10))) {
+                if (results.size() >= Math.max(1, maxCandidates)) {
                     break;
                 }
             }

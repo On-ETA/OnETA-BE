@@ -58,7 +58,7 @@ public class KakaoTransitClient {
     boolean isConfigured() { return enabled && !key.isBlank(); }
 
     public List<TransitDto.RouteOptionResponse> search(double sx, double sy, double ex, double ey) {
-        return search(sx, sy, ex, ey, 3);
+        return search(sx, sy, ex, ey, Integer.MAX_VALUE);
     }
 
     public List<TransitDto.RouteOptionResponse> search(
@@ -190,7 +190,7 @@ public class KakaoTransitClient {
     }
 
     List<TransitDto.RouteOptionResponse> parse(String body) {
-        return parse(body, 3);
+        return parse(body, Integer.MAX_VALUE);
     }
 
     List<TransitDto.RouteOptionResponse> parse(String body, int maxCandidates) {
@@ -227,7 +227,7 @@ public class KakaoTransitClient {
                         .routeId("KAKAO_" + HexFormat.of().formatHex(hash, 0, 8)).provider("KAKAO")
                         .totalDurationMinutes(minutes).realTimeDurationMinutes(minutes)
                         .totalCost(cost).transferCount(transfers).segments(segments).build());
-                if (result.size() >= Math.max(1, Math.min(maxCandidates, 10))) break;
+                if (result.size() >= Math.max(1, maxCandidates)) break;
             }
             return result;
         } catch (GlobalException e) {
