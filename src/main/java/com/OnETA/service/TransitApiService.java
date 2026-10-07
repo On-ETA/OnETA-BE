@@ -180,10 +180,6 @@ public class TransitApiService {
             primaryFromKakao = true;
         }
 
-        if (primary.stream().anyMatch(TransitRouteClassifier::isNightOnlyRoute)) {
-            return primary;
-        }
-
         List<TransitDto.RouteOptionResponse> combined = new ArrayList<>(primary);
 
         // Route planners may omit night buses during daytime searches. Try Kakao as a
@@ -192,22 +188,25 @@ public class TransitApiService {
                 && kakaoTransitClient != null
                 && kakaoTransitClient.isConfigured()) {
             try {
-                List<TransitDto.RouteOptionResponse> kakaoNightOnly =
+                List<TransitDto.RouteOptionResponse> kakaoNightRoutes =
                         kakaoTransitClient.searchScheduleCandidates(
                                         originX, originY, destX, destY, limit)
                                 .stream()
-                                .filter(TransitRouteClassifier::isNightOnlyRoute)
+                                .filter(TransitRouteClassifier::containsNightBus)
                                 .toList();
-                if (!kakaoNightOnly.isEmpty()) {
-                    combined.addAll(kakaoNightOnly);
-                    log.info("Supplemented FIRST/LAST candidates with {} NIGHT_ONLY Kakao route(s)",
-                            kakaoNightOnly.size());
-                    return combined;
+                if (!kakaoNightRoutes.isEmpty()) {
+                    combined.addAll(kakaoNightRoutes);
+                    log.info("Supplemented FIRST/LAST candidates with {} night-bus Kakao route(s)",
+                            kakaoNightRoutes.size());
                 }
             } catch (GlobalException e) {
-                log.info("Kakao NIGHT_ONLY supplement unavailable ({}); trying Seoul bus graph",
+                log.info("Kakao night-bus supplement unavailable ({}); trying Seoul bus graph",
                         e.getErrorCode().getCode());
             }
+        }
+
+        if (combined.stream().anyMatch(TransitRouteClassifier::isNightOnlyRoute)) {
+            return combined;
         }
 
         // If both planners omit night service, discover a direct N* route from the

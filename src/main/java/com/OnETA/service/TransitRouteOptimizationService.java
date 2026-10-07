@@ -18,6 +18,8 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -82,6 +84,9 @@ public class TransitRouteOptimizationService {
 
     private List<TransitDto.FirstLastRouteOptionResponse> searchLast(
             List<TransitDto.RouteOptionResponse> routes, LocalDateTime now) {
+        List<TransitDto.RouteOptionResponse> nightOnlyRoutes = routes.stream()
+                .filter(TransitRouteClassifier::isNightOnlyRoute)
+                .toList();
         Map<String, LocalDateTime> cache = new HashMap<>();
         FailureState failures = new FailureState();
         List<Candidate> active = new ArrayList<>();
@@ -97,15 +102,25 @@ public class TransitRouteOptimizationService {
                         route.getRouteId(), e.getClass().getSimpleName());
             }
         }
-        if (!active.isEmpty()) return rank(active, NotificationScheduleType.LAST_TRANSIT);
+        if (!active.isEmpty()) return appendMissingNightOnly(
+                rank(active, NotificationScheduleType.LAST_TRANSIT), nightOnlyRoutes);
         // An API outage is not evidence that the current operating interval ended.
-        if (failures.unavailable) throw new GlobalException(ErrorCode.TRANSIT_SCHEDULE_UNAVAILABLE);
+        if (failures.unavailable) {
+            if (!nightOnlyRoutes.isEmpty()) {
+                return nightOnlyResponses(nightOnlyRoutes, NotificationScheduleType.LAST_TRANSIT);
+            }
+            throw new GlobalException(ErrorCode.TRANSIT_SCHEDULE_UNAVAILABLE);
+        }
 
         // Only when no current interval is catchable, show the next operating cycle.
         for (var day : List.of(now.toLocalDate(), now.toLocalDate().plusDays(1))) {
             var upcoming = evaluateCandidates(routes, NotificationScheduleType.LAST_TRANSIT,
                     day, now, cache, failures, true);
-            if (!upcoming.isEmpty()) return rank(upcoming, NotificationScheduleType.LAST_TRANSIT);
+            if (!upcoming.isEmpty()) return appendMissingNightOnly(
+                    rank(upcoming, NotificationScheduleType.LAST_TRANSIT), nightOnlyRoutes);
+        }
+        if (!nightOnlyRoutes.isEmpty()) {
+            return nightOnlyResponses(nightOnlyRoutes, NotificationScheduleType.LAST_TRANSIT);
         }
         if (failures.unavailable) throw new GlobalException(ErrorCode.TRANSIT_SCHEDULE_UNAVAILABLE);
         if (failures.unsupported) throw new GlobalException(ErrorCode.TRANSIT_SCHEDULE_UNSUPPORTED);
@@ -191,6 +206,22 @@ public class TransitRouteOptimizationService {
         result.addAll(available);
         result.addAll(nightResponses.subList(1, nightResponses.size()));
 
+        return result;
+    }
+
+    private List<TransitDto.FirstLastRouteOptionResponse> appendMissingNightOnly(
+            List<TransitDto.FirstLastRouteOptionResponse> available,
+            List<TransitDto.RouteOptionResponse> nightOnlyRoutes) {
+        Set<String> availableIds = available.stream()
+                .map(response -> response.getRoute().getRouteId())
+                .collect(Collectors.toSet());
+        List<TransitDto.RouteOptionResponse> missing = nightOnlyRoutes.stream()
+                .filter(route -> !availableIds.contains(route.getRouteId()))
+                .toList();
+        if (missing.isEmpty()) return available;
+
+        List<TransitDto.FirstLastRouteOptionResponse> result = new ArrayList<>(available);
+        result.addAll(nightOnlyResponses(missing, NotificationScheduleType.LAST_TRANSIT));
         return result;
     }
 
