@@ -35,6 +35,7 @@ public class NotificationDto {
         private List<Integer> reminderOffsetMinutes;
         private List<String> repeatDays;
         private String routeDetails;
+        private OffsetDateTime selectedDepartureAt;
         private NotificationScheduleType scheduleType;
     }
 
