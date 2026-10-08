@@ -205,33 +205,28 @@ public class TransitApiService {
             }
         }
 
-        if (combined.stream().anyMatch(TransitRouteClassifier::isNightOnlyRoute)) {
-            return combined;
-        }
-
-        // If both planners omit night service, discover a direct N* route from the
-        // Seoul bus station/route graph so the result is independent of current time.
+        // A provider N-only route may have unusable stop/time identifiers. Never
+        // skip independent Seoul-bus graph discovery just because one is present.
+        // The direct graph also contributes alternatives whose last runs differ.
         if (seoulBusScheduleService != null) {
-            Optional<TransitDto.RouteOptionResponse> discovered =
-                    seoulBusScheduleService.discoverDirectNightRoute(
-                            originX, originY, destX, destY);
-            if (discovered.isPresent()) {
-                TransitDto.RouteOptionResponse nightRoute = discovered.get();
+            List<TransitDto.RouteOptionResponse> discovered =
+                    seoulBusScheduleService.discoverDirectNightRoutes(originX, originY, destX, destY);
+            for (TransitDto.RouteOptionResponse direct : discovered) {
+                TransitDto.RouteOptionResponse nightRoute = direct;
                 if (kakaoTransitClient != null && kakaoTransitClient.isConfigured()) {
                     try {
                         nightRoute = kakaoTransitClient.completeEndpointWalks(
                                 nightRoute, originX, originY, destX, destY);
                     } catch (GlobalException e) {
-                        log.info("Night route walking supplement unavailable ({}); using bus-only fallback",
+                        log.info("Night route walking supplement unavailable ({}); using direct-route fallback",
                                 e.getErrorCode().getCode());
                     }
                 }
                 combined.add(nightRoute);
-                log.info("Supplemented FIRST/LAST candidates with direct Seoul NIGHT_ONLY route: {}",
-                        nightRoute.getSegments().stream()
-                                .filter(segment -> "BUS".equals(segment.getTransitType()))
-                                .map(TransitDto.RouteSegment::getTransitName)
-                                .findFirst().orElse("unknown"));
+            }
+            if (!discovered.isEmpty()) {
+                log.info("Supplemented FIRST/LAST candidates with {} direct Seoul N-bus route(s)",
+                        discovered.size());
             }
         }
 
