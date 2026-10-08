@@ -18,8 +18,6 @@ public class TransitNotificationDto {
     public static class CreateRequest {
         private List<Integer> reminderOffsetMinutes;
         private String routeDetails;
-        @Schema(description = "선택한 경로 검색 결과의 날짜·시간대 포함 출발시각. FIRST/LAST만 사용.")
-        private OffsetDateTime selectedDepartureAt;
         @Schema(allowableValues = {"FIRST_TRANSIT", "LAST_TRANSIT"}, requiredMode = Schema.RequiredMode.REQUIRED)
         private NotificationScheduleType scheduleType;
 
@@ -27,7 +25,6 @@ public class TransitNotificationDto {
             var request = new NotificationDto.CreateArrivalRequest();
             request.setReminderOffsetMinutes(reminderOffsetMinutes);
             request.setRouteDetails(routeDetails);
-            request.setSelectedDepartureAt(selectedDepartureAt);
             request.setScheduleType(scheduleType);
             return request;
         }
