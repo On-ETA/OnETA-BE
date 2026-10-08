@@ -26,6 +26,7 @@ public class NotificationService {
     private final RepeatDaysService repeatDaysService;
     private final TransitApiService transitApiService;
     private final com.OnETA.repository.NotificationDeliveryRepository deliveryRepository;
+    private final TransitScheduleService transitScheduleService;
 
     @Transactional
     public Long createArrivalNotification(String email, NotificationDto.CreateArrivalRequest request) {
@@ -58,7 +59,12 @@ public class NotificationService {
                 request.getScheduleType() == null ? NotificationScheduleType.NORMAL : request.getScheduleType()
         );
 
-        return arrivalNotificationRepository.save(notification).getId();
+        ArrivalNotification saved = arrivalNotificationRepository.save(notification);
+        if (transit && request.getSelectedDepartureAt() != null) {
+            transitScheduleService.pinSelectedDeparture(saved, request.getSelectedDepartureAt(),
+                    java.time.ZoneId.of("Asia/Seoul"));
+        }
+        return saved.getId();
     }
 
     public List<NotificationDto.ArrivalResponse> getArrivalNotifications(String email) {
@@ -101,7 +107,8 @@ public class NotificationService {
         }
         if (request.getRouteName() == null && request.getTargetArrivalTime() == null
                 && request.getReminderOffsetMinutes() == null && request.getRepeatDays() == null
-                && request.getRouteDetails() == null && request.getScheduleType() == null) {
+                && request.getRouteDetails() == null && request.getScheduleType() == null
+                && request.getSelectedDepartureAt() == null) {
             throw new com.OnETA.common.exception.GlobalException(
                     com.OnETA.common.error.ErrorCode.INVALID_INPUT_VALUE, "수정할 값이 하나도 없습니다.");
         }
@@ -133,10 +140,16 @@ public class NotificationService {
         notification.updateArrivalInfo(request.getTargetArrivalTime(), request.getRouteDetails());
         notification.updateScheduleType(request.getScheduleType());
 
-        // FIRST/LAST snapshots cache the scheduled reminder window. When reminder offsets
-        // change, drop the cached snapshot so the next query/scheduler run rebuilds it.
-        if (request.getReminderOffsetMinutes() != null && isTransit(effectiveType)) {
+        // Changing the route/type or offsets invalidates its previous timetable snapshot.
+        // When the user chose a specific search result, pin the new result atomically.
+        if (isTransit(effectiveType) && (request.getReminderOffsetMinutes() != null
+                || request.getRouteDetails() != null || request.getScheduleType() != null
+                || request.getSelectedDepartureAt() != null)) {
             notificationRepository.deleteScheduleSnapshotsByIds(List.of(notification.getId()));
+            if (request.getSelectedDepartureAt() != null) {
+                transitScheduleService.pinSelectedDeparture(notification, request.getSelectedDepartureAt(),
+                        java.time.ZoneId.of("Asia/Seoul"));
+            }
         }
     }
 
