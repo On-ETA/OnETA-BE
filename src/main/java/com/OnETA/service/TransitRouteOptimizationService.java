@@ -97,10 +97,13 @@ public class TransitRouteOptimizationService {
             throw new GlobalException(ErrorCode.TRANSIT_SCHEDULE_UNAVAILABLE);
         }
 
-        // Only when no current interval is catchable, show the next operating cycle.
-        for (var day : List.of(now.toLocalDate(), now.toLocalDate().plusDays(1))) {
+        // Do not show tomorrow's 23:xx as if it were today's still-catchable last.
+        // The existing frontend only prints HH:mm, so crossing service days here is unsafe.
+        // After midnight (00:00-06:00), ONLY still-catchable current intervals are eligible.
+        // Before midnight, an upcoming LAST from today's service day may still be shown.
+        if (!now.toLocalTime().isBefore(LocalTime.of(6, 0))) {
             var upcoming = evaluateCandidates(routes, NotificationScheduleType.LAST_TRANSIT,
-                    day, now, cache, failures, true);
+                    now.toLocalDate(), now, cache, failures, true);
             if (!upcoming.isEmpty()) return rank(upcoming, NotificationScheduleType.LAST_TRANSIT);
         }
         if (failures.unavailable) throw new GlobalException(ErrorCode.TRANSIT_SCHEDULE_UNAVAILABLE);
@@ -163,7 +166,11 @@ public class TransitRouteOptimizationService {
         return candidates.stream()
                 .sorted(order)
                 .map(candidate -> TransitDto.FirstLastRouteOptionResponse.builder()
-                        .route(candidate.route())
+                        // The current FE sends route.raw unchanged as routeDetails on save.
+                        // Embedding the exact selected departure in route therefore preserves
+                        // the search decision without changing the FE request at all.
+                        .route(candidate.route().toBuilder().selectedDepartureAt(
+                                candidate.departure().atZone(SEOUL).toOffsetDateTime()).build())
                         .scheduleType(scheduleType)
                         .estimatedDepartureAt(candidate.departure().atZone(SEOUL).toOffsetDateTime())
                         .status(FirstLastRouteStatus.AVAILABLE)
