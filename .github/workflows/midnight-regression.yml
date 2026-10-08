@@ -1,0 +1,25 @@
+name: Midnight transit regression
+on:
+  pull_request:
+    branches: [main]
+jobs:
+  midnight-regression:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+      - run: chmod +x gradlew
+      - name: Run midnight departure regression tests
+        run: |
+          ./gradlew test \
+            --tests 'com.OnETA.service.TransitScheduleServiceTest.selectedJustAfterMidnightRemainsOnPreviousOperatingDayEvenWithLaterSnapshot' \
+            --tests 'com.OnETA.service.TransitScheduleServiceTest.selectedPastLastDepartureIsRejectedBeforeCreatingSnapshot' \
+            --tests 'com.OnETA.scheduler.FirstLastNotificationSchedulerTest.midnightDoesNotEvaluateTonightWhileSelectedPreviousLastIsFuture' \
+            --tests 'com.OnETA.service.NotificationServiceTest.transitCreatePinsSelectedSearchDeparture' \
+            --tests 'com.OnETA.service.NotificationServiceTest.transitDtoPreservesSelectedSearchDepartureInConversion'
