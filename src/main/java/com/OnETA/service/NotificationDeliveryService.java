@@ -22,6 +22,7 @@ import java.time.Duration;
 import java.time.Clock;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ScheduledExecutorService;
@@ -142,9 +143,14 @@ public class NotificationDeliveryService {
 
             NotificationDelivery delivery = deliveryRepository.findById(deliveryId).orElse(null);
             if (delivery == null || delivery.getStatus() != NotificationDeliveryStatus.SENDING) return;
+            ArrivalNotification notification = (ArrivalNotification)
+                    org.hibernate.Hibernate.unproxy(delivery.getNotification());
+            String type = notification.getScheduleType() == com.OnETA.entity.NotificationScheduleType.FIRST_TRANSIT
+                    || notification.getScheduleType() == com.OnETA.entity.NotificationScheduleType.LAST_TRANSIT
+                    ? "firstandlast" : "normal";
             fcmPushService.sendPushMessage(
                     delivery.getDeviceToken(), delivery.getTitle(), delivery.getBody(),
-                    delivery.getHardDeadlineAt());
+                    delivery.getHardDeadlineAt(), Map.of("type", type));
             new TransactionTemplate(transactionManager)
                     .executeWithoutResult(status -> markSent(deliveryId));
         } catch (Exception e) {

@@ -71,7 +71,7 @@ class NotificationDeliveryConcurrencyTest {
         NotificationDelivery result = deliveryRepository.findById(deliveryId).orElseThrow();
         assertThat(result.getAttempts()).isEqualTo(4);
         assertThat(result.getStatus()).isEqualTo(NotificationDeliveryStatus.SENT);
-        verify(fcmPushService, times(1)).sendPushMessage(any(), any(), any(), any());
+        verify(fcmPushService, times(1)).sendPushMessage(any(), any(), any(), any(), any());
     }
 
     private void processWhenReleased(CountDownLatch start, Long deliveryId) {
