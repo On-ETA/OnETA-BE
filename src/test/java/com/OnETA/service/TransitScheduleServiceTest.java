@@ -60,6 +60,30 @@ class TransitScheduleServiceTest {
     }
 
     @Test
+    void pinnedLastKeepsLiveSeoulBusEvaluationWhenBindingIsAvailable() {
+        var service = service("0530", "2330");
+        var seoul = mock(SeoulBusScheduleService.class);
+        ReflectionTestUtils.setField(service, "seoulBusScheduleService", seoul);
+        var route = SeoulBusScheduleServiceTest.route();
+        when(serviceApi(service).readSavedRoute("route")).thenReturn(route);
+        when(seoul.resolve(any(), eq(DATE))).thenReturn(new SeoulBusScheduleService.Schedule(
+                "1", "01001", "bus", DATE.atTime(4, 30), DATE.plusDays(1).atTime(0, 20)));
+        var notification = notification(NotificationScheduleType.LAST_TRANSIT, 5);
+        var selected = DATE.plusDays(1).atTime(0, 10);
+        var pinned = new ScheduleSnapshot(notification, DATE, NotificationScheduleType.LAST_TRANSIT,
+                "hash", selected, selected.minusMinutes(5), DATE.atTime(23, 30),
+                DATE.atTime(23, 0), 30);
+        pinned.useSelectedPreviewSource();
+        when(snapshotRepo(service).findForUpdate(any(), any(), any(), any())).thenReturn(Optional.of(pinned));
+
+        var decision = service.evaluate(notification, DATE, DATE.atTime(23, 50), SEOUL);
+
+        assertThat(pinned.getSource()).isEqualTo("SEOUL_BUS");
+        assertThat(decision.hardDeadlineAt()).isEqualTo(selected);
+        verify(snapshotRepo(service)).save(pinned);
+    }
+
+    @Test
     void selectedPastLastDepartureIsRejectedBeforeCreatingSnapshot() {
         var service = service("0530", "2330");
         var notification = notification(NotificationScheduleType.LAST_TRANSIT, 5);
