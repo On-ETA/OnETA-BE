@@ -116,7 +116,7 @@ class NotificationDeliveryServiceTest {
         service.processPending();
 
         verify(fcm, times(1)).sendPushMessage("token", "title", "body",
-                java.time.LocalDateTime.of(2026, 8, 10, 9, 10));
+                java.time.LocalDateTime.of(2026, 8, 10, 9, 10), java.util.Map.of("type", "normal"));
         verify(deliveries, times(2)).save(delivery);
     }
 
@@ -124,7 +124,7 @@ class NotificationDeliveryServiceTest {
     void transientFailureSchedulesFirstRetryAfterTwoSeconds() {
         TestFixture fixture = fixture();
         doThrow(new FcmPushException("UNAVAILABLE", "temporarily unavailable", false, null))
-                .when(fixture.fcm).sendPushMessage(any(), any(), any(), any());
+                .when(fixture.fcm).sendPushMessage(any(), any(), any(), any(), any());
 
         fixture.service.processPending();
 
@@ -139,7 +139,7 @@ class NotificationDeliveryServiceTest {
         TestFixture secondAttempt = fixture();
         ReflectionTestUtils.setField(secondAttempt.delivery, "attempts", 1);
         doThrow(new FcmPushException("UNAVAILABLE", "temporarily unavailable", false, null))
-                .when(secondAttempt.fcm).sendPushMessage(any(), any(), any(), any());
+                .when(secondAttempt.fcm).sendPushMessage(any(), any(), any(), any(), any());
         secondAttempt.service.processPending();
         assertThat(secondAttempt.delivery.getNextAttemptAt())
                 .isEqualTo(java.time.LocalDateTime.of(2026, 8, 10, 9, 0, 20));
@@ -147,7 +147,7 @@ class NotificationDeliveryServiceTest {
         TestFixture thirdAttempt = fixture();
         ReflectionTestUtils.setField(thirdAttempt.delivery, "attempts", 2);
         doThrow(new FcmPushException("UNAVAILABLE", "temporarily unavailable", false, null))
-                .when(thirdAttempt.fcm).sendPushMessage(any(), any(), any(), any());
+                .when(thirdAttempt.fcm).sendPushMessage(any(), any(), any(), any(), any());
         thirdAttempt.service.processPending();
         assertThat(thirdAttempt.delivery.getNextAttemptAt())
                 .isEqualTo(java.time.LocalDateTime.of(2026, 8, 10, 9, 0, 40));
@@ -158,7 +158,7 @@ class NotificationDeliveryServiceTest {
         TestFixture fixture = fixture();
         doThrow(new FcmPushException("QUOTA_EXCEEDED", "quota", false,
                 Duration.ofSeconds(60), null))
-                .when(fixture.fcm).sendPushMessage(any(), any(), any(), any());
+                .when(fixture.fcm).sendPushMessage(any(), any(), any(), any(), any());
 
         fixture.service.processPending();
 
@@ -172,7 +172,7 @@ class NotificationDeliveryServiceTest {
         TestFixture fixture = fixture();
         ReflectionTestUtils.setField(fixture.delivery, "attempts", 3);
         doThrow(new FcmPushException("UNAVAILABLE", "temporarily unavailable", false, null))
-                .when(fixture.fcm).sendPushMessage(any(), any(), any(), any());
+                .when(fixture.fcm).sendPushMessage(any(), any(), any(), any(), any());
 
         fixture.service.processPending();
 
@@ -196,7 +196,7 @@ class NotificationDeliveryServiceTest {
         when(fixture.notification.getRepeatDays()).thenReturn(0);
         ReflectionTestUtils.setField(fixture.delivery, "attempts", 4);
         doThrow(new FcmPushException("UNAVAILABLE", "temporarily unavailable", false, null))
-                .when(fixture.fcm).sendPushMessage(any(), any(), any(), any());
+                .when(fixture.fcm).sendPushMessage(any(), any(), any(), any(), any());
 
         fixture.service.processPending();
 
@@ -209,7 +209,7 @@ class NotificationDeliveryServiceTest {
     void unregisteredTokenFailsAndDeletesOnlyTheSameCurrentToken() {
         TestFixture fixture = fixture();
         doThrow(new FcmPushException("UNREGISTERED", "unregistered", true, null))
-                .when(fixture.fcm).sendPushMessage(any(), any(), any(), any());
+                .when(fixture.fcm).sendPushMessage(any(), any(), any(), any(), any());
         UserDeviceToken token = mock(UserDeviceToken.class);
         when(token.getDeviceToken()).thenReturn("token");
         when(fixture.tokens.findByUserIdAndDeviceToken(1L, "token")).thenReturn(Optional.of(token));
@@ -224,7 +224,7 @@ class NotificationDeliveryServiceTest {
     void configurationPermanentFailureDoesNotDeleteToken() {
         TestFixture fixture = fixture();
         doThrow(new FcmPushException("SENDER_ID_MISMATCH", "sender mismatch", true, null))
-                .when(fixture.fcm).sendPushMessage(any(), any(), any(), any());
+                .when(fixture.fcm).sendPushMessage(any(), any(), any(), any(), any());
 
         fixture.service.processPending();
 
@@ -236,7 +236,7 @@ class NotificationDeliveryServiceTest {
     void updatedTokenIsNotDeletedAfterOldTokenFails() {
         TestFixture fixture = fixture();
         doThrow(new FcmPushException("UNREGISTERED", "unregistered", true, null))
-                .when(fixture.fcm).sendPushMessage(any(), any(), any(), any());
+                .when(fixture.fcm).sendPushMessage(any(), any(), any(), any(), any());
         when(fixture.tokens.findByUserIdAndDeviceToken(1L, "token")).thenReturn(Optional.empty());
 
         fixture.service.processPending();
@@ -289,7 +289,7 @@ class NotificationDeliveryServiceTest {
         fixture.service.processPending();
 
         assertThat(fixture.delivery.getStatus()).isEqualTo(NotificationDeliveryStatus.EXPIRED);
-        verify(fixture.fcm, never()).sendPushMessage(any(), any(), any(), any());
+        verify(fixture.fcm, never()).sendPushMessage(any(), any(), any(), any(), any());
     }
 
     @Test
@@ -311,7 +311,7 @@ class NotificationDeliveryServiceTest {
         TestFixture fixture = fixture();
         ReflectionTestUtils.setField(fixture.delivery, "deliveryPhase", DeliveryPhase.RECOVERY);
         doThrow(new FcmPushException("UNAVAILABLE", "temporary", false, null))
-                .doNothing().when(fixture.fcm).sendPushMessage(any(), any(), any(), any());
+                .doNothing().when(fixture.fcm).sendPushMessage(any(), any(), any(), any(), any());
 
         fixture.service.processPending();
         assertThat(fixture.delivery.getStatus()).isEqualTo(NotificationDeliveryStatus.PENDING);
@@ -323,7 +323,7 @@ class NotificationDeliveryServiceTest {
 
         assertThat(fixture.delivery.getStatus()).isEqualTo(NotificationDeliveryStatus.SENT);
         verify(fixture.fcm, times(2)).sendPushMessage("token", "title", "body",
-                LocalDateTime.of(2026, 8, 10, 9, 10));
+                LocalDateTime.of(2026, 8, 10, 9, 10), java.util.Map.of("type", "normal"));
     }
 
     @Test
@@ -362,7 +362,7 @@ class NotificationDeliveryServiceTest {
         when(nonFinal.notification.getReminderOffsetMinutesList()).thenReturn(List.of(5, 10, 30));
         ReflectionTestUtils.setField(nonFinal.delivery, "reminderOffsetMinutes", 10);
         doThrow(new FcmPushException("SENDER_ID_MISMATCH", "permanent", true, null))
-                .when(nonFinal.fcm).sendPushMessage(any(), any(), any(), any());
+                .when(nonFinal.fcm).sendPushMessage(any(), any(), any(), any(), any());
 
         nonFinal.service.processPending();
 
@@ -374,7 +374,7 @@ class NotificationDeliveryServiceTest {
         when(finalReminder.notification.getReminderOffsetMinutesList()).thenReturn(List.of(5, 10, 30));
         ReflectionTestUtils.setField(finalReminder.delivery, "reminderOffsetMinutes", 5);
         doThrow(new FcmPushException("SENDER_ID_MISMATCH", "permanent", true, null))
-                .when(finalReminder.fcm).sendPushMessage(any(), any(), any(), any());
+                .when(finalReminder.fcm).sendPushMessage(any(), any(), any(), any(), any());
 
         finalReminder.service.processPending();
 
@@ -401,6 +401,21 @@ class NotificationDeliveryServiceTest {
         assertThat(fixture.delivery.getStatus()).isEqualTo(NotificationDeliveryStatus.EXPIRED);
         assertThat(fixture.delivery.getLastErrorCode()).isEqualTo("TRANSIT_REPLACED");
         verifyNoInteractions(fixture.fcm);
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.EnumSource(com.OnETA.entity.NotificationScheduleType.class)
+    void sendsNotificationTypeAsCustomData(com.OnETA.entity.NotificationScheduleType scheduleType) {
+        TestFixture fixture = fixture();
+        when(fixture.notification.getScheduleType()).thenReturn(scheduleType);
+
+        fixture.service.processPending();
+
+        String expectedType = scheduleType == com.OnETA.entity.NotificationScheduleType.NORMAL
+                ? "normal" : "firstandlast";
+        verify(fixture.fcm).sendPushMessage("token", "title", "body",
+                LocalDateTime.of(2026, 8, 10, 9, 10), java.util.Map.of("type", expectedType));
+        assertThat(fixture.delivery.getStatus()).isEqualTo(NotificationDeliveryStatus.SENT);
     }
 
     private TestFixture fixture() {
