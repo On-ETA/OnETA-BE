@@ -132,9 +132,13 @@ public class NotificationScheduler {
     private void processScheduledTransit(ArrivalNotification notification, LocalDate today,
                                          LocalDateTime now, ZoneId zoneId) {
         var route = transitApiService.readSavedRoute(notification.getRouteDetails());
-        if (com.OnETA.service.SeoulBusScheduleService.usesSeoulBusSchedules(route)) {
+        if (notification.getScheduleType() == NotificationScheduleType.LAST_TRANSIT
+                || com.OnETA.service.SeoulBusScheduleService.usesSeoulBusSchedules(route)) {
             processScheduledServiceDay(notification, today.minusDays(1), now, zoneId);
             if (Boolean.FALSE.equals(notification.getIsActive())) return;
+            // Do not create tonight's snapshot while the selected previous operating
+            // day's last departure (e.g. 00:10) has not passed yet.
+            if (transitScheduleService.hasPendingPreviousLast(notification, now)) return;
         }
 
         processScheduledServiceDay(notification, today, now, zoneId);
