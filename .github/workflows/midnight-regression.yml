@@ -22,5 +22,7 @@ jobs:
             --tests 'com.OnETA.service.TransitScheduleServiceTest.selectedPastLastDepartureIsRejectedBeforeCreatingSnapshot' \
             --tests 'com.OnETA.service.TransitScheduleServiceTest.pinnedLastKeepsLiveSeoulBusEvaluationWhenBindingIsAvailable' \
             --tests 'com.OnETA.scheduler.FirstLastNotificationSchedulerTest.midnightDoesNotEvaluateTonightWhileSelectedPreviousLastIsFuture' \
-            --tests 'com.OnETA.service.NotificationServiceTest.transitCreatePinsSelectedSearchDeparture' \
-            --tests 'com.OnETA.service.NotificationServiceTest.transitDtoPreservesSelectedSearchDepartureInConversion'
+            --tests 'com.OnETA.service.NotificationServiceTest.transitCreatePinsDepartureCarriedInExistingRouteDetails' \
+            --tests 'com.OnETA.service.NotificationServiceTest.routeResetPinsTheNewDepartureWithoutAnyFrontendRequestField' \
+            --tests 'com.OnETA.service.TransitRouteOptimizationServiceTest.lastAt2359OnlyReturnsTheStillCatchableOvernightTrip' \
+            --tests 'com.OnETA.service.TransitRouteOptimizationServiceTest.lastAt0001DoesNotJumpToTonightWhenCurrentLastUnavailable'
