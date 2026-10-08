@@ -94,27 +94,51 @@ class NotificationServiceTest {
     }
 
     @Test
-    void transitCreatePinsSelectedSearchDeparture() {
+    void transitCreatePinsDepartureCarriedInExistingRouteDetails() {
         when(users.findByEmail("test@example.com")).thenReturn(Optional.of(user));
         when(arrivals.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
-        var request = request(NotificationScheduleType.LAST_TRANSIT);
         var selected = java.time.OffsetDateTime.parse("2026-10-09T00:10:00+09:00");
-        request.setSelectedDepartureAt(selected);
+        var route = com.OnETA.dto.TransitDto.RouteOptionResponse.builder()
+                .routeId("KAKAO_overnight").provider("KAKAO").selectedDepartureAt(selected)
+                .totalDurationMinutes(32)
+                .segments(List.of(com.OnETA.dto.TransitDto.RouteSegment.builder()
+                        .transitType("SUBWAY").transitName("2호선").durationMinutes(32).build()))
+                .build();
+        when(transit.readSavedRoute("{}")).thenReturn(route);
 
-        service.createArrivalNotification("test@example.com", request);
+        service.createArrivalNotification("test@example.com", request(NotificationScheduleType.LAST_TRANSIT));
 
         verify(schedules).pinSelectedDeparture(any(ArrivalNotification.class), eq(selected),
                 eq(java.time.ZoneId.of("Asia/Seoul")));
     }
 
     @Test
-    void transitDtoPreservesSelectedSearchDepartureInConversion() {
-        var request = new com.OnETA.dto.TransitNotificationDto.CreateRequest();
+    void routeResetPinsTheNewDepartureWithoutAnyFrontendRequestField() {
+        when(user.getId()).thenReturn(1L);
+        when(users.findByEmail("test@example.com")).thenReturn(Optional.of(user));
+        var notification = new ArrivalNotification(user, "막차 알림", List.of(10), 0,
+                null, "old", NotificationScheduleType.LAST_TRANSIT);
+        org.springframework.test.util.ReflectionTestUtils.setField(notification, "id", 17L);
+        when(arrivals.findById(17L)).thenReturn(Optional.of(notification));
         var selected = java.time.OffsetDateTime.parse("2026-10-09T00:10:00+09:00");
-        request.setScheduleType(NotificationScheduleType.LAST_TRANSIT);
-        request.setSelectedDepartureAt(selected);
+        var route = com.OnETA.dto.TransitDto.RouteOptionResponse.builder()
+                .routeId("KAKAO_overnight").provider("KAKAO").selectedDepartureAt(selected)
+                .totalDurationMinutes(32)
+                .segments(List.of(com.OnETA.dto.TransitDto.RouteSegment.builder()
+                        .transitType("SUBWAY").transitName("2호선").durationMinutes(32).build()))
+                .build();
+        when(transit.readSavedRoute("new")).thenReturn(route);
+        when(transit.readSavedRoute("old")).thenReturn(com.OnETA.dto.TransitDto.RouteOptionResponse.builder()
+                .routeId("old").totalDurationMinutes(32)
+                .segments(List.of(com.OnETA.dto.TransitDto.RouteSegment.builder()
+                        .transitType("SUBWAY").transitName("2호선").durationMinutes(32).build())).build());
+        var patch = new NotificationDto.UpdateArrivalRequest();
+        patch.setRouteDetails("new");
 
-        assertThat(request.toArrivalRequest().getSelectedDepartureAt()).isEqualTo(selected);
+        service.updateArrivalNotification("test@example.com", 17L, patch);
+
+        verify(schedules).pinSelectedDeparture(eq(notification), eq(selected),
+                eq(java.time.ZoneId.of("Asia/Seoul")));
     }
 
     @Test
