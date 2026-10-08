@@ -60,9 +60,13 @@ public class NotificationService {
         );
 
         ArrivalNotification saved = arrivalNotificationRepository.save(notification);
-        if (transit && request.getSelectedDepartureAt() != null) {
-            transitScheduleService.pinSelectedDeparture(saved, request.getSelectedDepartureAt(),
-                    java.time.ZoneId.of("Asia/Seoul"));
+        if (transit) {
+            // Unmodified FE sends the selected RouteOptionResponse via routeDetails.
+            var chosen = transitApiService.readSavedRoute(request.getRouteDetails());
+            if (chosen.getSelectedDepartureAt() != null) {
+                transitScheduleService.pinSelectedDeparture(saved, chosen.getSelectedDepartureAt(),
+                        java.time.ZoneId.of("Asia/Seoul"));
+            }
         }
         return saved.getId();
     }
@@ -107,8 +111,7 @@ public class NotificationService {
         }
         if (request.getRouteName() == null && request.getTargetArrivalTime() == null
                 && request.getReminderOffsetMinutes() == null && request.getRepeatDays() == null
-                && request.getRouteDetails() == null && request.getScheduleType() == null
-                && request.getSelectedDepartureAt() == null) {
+                && request.getRouteDetails() == null && request.getScheduleType() == null) {
             throw new com.OnETA.common.exception.GlobalException(
                     com.OnETA.common.error.ErrorCode.INVALID_INPUT_VALUE, "수정할 값이 하나도 없습니다.");
         }
@@ -143,12 +146,15 @@ public class NotificationService {
         // Changing the route/type or offsets invalidates its previous timetable snapshot.
         // When the user chose a specific search result, pin the new result atomically.
         if (isTransit(effectiveType) && (request.getReminderOffsetMinutes() != null
-                || request.getRouteDetails() != null || request.getScheduleType() != null
-                || request.getSelectedDepartureAt() != null)) {
+                || request.getRouteDetails() != null || request.getScheduleType() != null)) {
             notificationRepository.deleteScheduleSnapshotsByIds(List.of(notification.getId()));
-            if (request.getSelectedDepartureAt() != null) {
-                transitScheduleService.pinSelectedDeparture(notification, request.getSelectedDepartureAt(),
-                        java.time.ZoneId.of("Asia/Seoul"));
+            // A route reset carries a new preview inside routeDetails without an FE change.
+            if (request.getRouteDetails() != null) {
+                var chosen = transitApiService.readSavedRoute(request.getRouteDetails());
+                if (chosen.getSelectedDepartureAt() != null) {
+                    transitScheduleService.pinSelectedDeparture(notification, chosen.getSelectedDepartureAt(),
+                            java.time.ZoneId.of("Asia/Seoul"));
+                }
             }
         }
     }
