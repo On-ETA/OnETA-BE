@@ -88,6 +88,7 @@ public class TransitScheduleService {
         if (existing.isEmpty() && date.isBefore(now.toLocalDate())) return null;
         ScheduleSnapshot snapshot = existing.orElseGet(() -> createSnapshot(notification, date, type, hash, zone, now));
         if (snapshot.getEvaluationMode() == ScheduleEvaluationMode.FINISHED) return null;
+        refreshSelectedPreviewSource(snapshot, notification, now);
 
         int offset = notification.getReminderOffsetMinutesList().stream()
                 .max(Integer::compareTo).orElse(notification.getReminderOffsetMinutes());
@@ -683,6 +684,42 @@ public class TransitScheduleService {
                 hash(notification.getRouteDetails(), type), departure, scheduled,
                 scheduled.minusMinutes(evaluationLead), LocalDateTime.now(ZoneOffset.UTC), duration);
         snapshot.useSelectedPreviewSource();
+        snapshotRepository.save(snapshot);
+    }
+
+    /**
+     * A pinned result must not disable the existing live Seoul-transfer checks.
+     * Resolve provider bindings when the reminder window approaches; if an API is
+     * unavailable, keep the selected time instead of silently jumping to tonight.
+     */
+    private void refreshSelectedPreviewSource(ScheduleSnapshot snapshot, ArrivalNotification notification,
+                                              LocalDateTime now) {
+        if (!"SELECTED_PREVIEW".equals(snapshot.getSource())
+                || notification.getScheduleType() != NotificationScheduleType.LAST_TRANSIT
+                || now.isBefore(snapshot.getRealtimeEvaluationStartAt())
+                || !snapshot.getEffectiveDepartureAt().isAfter(now)) return;
+
+        TransitDto.RouteOptionResponse route = transitApiService.readSavedRoute(notification.getRouteDetails());
+        if (!SeoulBusScheduleService.usesSeoulBusSchedules(route)) return;
+        LocalDateTime lastAttempt = snapshot.getLastRealtimeEvaluatedAt();
+        if (lastAttempt != null && now.isBefore(lastAttempt.plusMinutes(3))) return;
+
+        // Throttle external lookups, even when the provider fails.
+        snapshot.updateConnection(snapshot.getEffectiveDepartureAt(), snapshot.getEffectiveScheduledAt(),
+                snapshot.getEstimatedDurationMinutes(), now);
+        try {
+            RouteSchedulePlan current = calculateCurrentLastPlan(route, now, new HashMap<>());
+            if (current == null || Math.abs(Duration.between(current.departure(),
+                    snapshot.getEffectiveDepartureAt()).toMinutes()) > 15) return;
+            if ("SEOUL_BUS_TRANSFER".equals(current.source()) && current.providerDetails() != null) {
+                snapshot.useSeoulTransferSource(current.providerDetails());
+            } else if ("SEOUL_BUS".equals(current.source())) {
+                snapshot.useSeoulBusSource();
+            }
+        } catch (RuntimeException e) {
+            log.debug("Selected last departure retained while live bindings unavailable: notificationId={}, reason={}",
+                    notification.getId(), e.getClass().getSimpleName());
+        }
         snapshotRepository.save(snapshot);
     }
 
