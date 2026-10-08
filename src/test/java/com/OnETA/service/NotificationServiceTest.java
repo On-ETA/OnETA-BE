@@ -94,6 +94,30 @@ class NotificationServiceTest {
     }
 
     @Test
+    void transitCreatePinsSelectedSearchDeparture() {
+        when(users.findByEmail("test@example.com")).thenReturn(Optional.of(user));
+        when(arrivals.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        var request = request(NotificationScheduleType.LAST_TRANSIT);
+        var selected = java.time.OffsetDateTime.parse("2026-10-09T00:10:00+09:00");
+        request.setSelectedDepartureAt(selected);
+
+        service.createArrivalNotification("test@example.com", request);
+
+        verify(schedules).pinSelectedDeparture(any(ArrivalNotification.class), eq(selected),
+                eq(java.time.ZoneId.of("Asia/Seoul")));
+    }
+
+    @Test
+    void transitDtoPreservesSelectedSearchDepartureInConversion() {
+        var request = new com.OnETA.dto.TransitNotificationDto.CreateRequest();
+        var selected = java.time.OffsetDateTime.parse("2026-10-09T00:10:00+09:00");
+        request.setScheduleType(NotificationScheduleType.LAST_TRANSIT);
+        request.setSelectedDepartureAt(selected);
+
+        assertThat(request.toArrivalRequest().getSelectedDepartureAt()).isEqualTo(selected);
+    }
+
+    @Test
     void savesNightBusLastNotificationWithoutLiveTimetableValidation() {
         var route = com.OnETA.dto.TransitDto.RouteOptionResponse.builder()
                 .provider("SEOUL_NIGHT").routeId("NIGHT_test")
