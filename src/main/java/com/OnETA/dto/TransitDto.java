@@ -31,6 +31,9 @@ public class TransitDto {
     public static class RouteOptionResponse {
         private String routeId;
         private String provider;
+        // Search-time departure is carried through the unchanged FE route.raw payload.
+        // It is data, not an extra frontend request field.
+        private OffsetDateTime selectedDepartureAt;
         private String originAddress;
         private String destinationAddress;
         private Integer totalDurationMinutes;
