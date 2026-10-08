@@ -709,12 +709,13 @@ public class TransitScheduleService {
                 snapshot.getEstimatedDurationMinutes(), now);
         try {
             RouteSchedulePlan current = calculateCurrentLastPlan(route, now, new HashMap<>());
-            if (current == null || Math.abs(Duration.between(current.departure(),
-                    snapshot.getEffectiveDepartureAt()).toMinutes()) > 15) return;
-            if ("SEOUL_BUS_TRANSFER".equals(current.source()) && current.providerDetails() != null) {
-                snapshot.useSeoulTransferSource(current.providerDetails());
-            } else if ("SEOUL_BUS".equals(current.source())) {
-                snapshot.useSeoulBusSource();
+            if (current != null && Math.abs(Duration.between(current.departure(),
+                    snapshot.getEffectiveDepartureAt()).toMinutes()) <= 15) {
+                if ("SEOUL_BUS_TRANSFER".equals(current.source()) && current.providerDetails() != null) {
+                    snapshot.useSeoulTransferSource(current.providerDetails());
+                } else if ("SEOUL_BUS".equals(current.source())) {
+                    snapshot.useSeoulBusSource();
+                }
             }
         } catch (RuntimeException e) {
             log.debug("Selected last departure retained while live bindings unavailable: notificationId={}, reason={}",
