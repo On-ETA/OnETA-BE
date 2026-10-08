@@ -218,8 +218,8 @@ public class TransitRouteOptimizationService {
         List<TransitDto.FirstLastRouteOptionResponse> result = new ArrayList<>(available);
         for (var route : unverifiedNightRoutes) {
             boolean alreadyIncluded = result.stream().anyMatch(item ->
-                    item.getRoute().getRouteId().equals(route.getRouteId())
-                            && item.getRoute().getProvider().equals(route.getProvider()));
+                    java.util.Objects.equals(item.getRoute().getRouteId(), route.getRouteId())
+                            && java.util.Objects.equals(item.getRoute().getProvider(), route.getProvider()));
             if (alreadyIncluded) continue;
             result.add(TransitDto.FirstLastRouteOptionResponse.builder()
                     .route(route)
