@@ -223,13 +223,15 @@ class TransitRouteOptimizationServiceTest {
         TransitApiService api = mock(TransitApiService.class);
         TransitScheduleService schedules = mock(TransitScheduleService.class);
         var service = new TransitRouteOptimizationService(api, schedules);
+        var now = LocalDateTime.of(2026, 10, 9, 2, 3);
+        setClock(service, now);
         var unsupported = route("X", "KAKAO", 10);
         var unavailable = route("Y", "ODSAY", 10);
         when(api.searchScheduleCandidates(anyString(), anyDouble(), anyDouble(), any(), anyDouble(), anyDouble(), any(), eq(Integer.MAX_VALUE)))
                 .thenReturn(List.of(unsupported, unavailable));
-        when(schedules.previewDepartureForServiceDate(eq(unsupported), any(), any(), anyMap()))
+        when(schedules.previewCurrentLastDeparture(eq(unsupported), eq(now), anyMap()))
                 .thenThrow(new GlobalException(ErrorCode.TRANSIT_SCHEDULE_UNSUPPORTED));
-        when(schedules.previewDepartureForServiceDate(eq(unavailable), any(), any(), anyMap()))
+        when(schedules.previewCurrentLastDeparture(eq(unavailable), eq(now), anyMap()))
                 .thenThrow(new GlobalException(ErrorCode.TRANSIT_SCHEDULE_UNAVAILABLE));
 
         assertThatThrownBy(() -> service.search("user@test.com", 126.8, 37.5, null,
