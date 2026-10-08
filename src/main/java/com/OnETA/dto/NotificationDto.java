@@ -8,6 +8,7 @@ import lombok.Getter;
 import lombok.Setter;
 
 import java.time.LocalTime;
+import java.time.OffsetDateTime;
 import java.util.List;
 
 public class NotificationDto {
@@ -21,6 +22,8 @@ public class NotificationDto {
         private List<Integer> reminderOffsetMinutes;
         private List<String> repeatDays;
         private String routeDetails;
+        // Departure selected from /api/transit/routes/first-last/search, including its date and offset.
+        private OffsetDateTime selectedDepartureAt;
         private NotificationScheduleType scheduleType;
     }
 
