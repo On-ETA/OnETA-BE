@@ -17,6 +17,24 @@ class FirstLastNotificationSchedulerTest {
     private static final ZoneId SEOUL = ZoneId.of("Asia/Seoul");
 
     @Test
+    void midnightDoesNotEvaluateTonightWhileSelectedPreviousLastIsFuture() {
+        ArrivalNotification notification = notification(NotificationScheduleType.LAST_TRANSIT);
+        TransitScheduleService schedules = mock(TransitScheduleService.class);
+        LocalDate today = LocalDate.of(2026, 8, 28);
+        when(schedules.hasPendingPreviousLast(eq(notification), any())).thenReturn(true);
+        var delivery = mock(NotificationDeliveryService.class);
+        var scheduler = scheduler(notification, schedules, delivery, "2026-08-28T00:01");
+        var transit = (TransitApiService) ReflectionTestUtils.getField(scheduler, "transitApiService");
+        when(transit.readSavedRoute("route")).thenReturn(com.OnETA.dto.TransitDto.RouteOptionResponse
+                .builder().provider("KAKAO").build());
+
+        scheduler.scheduleArrivalNotifications();
+
+        verify(schedules).evaluate(eq(notification), eq(today.minusDays(1)), any(), any());
+        verify(schedules, never()).evaluate(eq(notification), eq(today), any(), any());
+    }
+
+    @Test
     void kakaoOvernightLastBusUsesPreviousSelectedWeekday() {
         var n = notification(NotificationScheduleType.LAST_TRANSIT);
         var repeats = new RepeatDaysService();
