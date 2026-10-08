@@ -28,6 +28,7 @@ import java.util.*;
 public class TransitScheduleService {
     private static final int FIRST_TRANSFER_BUFFER_MINUTES = 1;
     private static final int MAX_FIRST_TRANSFER_WAIT_MINUTES = 45;
+    private Clock clock = Clock.systemUTC();
 
     private final TransitApiService transitApiService;
     private final PublicDataTransitService publicDataTransitService;
@@ -640,6 +641,61 @@ public class TransitScheduleService {
                 com.OnETA.common.error.ErrorCode.TRANSIT_SCHEDULE_UNSUPPORTED);
     }
 
+    /**
+     * Persist the departure that the user actually chose in first/last search.
+     * A 00:xx-05:xx LAST departure belongs to the preceding operating day,
+     * so the scheduler can still deliver it after midnight.
+     */
+    @Transactional
+    public void pinSelectedDeparture(ArrivalNotification notification, OffsetDateTime selectedAt, ZoneId zone) {
+        NotificationScheduleType type = notification.getScheduleType();
+        if (type != NotificationScheduleType.FIRST_TRANSIT && type != NotificationScheduleType.LAST_TRANSIT) {
+            throw new com.OnETA.common.exception.GlobalException(
+                    com.OnETA.common.error.ErrorCode.INVALID_INPUT_VALUE, "첫차·막차 경로에서만 출발시각을 선택할 수 있습니다.");
+        }
+        LocalDateTime now = LocalDateTime.ofInstant(clock.instant(), zone);
+        LocalDateTime departure = selectedAt.atZoneSameInstant(zone).toLocalDateTime();
+        LocalTime time = departure.toLocalTime();
+        boolean inWindow = type == NotificationScheduleType.LAST_TRANSIT
+                ? !time.isBefore(LocalTime.of(21, 0)) || !time.isAfter(LocalTime.of(6, 0))
+                : !time.isBefore(LocalTime.of(3, 0)) && !time.isAfter(LocalTime.of(9, 0));
+        if (!departure.isAfter(now) || departure.isAfter(now.plusDays(2)) || !inWindow) {
+            throw new com.OnETA.common.exception.GlobalException(
+                    com.OnETA.common.error.ErrorCode.INVALID_INPUT_VALUE,
+                    "선택한 첫차·막차 출발시각이 유효하지 않습니다. 경로를 다시 조회해주세요.");
+        }
+
+        TransitDto.RouteOptionResponse route = transitApiService.readSavedRoute(notification.getRouteDetails());
+        Integer duration = route.getTotalDurationMinutes();
+        if (duration == null || duration <= 0 || duration > 1440) {
+            throw new com.OnETA.common.exception.GlobalException(
+                    com.OnETA.common.error.ErrorCode.INVALID_INPUT_VALUE, "선택한 경로의 소요시간이 유효하지 않습니다.");
+        }
+        LocalDate serviceDate = departure.toLocalDate();
+        if (type == NotificationScheduleType.LAST_TRANSIT && time.isBefore(LocalTime.of(6, 0))) {
+            serviceDate = serviceDate.minusDays(1);
+        }
+        int offset = notification.getReminderOffsetMinutesList().stream()
+                .max(Integer::compareTo).orElse(notification.getReminderOffsetMinutes());
+        LocalDateTime scheduled = departure.minusMinutes(offset);
+        int evaluationLead = Math.max(15, Math.min(60, duration));
+        ScheduleSnapshot snapshot = new ScheduleSnapshot(notification, serviceDate, type,
+                hash(notification.getRouteDetails(), type), departure, scheduled,
+                scheduled.minusMinutes(evaluationLead), LocalDateTime.now(ZoneOffset.UTC), duration);
+        snapshot.useSelectedPreviewSource();
+        snapshotRepository.save(snapshot);
+    }
+
+    /** True while a selected/known LAST run from yesterday remains catchable after midnight. */
+    public boolean hasPendingPreviousLast(ArrivalNotification notification, LocalDateTime now) {
+        if (notification.getScheduleType() != NotificationScheduleType.LAST_TRANSIT) return false;
+        return snapshotRepository.findByNotificationIdAndServiceDateAndScheduleTypeAndRouteHash(
+                notification.getId(), now.toLocalDate().minusDays(1),
+                NotificationScheduleType.LAST_TRANSIT, hash(notification.getRouteDetails(), NotificationScheduleType.LAST_TRANSIT))
+                .map(snapshot -> snapshot.getEffectiveDepartureAt().isAfter(now))
+                .orElse(false);
+    }
+
     /** Read-only display estimate: never runs realtime polling, recovery, or delivery creation. */
     public LocalDateTime estimateDeparture(ArrivalNotification notification, LocalDateTime now, ZoneId zone) {
         String routeHash = hash(notification.getRouteDetails(), notification.getScheduleType());
@@ -652,6 +708,13 @@ public class TransitScheduleService {
                 .findFirstByNotificationIdAndScheduleTypeAndRouteHashOrderByServiceDateDesc(
                         notification.getId(), type, routeHash);
         LocalDate today = now.toLocalDate();
+        if (type == NotificationScheduleType.LAST_TRANSIT) {
+            var previous = snapshotRepository.findByNotificationIdAndServiceDateAndScheduleTypeAndRouteHash(
+                    notification.getId(), today.minusDays(1), type, routeHash);
+            if (previous.isPresent() && previous.get().getEffectiveDepartureAt().isAfter(now)) {
+                return previous.get().getEffectiveDepartureAt();
+            }
+        }
         if (saved.isEmpty() && type == NotificationScheduleType.LAST_TRANSIT) {
             saved = snapshotRepository.findFirstByNotificationIdAndScheduleTypeAndRouteHashOrderByServiceDateDesc(
                     notification.getId(), type, hash(notification.getRouteDetails()))
