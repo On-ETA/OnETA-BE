@@ -20,6 +20,7 @@ jobs:
           ./gradlew test \
             --tests 'com.OnETA.service.TransitScheduleServiceTest.selectedJustAfterMidnightRemainsOnPreviousOperatingDayEvenWithLaterSnapshot' \
             --tests 'com.OnETA.service.TransitScheduleServiceTest.selectedPastLastDepartureIsRejectedBeforeCreatingSnapshot' \
+            --tests 'com.OnETA.service.TransitScheduleServiceTest.pinnedLastKeepsLiveSeoulBusEvaluationWhenBindingIsAvailable' \
             --tests 'com.OnETA.scheduler.FirstLastNotificationSchedulerTest.midnightDoesNotEvaluateTonightWhileSelectedPreviousLastIsFuture' \
             --tests 'com.OnETA.service.NotificationServiceTest.transitCreatePinsSelectedSearchDeparture' \
             --tests 'com.OnETA.service.NotificationServiceTest.transitDtoPreservesSelectedSearchDepartureInConversion'
