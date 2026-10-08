@@ -46,8 +46,8 @@ class FcmPushServiceTest {
                     .isEqualTo(java.util.Map.of("type", type));
             var notification = (com.google.firebase.messaging.Notification)
                     ReflectionTestUtils.getField(message, "notification");
-            org.assertj.core.api.Assertions.assertThat(notification.getTitle()).isEqualTo("Reminder");
-            org.assertj.core.api.Assertions.assertThat(notification.getBody()).isEqualTo("Departure soon");
+            org.assertj.core.api.Assertions.assertThat(ReflectionTestUtils.getField(notification, "title")).isEqualTo("Reminder");
+            org.assertj.core.api.Assertions.assertThat(ReflectionTestUtils.getField(notification, "body")).isEqualTo("Departure soon");
         }
     }
 }
