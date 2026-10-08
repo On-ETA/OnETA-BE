@@ -128,6 +128,33 @@ class SeoulBusScheduleServiceTest {
         server.verify();
     }
     @Test
+    void acceptsStillActivePreviousOperatingDayAt0203() {
+        var midnight = new SeoulBusScheduleService(http, "key", "https://seoul.test",
+                Clock.fixed(DAY.atTime(2, 3).atZone(ZoneId.of("Asia/Seoul")).toInstant(),
+                        ZoneId.of("Asia/Seoul")));
+        mapping(false, "3");
+        times("20260917230000", "20260918033000");
+
+        var schedule = midnight.resolve(route(), DAY);
+
+        assertThat(schedule.first()).isEqualTo(DAY.minusDays(1).atTime(23, 0));
+        assertThat(schedule.last()).isEqualTo(DAY.atTime(3, 30));
+        server.verify();
+    }
+
+    @Test
+    void previousOperatingDayAlreadyEndedAt0203RemainsUnsupported() {
+        var midnight = new SeoulBusScheduleService(http, "key", "https://seoul.test",
+                Clock.fixed(DAY.atTime(2, 3).atZone(ZoneId.of("Asia/Seoul")).toInstant(),
+                        ZoneId.of("Asia/Seoul")));
+        mapping(false, "3");
+        times("20260917230000", "20260918013000");
+
+        assertUnsupported(() -> midnight.resolve(route(), DAY));
+        server.verify();
+    }
+
+    @Test
     void rejectsReverseDirectionInsteadOfUsingNearbyOppositeStop() {
         mapping(true, "3");
         assertUnsupported(() -> service.resolve(route(), DAY)); server.verify();

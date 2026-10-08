@@ -252,9 +252,23 @@ public class SeoulBusScheduleService {
         if (times.size() != 1) throw unsupported();
         LocalDateTime first = parseTime(text(times.get(0), "firstBusTm"), day);
         LocalDateTime last = parseTime(text(times.get(0), "lastBusTm"), day);
-        if (last.isBefore(first) && last.toLocalDate().equals(day)) last = last.plusDays(1);
-        if (!first.toLocalDate().equals(day) || !last.isAfter(first)
-                || last.isAfter(day.plusDays(1).atTime(12, 0))) throw unsupported();
+        if (last.isBefore(first) && last.toLocalDate().equals(first.toLocalDate())) {
+            last = last.plusDays(1);
+        }
+        // The Seoul API can return absolute dates for the previous operating day.
+        // At 02:00, an N bus that started at 23:00 yesterday is still today's
+        // catchable service. Accept that interval ONLY while it is actually active;
+        // never recycle stale yesterday schedules or tomorrow-night departures.
+        LocalDateTime now = LocalDateTime.now(clock);
+        boolean fromToday = first.toLocalDate().equals(day);
+        boolean activePreviousNight = day.equals(today())
+                && now.toLocalTime().isBefore(LocalTime.of(6, 0))
+                && first.toLocalDate().equals(day.minusDays(1))
+                && !now.isBefore(first) && now.isBefore(last);
+        if ((!fromToday && !activePreviousNight) || !last.isAfter(first)
+                || last.isAfter(first.toLocalDate().plusDays(1).atTime(12, 0))) {
+            throw unsupported();
+        }
         Schedule schedule = new Schedule(binding.stationId(), binding.arsId(), binding.routeId(), first, last,
                 binding.order(), binding.endStationId(), binding.endOrder());
         if (cache.size() >= 1000) cache.clear();
