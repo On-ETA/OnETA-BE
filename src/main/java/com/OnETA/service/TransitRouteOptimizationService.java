@@ -80,6 +80,7 @@ public class TransitRouteOptimizationService {
             try {
                 LocalDateTime departure = transitScheduleService.previewCurrentLastDeparture(route, now, cache);
                 if (departure != null && departure.isAfter(now)
+                        && isWithinCurrentLastInterval(departure, now)
                         && isWithinSearchWindow(departure, NotificationScheduleType.LAST_TRANSIT)) {
                     active.add(new Candidate(route, departure));
                 }
@@ -109,6 +110,22 @@ public class TransitRouteOptimizationService {
         if (failures.unavailable) throw new GlobalException(ErrorCode.TRANSIT_SCHEDULE_UNAVAILABLE);
         if (failures.unsupported) throw new GlobalException(ErrorCode.TRANSIT_SCHEDULE_UNSUPPORTED);
         throw new GlobalException(ErrorCode.TRANSIT_ROUTE_NOT_FOUND);
+    }
+
+    /**
+     * A LAST preview at 00:01 must not silently include tonight's 23:00;
+     * a preview at 23:59 must not include tomorrow night's 23:00.
+     */
+    private boolean isWithinCurrentLastInterval(LocalDateTime departure, LocalDateTime now) {
+        LocalTime localNow = now.toLocalTime();
+        if (localNow.isBefore(LocalTime.of(6, 0))) {
+            return !departure.isAfter(now.toLocalDate().atTime(6, 0));
+        }
+        if (!localNow.isBefore(LocalTime.of(21, 0))) {
+            return !departure.isAfter(now.toLocalDate().plusDays(1).atTime(6, 0));
+        }
+        // Daytime departures are evaluated against today's service date below.
+        return false;
     }
 
     private void recordFailure(FailureState failures, GlobalException e) {
