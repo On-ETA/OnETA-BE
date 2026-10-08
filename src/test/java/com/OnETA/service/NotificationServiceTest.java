@@ -32,8 +32,9 @@ class NotificationServiceTest {
     private final UserRepository users = mock(UserRepository.class);
     private final User user = mock(User.class);
     private final TransitApiService transit = mock(TransitApiService.class);
+    private final TransitScheduleService schedules = mock(TransitScheduleService.class);
     private final NotificationService service = new NotificationService(arrivals,
-            notifications, users, new RepeatDaysService(), transit, deliveries);
+            notifications, users, new RepeatDaysService(), transit, deliveries, schedules);
 
     @ParameterizedTest
     @EnumSource(value = NotificationScheduleType.class, names = {"FIRST_TRANSIT", "LAST_TRANSIT"})
