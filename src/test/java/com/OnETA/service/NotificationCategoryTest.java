@@ -22,7 +22,7 @@ class NotificationCategoryTest {
                 "test", List.of(10), 0, LocalTime.of(9, 0), "{}", type)).toList();
         when(arrivals.findAllByUserId(1L)).thenReturn(records);
         var service = new NotificationService(arrivals, mock(NotificationRepository.class), users,
-                new RepeatDaysService(), mock(TransitApiService.class), mock(NotificationDeliveryRepository.class));
+                new RepeatDaysService(), mock(TransitApiService.class), mock(NotificationDeliveryRepository.class), mock(TransitScheduleService.class));
         assertThat(service.getArrivalNotifications("me", NotificationCategory.SCHEDULE))
                 .extracting(NotificationDto.ArrivalResponse::getScheduleType).containsExactly(NotificationScheduleType.NORMAL);
         assertThat(service.getArrivalNotifications("me", NotificationCategory.TRANSIT))
@@ -48,10 +48,10 @@ class NotificationCategoryTest {
         }
         var missing = new TransitNotificationDto.CreateRequest();
         assertThatThrownBy(() -> controller.createTransit(() -> "me", missing)).isInstanceOf(GlobalException.class);
-        assertThatThrownBy(() -> controller.transit(null)).isInstanceOf(GlobalException.class);
-        controller.schedules(() -> "me"); controller.transit(() -> "me");
+        assertThatThrownBy(() -> controller.transit(null, NotificationScheduleType.LAST_TRANSIT)).isInstanceOf(GlobalException.class);
+        controller.schedules(() -> "me"); controller.transit(() -> "me", NotificationScheduleType.LAST_TRANSIT);
         verify(service).getArrivalNotifications("me", NotificationCategory.SCHEDULE);
-        verify(queries).getCurrentNotifications("me");
+        verify(queries).getCurrentNotifications("me", NotificationScheduleType.LAST_TRANSIT);
     }
 
     @Test void oldTransitClientCannotReintroduceRepeatDaysOrArrivalTime() {
