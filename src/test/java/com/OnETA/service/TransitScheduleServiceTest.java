@@ -26,6 +26,78 @@ import static org.springframework.test.web.client.response.MockRestResponseCreat
 
 class TransitScheduleServiceTest {
     @Test
+    void selectedJustAfterMidnightRemainsOnPreviousOperatingDayEvenWithLaterSnapshot() {
+        var service = service("0530", "2330");
+        var route = route(10, 20, "1");
+        when(serviceApi(service).readSavedRoute("route")).thenReturn(route);
+        var notification = notification(NotificationScheduleType.LAST_TRANSIT, 5);
+        var selected = DATE.plusDays(1).atTime(0, 10);
+        ReflectionTestUtils.setField(service, "clock", Clock.fixed(
+                DATE.atTime(23, 59).atZone(SEOUL).toInstant(), ZoneOffset.UTC));
+
+        service.pinSelectedDeparture(notification, selected.atZone(SEOUL).toOffsetDateTime(), SEOUL);
+
+        var saved = org.mockito.ArgumentCaptor.forClass(ScheduleSnapshot.class);
+        verify(snapshotRepo(service)).save(saved.capture());
+        assertThat(saved.getValue().getServiceDate()).isEqualTo(DATE);
+        assertThat(saved.getValue().getEffectiveDepartureAt()).isEqualTo(selected);
+        assertThat(saved.getValue().getSource()).isEqualTo("SELECTED_PREVIEW");
+
+        var later = new ScheduleSnapshot(notification, DATE.plusDays(1),
+                NotificationScheduleType.LAST_TRANSIT, "later", DATE.plusDays(1).atTime(23, 0),
+                DATE.plusDays(1).atTime(22, 55), DATE.plusDays(1).atTime(22, 0),
+                DATE.atTime(23, 59), 30);
+        when(snapshotRepo(service).findByNotificationIdAndServiceDateAndScheduleTypeAndRouteHash(
+                eq(1L), eq(DATE), eq(NotificationScheduleType.LAST_TRANSIT), anyString()))
+                .thenReturn(Optional.of(saved.getValue()));
+        when(snapshotRepo(service).findFirstByNotificationIdAndScheduleTypeAndRouteHashOrderByServiceDateDesc(
+                eq(1L), eq(NotificationScheduleType.LAST_TRANSIT), anyString()))
+                .thenReturn(Optional.of(later));
+
+        var now = DATE.plusDays(1).atTime(0, 1);
+        assertThat(service.hasPendingPreviousLast(notification, now)).isTrue();
+        assertThat(service.estimateDeparture(notification, now, SEOUL)).isEqualTo(selected);
+    }
+
+    @Test
+    void pinnedLastKeepsLiveSeoulBusEvaluationWhenBindingIsAvailable() {
+        var service = service("0530", "2330");
+        var seoul = mock(SeoulBusScheduleService.class);
+        ReflectionTestUtils.setField(service, "seoulBusScheduleService", seoul);
+        var route = SeoulBusScheduleServiceTest.route();
+        when(serviceApi(service).readSavedRoute("route")).thenReturn(route);
+        when(seoul.resolve(any(), eq(DATE))).thenReturn(new SeoulBusScheduleService.Schedule(
+                "1", "01001", "bus", DATE.atTime(4, 30), DATE.plusDays(1).atTime(0, 20)));
+        var notification = notification(NotificationScheduleType.LAST_TRANSIT, 5);
+        var selected = DATE.plusDays(1).atTime(0, 10);
+        var pinned = new ScheduleSnapshot(notification, DATE, NotificationScheduleType.LAST_TRANSIT,
+                "hash", selected, selected.minusMinutes(5), DATE.atTime(23, 30),
+                DATE.atTime(23, 0), 30);
+        pinned.useSelectedPreviewSource();
+        when(snapshotRepo(service).findForUpdate(any(), any(), any(), any())).thenReturn(Optional.of(pinned));
+
+        var decision = service.evaluate(notification, DATE, DATE.atTime(23, 50), SEOUL);
+
+        assertThat(pinned.getSource()).isEqualTo("SEOUL_BUS");
+        assertThat(decision.hardDeadlineAt()).isEqualTo(selected);
+        verify(snapshotRepo(service)).save(pinned);
+    }
+
+    @Test
+    void selectedPastLastDepartureIsRejectedBeforeCreatingSnapshot() {
+        var service = service("0530", "2330");
+        var notification = notification(NotificationScheduleType.LAST_TRANSIT, 5);
+        var now = DATE.plusDays(1).atTime(0, 11);
+        ReflectionTestUtils.setField(service, "clock", Clock.fixed(now.atZone(SEOUL).toInstant(), ZoneOffset.UTC));
+
+        assertThatThrownBy(() -> service.pinSelectedDeparture(notification,
+                DATE.plusDays(1).atTime(0, 10).atZone(SEOUL).toOffsetDateTime(), SEOUL))
+                .isInstanceOf(com.OnETA.common.exception.GlobalException.class)
+                .hasMessageContaining("경로를 다시 조회");
+        verify(snapshotRepo(service), never()).save(any());
+    }
+
+    @Test
     void displayEstimateWorksBeforePollingWindowWithoutSavingOrLookingUpRealtime() {
         var service = service("0530", "2330");
         var n = notification(NotificationScheduleType.FIRST_TRANSIT, 10);

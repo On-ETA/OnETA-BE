@@ -37,7 +37,7 @@ class NotificationSavedRouteValidationTest {
     private final TransitApiService transit = new TransitApiService(mock(PublicDataTransitService.class),
             new ObjectMapper(), mock(RestTemplate.class));
     private final NotificationService service = new NotificationService(arrivals,
-            mock(NotificationRepository.class), users, new RepeatDaysService(), transit, mock(NotificationDeliveryRepository.class));
+            mock(NotificationRepository.class), users, new RepeatDaysService(), transit, mock(NotificationDeliveryRepository.class), mock(TransitScheduleService.class));
 
     @BeforeEach
     void setup() {

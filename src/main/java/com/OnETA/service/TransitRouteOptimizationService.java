@@ -80,6 +80,7 @@ public class TransitRouteOptimizationService {
             try {
                 LocalDateTime departure = transitScheduleService.previewCurrentLastDeparture(route, now, cache);
                 if (departure != null && departure.isAfter(now)
+                        && isWithinCurrentLastInterval(departure, now)
                         && isWithinSearchWindow(departure, NotificationScheduleType.LAST_TRANSIT)) {
                     active.add(new Candidate(route, departure));
                 }
@@ -97,15 +98,34 @@ public class TransitRouteOptimizationService {
             throw new GlobalException(ErrorCode.TRANSIT_SCHEDULE_UNAVAILABLE);
         }
 
-        // Only when no current interval is catchable, show the next operating cycle.
-        for (var day : List.of(now.toLocalDate(), now.toLocalDate().plusDays(1))) {
+        // Do not show tomorrow's 23:xx as if it were today's still-catchable last.
+        // The existing frontend only prints HH:mm, so crossing service days here is unsafe.
+        // After midnight (00:00-06:00), ONLY still-catchable current intervals are eligible.
+        // Before midnight, an upcoming LAST from today's service day may still be shown.
+        if (!now.toLocalTime().isBefore(LocalTime.of(6, 0))) {
             var upcoming = evaluateCandidates(routes, NotificationScheduleType.LAST_TRANSIT,
-                    day, now, cache, failures, true);
+                    now.toLocalDate(), now, cache, failures, true);
             if (!upcoming.isEmpty()) return rank(upcoming, NotificationScheduleType.LAST_TRANSIT);
         }
         if (failures.unavailable) throw new GlobalException(ErrorCode.TRANSIT_SCHEDULE_UNAVAILABLE);
         if (failures.unsupported) throw new GlobalException(ErrorCode.TRANSIT_SCHEDULE_UNSUPPORTED);
         throw new GlobalException(ErrorCode.TRANSIT_ROUTE_NOT_FOUND);
+    }
+
+    /**
+     * A LAST preview at 00:01 must not silently include tonight's 23:00;
+     * a preview at 23:59 must not include tomorrow night's 23:00.
+     */
+    private boolean isWithinCurrentLastInterval(LocalDateTime departure, LocalDateTime now) {
+        LocalTime localNow = now.toLocalTime();
+        if (localNow.isBefore(LocalTime.of(6, 0))) {
+            return !departure.isAfter(now.toLocalDate().atTime(6, 0));
+        }
+        if (!localNow.isBefore(LocalTime.of(21, 0))) {
+            return !departure.isAfter(now.toLocalDate().plusDays(1).atTime(6, 0));
+        }
+        // Daytime departures are evaluated against today's service date below.
+        return false;
     }
 
     private void recordFailure(FailureState failures, GlobalException e) {
@@ -163,7 +183,11 @@ public class TransitRouteOptimizationService {
         return candidates.stream()
                 .sorted(order)
                 .map(candidate -> TransitDto.FirstLastRouteOptionResponse.builder()
-                        .route(candidate.route())
+                        // The current FE sends route.raw unchanged as routeDetails on save.
+                        // Embedding the exact selected departure in route therefore preserves
+                        // the search decision without changing the FE request at all.
+                        .route(candidate.route().toBuilder().selectedDepartureAt(
+                                candidate.departure().atZone(SEOUL).toOffsetDateTime()).build())
                         .scheduleType(scheduleType)
                         .estimatedDepartureAt(candidate.departure().atZone(SEOUL).toOffsetDateTime())
                         .status(FirstLastRouteStatus.AVAILABLE)

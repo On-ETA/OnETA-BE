@@ -25,7 +25,7 @@ class NotificationLimitTest {
     private final TransitApiService transit = mock(TransitApiService.class);
     private final NotificationRepository all = mock(NotificationRepository.class);
     private final NotificationService service = new NotificationService(arrivals,
-            all, users, new RepeatDaysService(), transit, mock(NotificationDeliveryRepository.class));
+            all, users, new RepeatDaysService(), transit, mock(NotificationDeliveryRepository.class), mock(TransitScheduleService.class));
     private final UserBusRepository buses = mock(UserBusRepository.class);
     private final DepotNotificationRepository depots = mock(DepotNotificationRepository.class);
     private final SeoulBusRouteRepository routes = mock(SeoulBusRouteRepository.class);

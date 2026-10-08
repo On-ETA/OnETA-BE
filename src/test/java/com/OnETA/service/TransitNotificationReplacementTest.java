@@ -22,7 +22,7 @@ class TransitNotificationReplacementTest {
     private final UserRepository users = mock(UserRepository.class);
     private final TransitApiService transit = mock(TransitApiService.class);
     private final User user = mock(User.class);
-    private final NotificationService service = new NotificationService(arrivals, all, users, new RepeatDaysService(), transit, deliveries);
+    private final NotificationService service = new NotificationService(arrivals, all, users, new RepeatDaysService(), transit, deliveries, mock(TransitScheduleService.class));
 
     @BeforeEach void setup() {
         when(user.getId()).thenReturn(1L);
@@ -87,14 +87,11 @@ class TransitNotificationReplacementTest {
         verify(arrivals, never()).save(any());
     }
 
-    @Test void singleDeleteHardDeletesCurrentAndIsIdempotent() {
+    @Test void singleDeleteHardDeletesSelectedCurrentNotification() {
         var old = notification(10L, NotificationScheduleType.LAST_TRANSIT, "saved");
-        when(arrivals.findAllForDuplicateCheckByUserId(1L))
-                .thenReturn(List.of(old))
-                .thenReturn(List.of());
+        when(arrivals.findById(10L)).thenReturn(Optional.of(old));
 
-        service.deleteCurrentTransitNotification("me");
-        service.deleteCurrentTransitNotification("me");
+        service.deleteTransitNotification("me", 10L);
 
         verify(deliveries, times(1)).expireReplacedTransitDeliveries(List.of(10L));
         verify(all, times(1)).deleteScheduleSnapshotsByIds(List.of(10L));

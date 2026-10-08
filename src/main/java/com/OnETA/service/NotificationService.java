@@ -26,6 +26,7 @@ public class NotificationService {
     private final RepeatDaysService repeatDaysService;
     private final TransitApiService transitApiService;
     private final com.OnETA.repository.NotificationDeliveryRepository deliveryRepository;
+    private final TransitScheduleService transitScheduleService;
 
     @Transactional
     public Long createArrivalNotification(String email, NotificationDto.CreateArrivalRequest request) {
@@ -58,7 +59,16 @@ public class NotificationService {
                 request.getScheduleType() == null ? NotificationScheduleType.NORMAL : request.getScheduleType()
         );
 
-        return arrivalNotificationRepository.save(notification).getId();
+        ArrivalNotification saved = arrivalNotificationRepository.save(notification);
+        if (transit) {
+            // Unmodified FE sends the selected RouteOptionResponse via routeDetails.
+            var chosen = transitApiService.readSavedRoute(request.getRouteDetails());
+            if (chosen.getSelectedDepartureAt() != null) {
+                transitScheduleService.pinSelectedDeparture(saved, chosen.getSelectedDepartureAt(),
+                        java.time.ZoneId.of("Asia/Seoul"));
+            }
+        }
+        return saved.getId();
     }
 
     public List<NotificationDto.ArrivalResponse> getArrivalNotifications(String email) {
@@ -133,10 +143,19 @@ public class NotificationService {
         notification.updateArrivalInfo(request.getTargetArrivalTime(), request.getRouteDetails());
         notification.updateScheduleType(request.getScheduleType());
 
-        // FIRST/LAST snapshots cache the scheduled reminder window. When reminder offsets
-        // change, drop the cached snapshot so the next query/scheduler run rebuilds it.
-        if (request.getReminderOffsetMinutes() != null && isTransit(effectiveType)) {
+        // Changing the route/type or offsets invalidates its previous timetable snapshot.
+        // When the user chose a specific search result, pin the new result atomically.
+        if (isTransit(effectiveType) && (request.getReminderOffsetMinutes() != null
+                || request.getRouteDetails() != null || request.getScheduleType() != null)) {
             notificationRepository.deleteScheduleSnapshotsByIds(List.of(notification.getId()));
+            // A route reset carries a new preview inside routeDetails without an FE change.
+            if (request.getRouteDetails() != null) {
+                var chosen = transitApiService.readSavedRoute(request.getRouteDetails());
+                if (chosen.getSelectedDepartureAt() != null) {
+                    transitScheduleService.pinSelectedDeparture(notification, chosen.getSelectedDepartureAt(),
+                            java.time.ZoneId.of("Asia/Seoul"));
+                }
+            }
         }
     }
 

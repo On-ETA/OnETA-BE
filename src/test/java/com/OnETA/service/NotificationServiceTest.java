@@ -32,8 +32,9 @@ class NotificationServiceTest {
     private final UserRepository users = mock(UserRepository.class);
     private final User user = mock(User.class);
     private final TransitApiService transit = mock(TransitApiService.class);
+    private final TransitScheduleService schedules = mock(TransitScheduleService.class);
     private final NotificationService service = new NotificationService(arrivals,
-            notifications, users, new RepeatDaysService(), transit, deliveries);
+            notifications, users, new RepeatDaysService(), transit, deliveries, schedules);
 
     @ParameterizedTest
     @EnumSource(value = NotificationScheduleType.class, names = {"FIRST_TRANSIT", "LAST_TRANSIT"})
@@ -90,6 +91,54 @@ class NotificationServiceTest {
                 .isInstanceOfSatisfying(GlobalException.class, e -> assertThat(e.getErrorCode())
                         .isEqualTo(com.OnETA.common.error.ErrorCode.TRANSIT_NIGHT_ONLY_ROUTE));
         verify(arrivals, never()).save(any());
+    }
+
+    @Test
+    void transitCreatePinsDepartureCarriedInExistingRouteDetails() {
+        when(users.findByEmail("test@example.com")).thenReturn(Optional.of(user));
+        when(arrivals.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        var selected = java.time.OffsetDateTime.parse("2026-10-09T00:10:00+09:00");
+        var route = com.OnETA.dto.TransitDto.RouteOptionResponse.builder()
+                .routeId("KAKAO_overnight").provider("KAKAO").selectedDepartureAt(selected)
+                .totalDurationMinutes(32)
+                .segments(List.of(com.OnETA.dto.TransitDto.RouteSegment.builder()
+                        .transitType("SUBWAY").transitName("2호선").durationMinutes(32).build()))
+                .build();
+        when(transit.readSavedRoute("{}")).thenReturn(route);
+
+        service.createArrivalNotification("test@example.com", request(NotificationScheduleType.LAST_TRANSIT));
+
+        verify(schedules).pinSelectedDeparture(any(ArrivalNotification.class), eq(selected),
+                eq(java.time.ZoneId.of("Asia/Seoul")));
+    }
+
+    @Test
+    void routeResetPinsTheNewDepartureWithoutAnyFrontendRequestField() {
+        when(user.getId()).thenReturn(1L);
+        when(users.findByEmail("test@example.com")).thenReturn(Optional.of(user));
+        var notification = new ArrivalNotification(user, "막차 알림", List.of(10), 0,
+                null, "old", NotificationScheduleType.LAST_TRANSIT);
+        org.springframework.test.util.ReflectionTestUtils.setField(notification, "id", 17L);
+        when(arrivals.findById(17L)).thenReturn(Optional.of(notification));
+        var selected = java.time.OffsetDateTime.parse("2026-10-09T00:10:00+09:00");
+        var route = com.OnETA.dto.TransitDto.RouteOptionResponse.builder()
+                .routeId("KAKAO_overnight").provider("KAKAO").selectedDepartureAt(selected)
+                .totalDurationMinutes(32)
+                .segments(List.of(com.OnETA.dto.TransitDto.RouteSegment.builder()
+                        .transitType("SUBWAY").transitName("2호선").durationMinutes(32).build()))
+                .build();
+        when(transit.readSavedRoute("new")).thenReturn(route);
+        when(transit.readSavedRoute("old")).thenReturn(com.OnETA.dto.TransitDto.RouteOptionResponse.builder()
+                .routeId("old").totalDurationMinutes(32)
+                .segments(List.of(com.OnETA.dto.TransitDto.RouteSegment.builder()
+                        .transitType("SUBWAY").transitName("2호선").durationMinutes(32).build())).build());
+        var patch = new NotificationDto.UpdateArrivalRequest();
+        patch.setRouteDetails("new");
+
+        service.updateArrivalNotification("test@example.com", 17L, patch);
+
+        verify(schedules).pinSelectedDeparture(eq(notification), eq(selected),
+                eq(java.time.ZoneId.of("Asia/Seoul")));
     }
 
     @Test

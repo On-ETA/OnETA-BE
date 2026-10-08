@@ -21,7 +21,7 @@ class NotificationDuplicateTest {
     private final TransitApiService transit = mock(TransitApiService.class);
     private final User user = mock(User.class);
     private final NotificationService service = new NotificationService(arrivals,
-            mock(NotificationRepository.class), users, new RepeatDaysService(), transit, mock(NotificationDeliveryRepository.class));
+            mock(NotificationRepository.class), users, new RepeatDaysService(), transit, mock(NotificationDeliveryRepository.class), mock(TransitScheduleService.class));
 
     @BeforeEach
     void setup() {
