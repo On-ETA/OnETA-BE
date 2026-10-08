@@ -389,6 +389,77 @@ class TransitRouteOptimizationServiceTest {
                 .extracting(r -> r.getRoute().getRouteId()).containsExactly("R1", "R0");
     }
 
+    @Test
+    void midnightUnverifiedDirectNightRouteIsShownAsNightOnlyInsteadOfT005() {
+        var api = mock(TransitApiService.class);
+        var schedules = mock(TransitScheduleService.class);
+        var service = new TransitRouteOptimizationService(api, schedules);
+        var now = LocalDateTime.of(2026, 10, 9, 2, 3);
+        setClock(service, now);
+        var night = nightRoute("N62_ONLY", "N62", 35);
+        when(api.searchScheduleCandidates(anyString(), anyDouble(), anyDouble(), any(),
+                anyDouble(), anyDouble(), any(), eq(Integer.MAX_VALUE))).thenReturn(List.of(night));
+        when(schedules.previewCurrentLastDeparture(eq(night), eq(now), anyMap()))
+                .thenThrow(new GlobalException(ErrorCode.TRANSIT_SCHEDULE_UNSUPPORTED));
+
+        var result = service.search("user@test.com", 126.8, 37.5, null,
+                127.0, 37.6, null, NotificationScheduleType.LAST_TRANSIT);
+
+        assertThat(result).hasSize(1);
+        assertThat(result.get(0).getRoute().getRouteId()).isEqualTo("N62_ONLY");
+        assertThat(result.get(0).getStatus()).isEqualTo(FirstLastRouteStatus.NIGHT_ONLY);
+        assertThat(result.get(0).getEstimatedDepartureAt()).isNull();
+        verify(schedules, never()).previewDepartureForServiceDate(any(), any(), any(), anyMap());
+    }
+
+    @Test
+    void midnightKnownEndedNightRouteIsNotMisrepresentedAsAvailable() {
+        var api = mock(TransitApiService.class);
+        var schedules = mock(TransitScheduleService.class);
+        var service = new TransitRouteOptimizationService(api, schedules);
+        var now = LocalDateTime.of(2026, 10, 9, 2, 3);
+        setClock(service, now);
+        var night = nightRoute("ENDED_N62", "N62", 35);
+        when(api.searchScheduleCandidates(anyString(), anyDouble(), anyDouble(), any(),
+                anyDouble(), anyDouble(), any(), eq(Integer.MAX_VALUE))).thenReturn(List.of(night));
+        // null means the interval is known not to contain a catchable last departure.
+        when(schedules.previewCurrentLastDeparture(eq(night), eq(now), anyMap()))
+                .thenReturn(null);
+
+        assertThatThrownBy(() -> service.search("user@test.com", 126.8, 37.5, null,
+                127.0, 37.6, null, NotificationScheduleType.LAST_TRANSIT))
+                .isInstanceOfSatisfying(GlobalException.class,
+                        e -> assertThat(e.getErrorCode()).isEqualTo(ErrorCode.TRANSIT_ROUTE_NOT_FOUND));
+    }
+
+    @Test
+    void midnightAvailableRouteRanksBeforeUnverifiedNightOnlyRoute() {
+        var api = mock(TransitApiService.class);
+        var schedules = mock(TransitScheduleService.class);
+        var service = new TransitRouteOptimizationService(api, schedules);
+        var now = LocalDateTime.of(2026, 10, 9, 2, 3);
+        setClock(service, now);
+        var available = route("AVAILABLE", "KAKAO", 25);
+        var night = nightRoute("N62_ONLY", "N62", 35);
+        when(api.searchScheduleCandidates(anyString(), anyDouble(), anyDouble(), any(),
+                anyDouble(), anyDouble(), any(), eq(Integer.MAX_VALUE)))
+                .thenReturn(List.of(night, available));
+        when(schedules.previewCurrentLastDeparture(eq(night), eq(now), anyMap()))
+                .thenThrow(new GlobalException(ErrorCode.TRANSIT_SCHEDULE_UNSUPPORTED));
+        when(schedules.previewCurrentLastDeparture(eq(available), eq(now), anyMap()))
+                .thenReturn(now.plusMinutes(20));
+
+        var result = service.search("user@test.com", 126.8, 37.5, null,
+                127.0, 37.6, null, NotificationScheduleType.LAST_TRANSIT);
+
+        assertThat(result).extracting(r -> r.getRoute().getRouteId())
+                .containsExactly("AVAILABLE", "N62_ONLY");
+        assertThat(result).extracting(TransitDto.FirstLastRouteOptionResponse::getStatus)
+                .containsExactly(FirstLastRouteStatus.AVAILABLE, FirstLastRouteStatus.NIGHT_ONLY);
+        assertThat(result.get(0).getEstimatedDepartureAt()).isNotNull();
+        assertThat(result.get(1).getEstimatedDepartureAt()).isNull();
+    }
+
     private void setClock(TransitRouteOptimizationService service, LocalDateTime now) {
         var zone = java.time.ZoneId.of("Asia/Seoul");
         org.springframework.test.util.ReflectionTestUtils.setField(service, "clock",
