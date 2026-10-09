@@ -212,6 +212,10 @@ class SeoulBusScheduleServiceTest {
                 .andRespond(withSuccess(xml("<itemList><busRouteId>100100062</busRouteId>"
                         + "<busRouteNm>N62</busRouteNm><busRouteType>3</busRouteType></itemList>"),
                         MediaType.APPLICATION_XML));
+        server.expect(queryParam("strSrch", "N"))
+                .andRespond(withSuccess(xml("<itemList><busRouteId>100100061</busRouteId>"
+                        + "<busRouteNm>N61</busRouteNm><busRouteType>3</busRouteType></itemList>"),
+                        MediaType.APPLICATION_XML));
 
         List<?> first = ReflectionTestUtils.invokeMethod(client, "routeCandidates", "N");
         List<?> cached = ReflectionTestUtils.invokeMethod(client, "routeCandidates", "N");
@@ -220,11 +224,6 @@ class SeoulBusScheduleServiceTest {
         verify(db, org.mockito.Mockito.times(1)).findByRouteNmContaining("N");
 
         clock.advance(Duration.ofMinutes(15).plusMillis(1));
-        server.expect(queryParam("strSrch", "N"))
-                .andRespond(withSuccess(xml("<itemList><busRouteId>100100061</busRouteId>"
-                        + "<busRouteNm>N61</busRouteNm><busRouteType>3</busRouteType></itemList>"),
-                        MediaType.APPLICATION_XML));
-
         List<?> refreshed = ReflectionTestUtils.invokeMethod(client, "routeCandidates", "N");
         assertThat(refreshed).hasSize(2);
         assertThat(refreshed.toString()).contains("N51", "N61").doesNotContain("N62");
@@ -244,6 +243,13 @@ class SeoulBusScheduleServiceTest {
 
         server.expect(queryParam("strSrch", "N"))
                 .andRespond(withStatus(HttpStatus.SERVICE_UNAVAILABLE));
+        server.expect(queryParam("busRouteId", "100100051"))
+                .andRespond(withSuccess(xml(""), MediaType.APPLICATION_XML));
+        server.expect(queryParam("strSrch", "N"))
+                .andRespond(withSuccess(xml("<itemList><busRouteId>100100062</busRouteId>"
+                        + "<busRouteNm>N62</busRouteNm><busRouteType>3</busRouteType></itemList>"),
+                        MediaType.APPLICATION_XML));
+
         List<?> fallback = ReflectionTestUtils.invokeMethod(client, "routeCandidates", "N");
         assertThat(fallback).hasSize(1);
         assertThat(fallback.toString()).contains("N51");
@@ -256,17 +262,11 @@ class SeoulBusScheduleServiceTest {
         assertThat(repeatedFallback).hasSize(1);
 
         // A failed discovery must not put the separate arrival endpoint into backoff.
-        server.expect(queryParam("busRouteId", "100100051"))
-                .andRespond(withSuccess(xml(""), MediaType.APPLICATION_XML));
         var schedule = new SeoulBusScheduleService.Schedule("100000001", "01001", "100100051",
                 DAY.atTime(0, 0), DAY.atTime(23, 59), 1, "100000002", 2);
         assertThat(client.arrivals(schedule, DAY.atTime(12, 0))).isEmpty();
 
         clock.advance(Duration.ofSeconds(61));
-        server.expect(queryParam("strSrch", "N"))
-                .andRespond(withSuccess(xml("<itemList><busRouteId>100100062</busRouteId>"
-                        + "<busRouteNm>N62</busRouteNm><busRouteType>3</busRouteType></itemList>"),
-                        MediaType.APPLICATION_XML));
         List<?> recovered = ReflectionTestUtils.invokeMethod(client, "routeCandidates", "N");
         assertThat(recovered).hasSize(2);
         assertThat(recovered.toString()).contains("N51", "N62");
