@@ -542,6 +542,11 @@ public class TransitScheduleService {
                 }
             }
             if (!window.last().isAfter(window.first())) throw connectionUnverified();
+            if (log.isDebugEnabled()) {
+                log.debug("LAST operating window: routeId={}, provider={}, leg={}, line={}, from={}, to={}, first={}, last={}",
+                        route.getRouteId(), route.getProvider(), windows.size(), segment.getTransitName(),
+                        segment.getStartStation(), segment.getEndStation(), window.first(), window.last());
+            }
             windows.add(window);
         }
         if (windows.isEmpty()) throw connectionUnverified();
@@ -552,6 +557,10 @@ public class TransitScheduleService {
         var plan = windows.size() == 1
                 ? TransitScheduleCalculator.calculate(route.getSegments(), lastTimes, NotificationScheduleType.LAST_TRANSIT)
                 : TransitScheduleCalculator.conservative(route.getSegments(), lastTimes, NotificationScheduleType.LAST_TRANSIT);
+        if (log.isDebugEnabled()) {
+            log.debug("LAST route departure: routeId={}, provider={}, calculated={}, referenceNow={}, numberOfRides={}",
+                    route.getRouteId(), route.getProvider(), plan.departure(), now, windows.size());
+        }
         if (!plan.departure().isAfter(now)) return null;
         int prefix = 0, ride = 0;
         for (var segment : route.getSegments()) {
@@ -906,11 +915,7 @@ public class TransitScheduleService {
     }
 
     private String odsayDay(LocalDate serviceDate) {
-        return switch (serviceDate.getDayOfWeek()) {
-            case SATURDAY -> "2";
-            case SUNDAY -> "3";
-            default -> "1";
-        };
+        return KoreanSubwayServiceDay.odsayDay(serviceDate);
     }
 
     private LocalDateTime serviceTime(TransitDto.RouteSegment s, NotificationScheduleType type, LocalDate serviceDate,

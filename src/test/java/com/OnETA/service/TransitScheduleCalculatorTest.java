@@ -20,6 +20,22 @@ class TransitScheduleCalculatorTest {
         return new SeoulBusScheduleService.LiveBus(now.plusMinutes(board),
                 end == null ? null : now.plusMinutes(end), last, "vehicle");
     }
+    @Test
+    void railTransferDepartureIsDeterminedByBothLastTrainBoundariesNotTheFinalWalk() {
+        var day = LocalDateTime.of(2026, 10, 9, 23, 0);
+        var transfer = List.of(
+                segment("WALK", 9), segment("SUBWAY", 2), segment("WALK", 2),
+                segment("SUBWAY", 9), segment("WALK", 13));
+        // Example timetable boundaries; not a claim about live subway API values.
+        var bound = List.of(day.withMinute(50), day.withMinute(53));
+        var estimated = TransitScheduleCalculator.conservative(
+                transfer, bound, NotificationScheduleType.LAST_TRANSIT);
+
+        assertThat(estimated.departure()).isEqualTo(day.withMinute(22));
+        // Even after removing the last bus, the second subway still constrains the route.
+        assertThat(estimated.departure()).isBefore(day.withMinute(24));
+    }
+
     @Test void choosesSecondBusWhenFirstConnectionIsMissed() {
         var plan = TransitScheduleCalculator.live(route(), List.of(List.of(bus(10, 20, false)),
                 List.of(bus(22, 32, false), bus(25, 35, false))), NotificationScheduleType.FIRST_TRANSIT, now);
