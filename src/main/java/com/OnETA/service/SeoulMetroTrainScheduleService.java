@@ -96,7 +96,7 @@ public class SeoulMetroTrainScheduleService {
         }
         if (key.isBlank()) throw unavailable();
 
-        String weekday = isWeekend(serviceDate) ? "주말" : "평일";
+        String weekday = KoreanSubwayServiceDay.seoulMetroDay(serviceDate);
         String lineName = normalizeLine(segment.getTransitName());
         List<String> directions = directions(lineName);
         List<Trip> validTrips = new ArrayList<>();
@@ -243,10 +243,6 @@ public class SeoulMetroTrainScheduleService {
                 .replace("지하철", "");
     }
 
-    private boolean isWeekend(LocalDate date) {
-        return date.getDayOfWeek() == java.time.DayOfWeek.SATURDAY
-                || date.getDayOfWeek() == java.time.DayOfWeek.SUNDAY;
-    }
 
     private void validate(TransitDto.RouteSegment segment, LocalDate serviceDate) {
         if (segment == null || serviceDate == null
