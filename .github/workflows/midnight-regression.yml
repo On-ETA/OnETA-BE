@@ -19,6 +19,7 @@ jobs:
         run: |
           ./gradlew test \
             --tests 'com.OnETA.service.KoreanSubwayServiceDayTest' \
+            --tests 'com.OnETA.service.TransitScheduleCalculatorTest' \
             --tests 'com.OnETA.service.TagoSubwayScheduleServiceTest' \
             --tests 'com.OnETA.service.SeoulMetroTrainScheduleServiceTest' \
             --tests 'com.OnETA.service.TransitScheduleServiceTest.hangulDayOdsayScheduleRequestUsesHolidayDayAndCorrectAccessWalk' \
