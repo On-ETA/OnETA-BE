@@ -497,6 +497,16 @@ public class TransitScheduleService {
         // Use the last *connected* train pair, not independent last trains whose
         // upstream/downstream departures may not form a reachable transfer.
         if (!now.toLocalTime().isBefore(LocalTime.of(6, 0))
+                && route.getSegments().stream().filter(segment ->
+                    segment != null && "SUBWAY".equals(segment.getTransitType())).count() >= 2
+                && !OdsayConnectedLastSubway.supports(route)) {
+            log.info("Connected subway LAST not eligible: routeId={}, provider={}, "
+                            + "subwaySegments={}, missingIdsOrUnsupportedRoute=true",
+                    route.getRouteId(), route.getProvider(),
+                    route.getSegments().stream().filter(segment ->
+                            segment != null && "SUBWAY".equals(segment.getTransitType())).count());
+        }
+        if (!now.toLocalTime().isBefore(LocalTime.of(6, 0))
                 && OdsayConnectedLastSubway.supports(route)) {
             var connected = resolveConnectedLastSubway(route, now.toLocalDate());
             if (connected.isPresent()) {
@@ -572,6 +582,16 @@ public class TransitScheduleService {
         // we reach them, but every projected boarding must fit its operating interval.
         if (!windows.get(0).contains(now)) return null;
         List<LocalDateTime> lastTimes = windows.stream().map(TransitOperatingWindow::last).toList();
+        if (windows.size() > 1 && route.getSegments().stream().anyMatch(segment ->
+                segment != null && "SUBWAY".equals(segment.getTransitType()))) {
+            log.info("LAST transfer conservative fallback: routeId={}, provider={}, "
+                            + "subwayLines={}, lastBoundaries={}",
+                    route.getRouteId(), route.getProvider(),
+                    route.getSegments().stream().filter(segment ->
+                            segment != null && "SUBWAY".equals(segment.getTransitType()))
+                            .map(TransitDto.RouteSegment::getTransitName).toList(),
+                    lastTimes);
+        }
         var plan = windows.size() == 1
                 ? TransitScheduleCalculator.calculate(route.getSegments(), lastTimes, NotificationScheduleType.LAST_TRANSIT)
                 : TransitScheduleCalculator.conservative(route.getSegments(), lastTimes, NotificationScheduleType.LAST_TRANSIT);
@@ -601,19 +621,32 @@ public class TransitScheduleService {
 
     private Optional<LocalDateTime> resolveConnectedLastSubway(
             TransitDto.RouteOptionResponse route, LocalDate day) {
+        var mid = OdsayConnectedLastSubway.transferId(route);
         try {
-            JsonNode timetable = request("/subwayPathSchedule", Map.of(
-                    "SID", OdsayConnectedLastSubway.originId(route),
-                    "EID", OdsayConnectedLastSubway.destinationId(route),
-                    "MODE", "4", "DAY", odsayDay(day)));
+            Map<String, String> params = new LinkedHashMap<>();
+            params.put("SID", OdsayConnectedLastSubway.originId(route));
+            params.put("EID", OdsayConnectedLastSubway.destinationId(route));
+            params.put("MODE", "4");
+            params.put("DAY", odsayDay(day));
+            mid.ifPresent(value -> params.put("MID", value));
+            JsonNode timetable = request("/subwayPathSchedule", params);
             ensureNoOdsayError(timetable);
             var departure = OdsayConnectedLastSubway.find(route, timetable, day);
-            log.info("Connected subway LAST: routeId={}, date={}, matched={}, selected={}",
-                    route.getRouteId(), day, departure.isPresent(), departure.orElse(null));
+            JsonNode paths = timetable.path("result").path("path");
+            log.info("Connected subway LAST: routeId={}, provider={}, date={}, midProvided={}, "
+                            + "pathCount={}, matched={}, rejection={}, selected={}",
+                    route.getRouteId(), route.getProvider(), day, mid.isPresent(),
+                    paths.isArray() ? paths.size() : 0, departure.isPresent(),
+                    departure.isPresent() ? "NONE" : OdsayConnectedLastSubway.mismatchReason(route, timetable),
+                    departure.orElse(null));
             return departure;
         } catch (RuntimeException e) {
-            log.warn("Connected subway LAST unavailable; retaining existing conservative estimate: routeId={}, errorType={}",
-                    route.getRouteId(), e.getClass().getSimpleName());
+            log.warn("Connected subway LAST unavailable; retaining existing conservative estimate: "
+                            + "routeId={}, provider={}, date={}, midProvided={}, errorType={}, errorCode={}",
+                    route.getRouteId(), route.getProvider(), day, mid.isPresent(),
+                    e.getClass().getSimpleName(),
+                    e instanceof com.OnETA.common.exception.GlobalException global
+                            ? global.getErrorCode().getCode() : "EXTERNAL_API_OR_RESPONSE");
             return Optional.empty();
         }
     }
