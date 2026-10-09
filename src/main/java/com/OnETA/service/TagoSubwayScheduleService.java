@@ -45,6 +45,12 @@ public class TagoSubwayScheduleService {
     }
 
     public SeoulBusScheduleService.Schedule resolve(TransitDto.RouteSegment segment, LocalDate day) {
+        return resolveWithDirectionInfo(segment, day).schedule();
+    }
+
+    record DirectionResult(SeoulBusScheduleService.Schedule schedule, boolean ambiguous) { }
+
+    DirectionResult resolveWithDirectionInfo(TransitDto.RouteSegment segment, LocalDate day) {
         log.info("TAGO resolve: line={}, start={}, end={}, serviceDate={}",
                 segment.getTransitName(), segment.getStartStation(), segment.getEndStation(), day);
         if (segment.getStations() == null || segment.getStations().size() < 2
@@ -58,6 +64,7 @@ public class TagoSubwayScheduleService {
         // Never mix weekday and public-holiday trains: they run on different timetables.
         List<String> days = List.of(KoreanSubwayServiceDay.tagoDay(day));
         LocalDateTime first = null, last = null;
+        boolean ambiguous = false;
         for (String dayType : days) {
             List<LocalDateTime> firsts = new ArrayList<>(), lasts = new ArrayList<>();
             Map<String, LocalDateTime> lastByDirection = new LinkedHashMap<>();
@@ -106,6 +113,7 @@ public class TagoSubwayScheduleService {
             var f = Collections.min(firsts);
             var l = Collections.min(lasts);
             if (lastByDirection.size() > 1) {
+                ambiguous = true;
                 log.info("TAGO subway ambiguous directions: line={}, start={}, end={}, day={}, "
                                 + "lastByDirection={}, selectedEarlierLast={}",
                         line, segment.getStartStation(), segment.getEndStation(), day,
@@ -119,7 +127,9 @@ public class TagoSubwayScheduleService {
                     line, segment.getStartStation(), segment.getEndStation(), start, next, end, day, days);
             throw unsupported();
         }
-        return new SeoulBusScheduleService.Schedule(start, "", "TAGO_SUBWAY:" + line, first, last, 0, end, 0);
+        return new DirectionResult(
+                new SeoulBusScheduleService.Schedule(start, "", "TAGO_SUBWAY:" + line, first, last, 0, end, 0),
+                ambiguous);
     }
 
     private boolean connects(List<JsonNode> rows, String terminal, LocalDateTime departure, LocalDate day, int maxMinutes) {
