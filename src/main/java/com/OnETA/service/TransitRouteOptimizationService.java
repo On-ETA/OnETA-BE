@@ -180,11 +180,25 @@ public class TransitRouteOptimizationService {
             try {
                 LocalDateTime departure = transitScheduleService.previewDepartureForServiceDate(
                         route, scheduleType, serviceDate, scheduleCache);
-                if (departure != null && isWithinSearchWindow(departure, scheduleType)
-                        && (!futureOnly || departure.isAfter(now))) {
+                boolean timeWindow = departure != null && isWithinSearchWindow(departure, scheduleType);
+                boolean inFuture = departure != null && (!futureOnly || departure.isAfter(now));
+                if (scheduleType == NotificationScheduleType.LAST_TRANSIT
+                        && TransitRouteClassifier.isNightOnlyRoute(route)) {
+                    log.info("NIGHT_LAST_FALLBACK routeId={}, serviceDate={}, now={}, departure={}, decision={}",
+                            route.getRouteId(), serviceDate, now, departure,
+                            departure == null ? "NULL_DEPARTURE"
+                                    : !timeWindow ? "OUTSIDE_LAST_SEARCH_WINDOW"
+                                    : !inFuture ? "DEPARTURE_PASSED" : "AVAILABLE");
+                }
+                if (timeWindow && inFuture) {
                     candidates.add(new Candidate(route, departure));
                 }
             } catch (GlobalException e) {
+                if (scheduleType == NotificationScheduleType.LAST_TRANSIT
+                        && TransitRouteClassifier.isNightOnlyRoute(route)) {
+                    log.info("NIGHT_LAST_FALLBACK routeId={}, serviceDate={}, decision=TIME_TABLE_ERROR, code={}",
+                            route.getRouteId(), serviceDate, e.getErrorCode().getCode());
+                }
                 if (e.getErrorCode() == ErrorCode.TRANSIT_SCHEDULE_UNAVAILABLE) {
                     failures.unavailable = true;
                 } else if (e.getErrorCode() == ErrorCode.TRANSIT_SCHEDULE_UNSUPPORTED
