@@ -12,6 +12,9 @@ import java.util.Objects;
 
 /** Connects known first/last departures; never invents an intermediate bus departure. */
 final class TransitScheduleCalculator {
+    private static final org.slf4j.Logger log =
+            org.slf4j.LoggerFactory.getLogger(TransitScheduleCalculator.class);
+
     private TransitScheduleCalculator() { }
 
     record Plan(LocalDateTime departure, int durationMinutes) { }
@@ -27,6 +30,12 @@ final class TransitScheduleCalculator {
             if (!"WALK".equals(segment.getTransitType())) {
                 if (ride >= boundaries.size()) throw unsupported();
                 LocalDateTime candidate = boundaries.get(ride).minusMinutes(prefix + 5L);
+                if (type == NotificationScheduleType.LAST_TRANSIT && log.isDebugEnabled()) {
+                    log.debug("LAST departure candidate: leg={}, line={}, boardingStop={}, lastBoundary={}, " +
+                                    "timeBeforeLegMinutes={}, safetyMinutes=5, candidate={}",
+                            ride, segment.getTransitName(), segment.getStartStation(),
+                            boundaries.get(ride), prefix, candidate);
+                }
                 if (departure == null || (type == NotificationScheduleType.LAST_TRANSIT && candidate.isBefore(departure)))
                     departure = candidate;
                 ride++;
@@ -36,6 +45,9 @@ final class TransitScheduleCalculator {
             prefix += segment.getDurationMinutes();
         }
         if (ride != boundaries.size() || departure == null) throw unsupported();
+        if (type == NotificationScheduleType.LAST_TRANSIT && log.isDebugEnabled()) {
+            log.debug("LAST conservative selected earliest departure={}", departure);
+        }
         return new Plan(departure, prefix + 5);
     }
 
