@@ -47,6 +47,45 @@ class TagoSubwayScheduleServiceTest {
         assertThat(service.resolve(segment, day)).isEqualTo(schedule);
         server.verify();
     }
+    @Test
+    void hangulDayUsesOnlyHolidayDailyTypeForTagoSubwayTimetables() {
+        var http = new RestTemplate();
+        var server = MockRestServiceServer.bindTo(http).build();
+        var timetableRequests = new java.util.concurrent.atomic.AtomicInteger();
+        server.expect(ExpectedCount.manyTimes(), request -> {
+            if (request.getURI().getPath().contains("GetSubwaySttnAcctoSchdulList")) {
+                String query = request.getURI().getRawQuery();
+                assertThat(query).contains("dailyTypeCode=03").doesNotContain("dailyTypeCode=01");
+                timetableRequests.incrementAndGet();
+            }
+        }).andRespond(request -> {
+            String decoded = java.net.URLDecoder.decode(request.getURI().getRawQuery(),
+                    java.nio.charset.StandardCharsets.UTF_8);
+            String items = "[]";
+            if (request.getURI().getPath().contains("Kwrd")) {
+                String name = decoded.contains("서울역") ? "서울역"
+                        : decoded.contains("회현") ? "회현" : "명동";
+                items = "[{\"subwayStationName\":\"" + name
+                        + "\",\"subwayRouteName\":\"4호선\",\"subwayStationId\":\"" + name + "\"}]";
+            }
+            int count = new ObjectMapper().readTree(items).size();
+            return withSuccess("{\"response\":{\"header\":{\"resultCode\":\"00\"},"
+                            + "\"body\":{\"totalCount\":" + count + ",\"items\":{\"item\":" + items + "}}}}",
+                    MediaType.APPLICATION_JSON).createResponse(request);
+        });
+        var service = new TagoSubwayScheduleService(
+                new ObjectMapper(), "key", "https://test", http);
+        var segment = TransitDto.RouteSegment.builder().transitType("SUBWAY").transitName("4호선")
+                .startStation("서울역").endStation("명동").durationMinutes(5)
+                .startX(126.97).startY(37.55).endX(126.98).endY(37.56)
+                .stations(List.of(station("서울역"), station("회현"), station("명동"))).build();
+
+        assertThatThrownBy(() -> service.resolve(segment, LocalDate.of(2026, 10, 9)))
+                .isInstanceOf(com.OnETA.common.exception.GlobalException.class);
+        assertThat(timetableRequests.get()).isGreaterThan(0);
+        server.verify();
+    }
+
     @Test void rejectsInvalidTimeAndPreservesMidnightRollover() {
         assertThat(TagoSubwayScheduleService.time("0", day)).isNull();
         assertThat(TagoSubwayScheduleService.time("296199", day)).isNull();
