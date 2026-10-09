@@ -217,7 +217,7 @@ class SeoulBusScheduleServiceTest {
         List<?> cached = ReflectionTestUtils.invokeMethod(client, "routeCandidates", "N");
         assertThat(first).hasSize(2);
         assertThat(cached).isSameAs(first);
-        verify(db, times(1)).findByRouteNmContaining("N");
+        verify(db, org.mockito.Mockito.times(1)).findByRouteNmContaining("N");
 
         clock.advance(Duration.ofMinutes(15).plusMillis(1));
         server.expect(queryParam("strSrch", "N"))
@@ -228,7 +228,7 @@ class SeoulBusScheduleServiceTest {
         List<?> refreshed = ReflectionTestUtils.invokeMethod(client, "routeCandidates", "N");
         assertThat(refreshed).hasSize(2);
         assertThat(refreshed.toString()).contains("N51", "N61").doesNotContain("N62");
-        verify(db, times(2)).findByRouteNmContaining("N");
+        verify(db, org.mockito.Mockito.times(2)).findByRouteNmContaining("N");
         server.verify();
     }
 
