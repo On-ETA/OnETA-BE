@@ -82,17 +82,35 @@ public class TransitRouteOptimizationService {
         for (var route : routes) {
             try {
                 LocalDateTime departure = transitScheduleService.previewCurrentLastDeparture(route, now, cache);
-                if (departure != null && departure.isAfter(now)
-                        && isWithinCurrentLastInterval(departure, now)
-                        && isWithinSearchWindow(departure, NotificationScheduleType.LAST_TRANSIT)) {
+                boolean future = departure != null && departure.isAfter(now);
+                boolean currentInterval = future && isWithinCurrentLastInterval(departure, now);
+                boolean searchWindow = future && isWithinSearchWindow(
+                        departure, NotificationScheduleType.LAST_TRANSIT);
+                if (TransitRouteClassifier.isNightOnlyRoute(route)) {
+                    log.info("NIGHT_LAST_PREVIEW routeId={}, now={}, departure={}, decision={}",
+                            route.getRouteId(), now, departure,
+                            departure == null ? "NO_CATCHABLE_DEPARTURE"
+                                    : !future ? "DEPARTURE_PASSED"
+                                    : !currentInterval ? "OUTSIDE_CURRENT_INTERVAL"
+                                    : !searchWindow ? "OUTSIDE_LAST_SEARCH_WINDOW" : "AVAILABLE");
+                }
+                if (future && currentInterval && searchWindow) {
                     active.add(new Candidate(route, departure));
                 }
             } catch (GlobalException e) {
                 recordFailure(failures, e);
-                if (TransitRouteClassifier.isNightOnlyRoute(route)) unverifiedNightRoutes.add(route);
+                if (TransitRouteClassifier.isNightOnlyRoute(route)) {
+                    unverifiedNightRoutes.add(route);
+                    log.info("NIGHT_LAST_PREVIEW routeId={}, now={}, decision=TIME_TABLE_ERROR, code={}",
+                            route.getRouteId(), now, e.getErrorCode().getCode());
+                }
             } catch (RuntimeException e) {
                 failures.unavailable = true;
-                if (TransitRouteClassifier.isNightOnlyRoute(route)) unverifiedNightRoutes.add(route);
+                if (TransitRouteClassifier.isNightOnlyRoute(route)) {
+                    unverifiedNightRoutes.add(route);
+                    log.info("NIGHT_LAST_PREVIEW routeId={}, now={}, decision=RUNTIME_ERROR, exception={}",
+                            route.getRouteId(), now, e.getClass().getSimpleName());
+                }
                 log.warn("Current LAST window lookup failed: routeId={}, type={}",
                         route.getRouteId(), e.getClass().getSimpleName());
             }
