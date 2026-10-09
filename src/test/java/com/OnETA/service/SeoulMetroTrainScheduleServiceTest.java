@@ -46,6 +46,24 @@ class SeoulMetroTrainScheduleServiceTest {
     }
 
     @Test
+    void hangulDayRequestsHolidayMetroTimetableDespiteBeingFriday() {
+        RestTemplate http = new RestTemplate();
+        MockRestServiceServer server = MockRestServiceServer.bindTo(http).build();
+        var service = new SeoulMetroTrainScheduleService(
+                new ObjectMapper(), http, "key", "https://metro.test/getTrainSch");
+        for (int i = 0; i < 4; i++) {
+            server.expect(org.springframework.test.web.client.match.MockRestRequestMatchers
+                    .queryParam("wkndSe", "주말"))
+                    .andRespond(withSuccess(response(""), MediaType.APPLICATION_JSON));
+        }
+
+        assertThat(org.assertj.core.api.Assertions.catchThrowable(() ->
+                service.resolve(segment(), LocalDate.of(2026, 10, 9))))
+                .isInstanceOf(com.OnETA.common.exception.GlobalException.class);
+        server.verify();
+    }
+
+    @Test
     void ignoresSameTrainMatchWhenDirectionWouldTakeFarLongerThanKakaoSegment() {
         RestTemplate http = new RestTemplate();
         MockRestServiceServer server = MockRestServiceServer.bindTo(http).build();
