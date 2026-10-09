@@ -164,6 +164,42 @@ class SeoulBusScheduleServiceTest {
     }
 
     @Test
+    void oneBrokenNightLineMustNotHideOtherValidDirectNightRoutes() {
+        String origin = "<itemList><stId>121000001</stId><arsId>17107</arsId>"
+                + "<stNm>홍대입구</stNm><tmX>126.92555</tmX>"
+                + "<tmY>37.55087</tmY></itemList>";
+        server.expect(queryParam("tmX", "126.92555"))
+                .andRespond(withSuccess(xml(origin), MediaType.APPLICATION_XML));
+        server.expect(queryParam("strSrch", "N"))
+                .andRespond(withSuccess(xml(
+                        "<itemList><busRouteId>100100051</busRouteId>"
+                                + "<busRouteNm>N51</busRouteNm><busRouteType>3</busRouteType></itemList>"
+                                + "<itemList><busRouteId>100100062</busRouteId>"
+                                + "<busRouteNm>N62</busRouteNm><busRouteType>3</busRouteType></itemList>"),
+                        MediaType.APPLICATION_XML));
+        // Previously, a single failed routeStops call aborted *all* N-line discovery.
+        server.expect(queryParam("busRouteId", "100100051"))
+                .andRespond(withStatus(HttpStatus.INTERNAL_SERVER_ERROR));
+        server.expect(queryParam("busRouteId", "100100062"))
+                .andRespond(withSuccess(xml(
+                        "<itemList><seq>1</seq><station>121000001</station>"
+                                + "<stationNm>홍대입구</stationNm><gpsX>126.92555</gpsX>"
+                                + "<gpsY>37.55087</gpsY><arsId>17107</arsId></itemList>"
+                                + "<itemList><seq>2</seq><station>121000002</station>"
+                                + "<stationNm>목적지정류장</stationNm><gpsX>126.93555</gpsX>"
+                                + "<gpsY>37.56087</gpsY><arsId>17108</arsId></itemList>"),
+                        MediaType.APPLICATION_XML));
+
+        var discovered = service.discoverDirectNightRoutes(126.92555, 37.55087,
+                126.93555, 37.56087);
+
+        assertThat(discovered).hasSize(1);
+        assertThat(discovered.get(0).getSegments().get(1).getTransitName()).isEqualTo("N62");
+        assertThat(discovered.get(0).getProvider()).isEqualTo("SEOUL_NIGHT");
+        server.verify();
+    }
+
+    @Test
     void discoveryKeepsOneBestStopPairForEachNightLine() {
         String origin = "<itemList><stId>121000001</stId><arsId>17107</arsId>"
                 + "<stNm>출발정류장</stNm><tmX>126.92555</tmX>"
