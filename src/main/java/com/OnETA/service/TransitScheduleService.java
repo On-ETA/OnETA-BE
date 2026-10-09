@@ -556,6 +556,7 @@ public class TransitScheduleService {
             }
         }
         boolean seoul = SeoulBusScheduleService.usesSeoulBusSchedules(route);
+        boolean nightOnly = TransitRouteClassifier.isNightOnlyRoute(route);
         boolean verifiedSubwayTransfer = seoul && pureSubwayTransfer(route);
         boolean singleBus = route.getSegments().stream()
                 .filter(segment -> segment != null && !"WALK".equals(segment.getTransitType())).count() == 1
@@ -578,6 +579,7 @@ public class TransitScheduleService {
                 window = new TransitOperatingWindow(binding.first(), binding.last());
                 if ("BUS".equals(segment.getTransitType())) {
                     window = window.at(now);
+                    if (nightOnly) window = window.alignUpcomingNightBus(now);
                 } else if (now.isBefore(window.first())) {
                     // Subway APIs accept a service date: use the actual preceding
                     // weekday timetable instead of shifting today's timetable.
@@ -604,6 +606,7 @@ public class TransitScheduleService {
                 window = new TransitOperatingWindow(first, last);
                 if ("BUS".equals(segment.getTransitType())) {
                     window = window.at(now);
+                    if (nightOnly) window = window.alignUpcomingNightBus(now);
                 } else if ("SUBWAY".equals(segment.getTransitType()) && now.isBefore(first)) {
                     var previousFirst = serviceTimeCached(segment, NotificationScheduleType.FIRST_TRANSIT,
                             date.minusDays(1), scheduleCache);
@@ -624,14 +627,15 @@ public class TransitScheduleService {
             windows.add(window);
         }
         if (windows.isEmpty()) throw connectionUnverified();
-        boolean nightOnly = TransitRouteClassifier.isNightOnlyRoute(route);
         if (nightOnly) {
             log.info("NIGHT_LAST_WINDOW routeId={}, now={}, intervals={}",
                     route.getRouteId(), now, windows);
         }
-        // The origin ride must be running now. Later rides may open by the time
-        // we reach them, but every projected boarding must fit its operating interval.
-        if (!windows.get(0).contains(now)) {
+        // The origin ride must be running now, except an N-only route whose first
+        // bus starts later in this same night. All projected boardings must still
+        // be within their respective real/recurring operating intervals.
+        if (!windows.get(0).contains(now)
+                && !(nightOnly && windows.get(0).catchableThisNight(now))) {
             if (nightOnly) {
                 log.info("NIGHT_LAST_NULL routeId={}, reason=FIRST_RIDE_NOT_ACTIVE, now={}, first={}, last={}",
                         route.getRouteId(), now, windows.get(0).first(), windows.get(0).last());

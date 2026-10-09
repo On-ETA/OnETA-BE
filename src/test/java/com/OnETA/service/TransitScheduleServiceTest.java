@@ -232,6 +232,66 @@ class TransitScheduleServiceTest {
         verifyNoInteractions(publicData(service));
     }
 
+
+    @Test
+    void nightBusEarlyMorningTimetableAt2351IsUpcomingNotAlreadyEnded() {
+        var service = service("0530", "2330");
+        var seoul = mock(SeoulBusScheduleService.class);
+        ReflectionTestUtils.setField(service, "seoulBusScheduleService", seoul);
+        var original = SeoulBusScheduleServiceTest.route();
+        var night = original.toBuilder().provider("SEOUL_NIGHT").routeId("SEOUL_NIGHT_N51")
+                .segments(List.of(original.getSegments().get(0),
+                        original.getSegments().get(1).toBuilder().transitName("N51").nightBus(true).build(),
+                        original.getSegments().get(2))).build();
+        // Exact shape captured from 2026-10-09 23:51 production logs:
+        // the Seoul stop API dates the next N51 service to today's 00:45–02:41.
+        when(seoul.resolve(any(), eq(DATE))).thenReturn(new SeoulBusScheduleService.Schedule(
+                "117000002", "17107", "113000413", DATE.atTime(0, 45, 29),
+                DATE.atTime(2, 41, 13)));
+
+        var departure = service.previewCurrentLastDeparture(night,
+                DATE.atTime(23, 51, 14), new java.util.HashMap<>());
+
+        assertThat(departure).isEqualTo(DATE.plusDays(1).atTime(2, 31, 13));
+        assertThat(departure).isAfter(DATE.atTime(23, 51, 14));
+    }
+
+    @Test
+    void nightBusAfterMidnightMayStartLaterThisMorningButNeverTomorrowNight() {
+        var service = service("0530", "2330");
+        var seoul = mock(SeoulBusScheduleService.class);
+        ReflectionTestUtils.setField(service, "seoulBusScheduleService", seoul);
+        var base = SeoulBusScheduleServiceTest.route();
+        var night = base.toBuilder().provider("SEOUL_NIGHT").routeId("SEOUL_NIGHT_N51")
+                .segments(List.of(base.getSegments().get(0),
+                        base.getSegments().get(1).toBuilder().transitName("N51").nightBus(true).build(),
+                        base.getSegments().get(2))).build();
+        when(seoul.resolve(any(), eq(DATE))).thenReturn(new SeoulBusScheduleService.Schedule(
+                "117000002", "17107", "113000413", DATE.atTime(0, 45, 29),
+                DATE.atTime(2, 41, 13)));
+
+        assertThat(service.previewCurrentLastDeparture(night,
+                DATE.atTime(0, 20), new java.util.HashMap<>()))
+                .isEqualTo(DATE.atTime(2, 31, 13));
+        assertThat(service.previewCurrentLastDeparture(night,
+                DATE.atTime(2, 45), new java.util.HashMap<>())).isNull();
+        assertThat(service.previewCurrentLastDeparture(night,
+                DATE.atTime(20, 59), new java.util.HashMap<>())).isNull();
+    }
+
+    @Test
+    void ordinaryBusEarlyMorningScheduleDoesNotRollForwardToTomorrow() {
+        var service = service("0530", "2330");
+        var seoul = mock(SeoulBusScheduleService.class);
+        ReflectionTestUtils.setField(service, "seoulBusScheduleService", seoul);
+        when(seoul.resolve(any(), eq(DATE))).thenReturn(new SeoulBusScheduleService.Schedule(
+                "117000002", "17107", "normal", DATE.atTime(0, 45, 29),
+                DATE.atTime(2, 41, 13)));
+
+        assertThat(service.previewCurrentLastDeparture(SeoulBusScheduleServiceTest.route(),
+                DATE.atTime(23, 51), new java.util.HashMap<>())).isNull();
+    }
+
     @Test
     void currentBusLastIsExcludedWhenAccessWalkWouldMissIt() {
         var service = service("0530", "2330");

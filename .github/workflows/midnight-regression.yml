@@ -34,6 +34,9 @@ jobs:
             --tests 'com.OnETA.service.TransitScheduleServiceTest.kakaoSubwayOnlyLastPrefersVerifiedMetroTrainTimesOverAmbiguousTago' \
             --tests 'com.OnETA.service.TransitScheduleServiceTest.selectedPastLastDepartureIsRejectedBeforeCreatingSnapshot' \
             --tests 'com.OnETA.service.TransitScheduleServiceTest.pinnedLastKeepsLiveSeoulBusEvaluationWhenBindingIsAvailable' \
+            --tests 'com.OnETA.service.TransitScheduleServiceTest.nightBusEarlyMorningTimetableAt2351IsUpcomingNotAlreadyEnded' \
+            --tests 'com.OnETA.service.TransitScheduleServiceTest.nightBusAfterMidnightMayStartLaterThisMorningButNeverTomorrowNight' \
+            --tests 'com.OnETA.service.TransitScheduleServiceTest.ordinaryBusEarlyMorningScheduleDoesNotRollForwardToTomorrow' \
             --tests 'com.OnETA.scheduler.FirstLastNotificationSchedulerTest.midnightDoesNotEvaluateTonightWhileSelectedPreviousLastIsFuture' \
             --tests 'com.OnETA.service.NotificationServiceTest.transitCreatePinsDepartureCarriedInExistingRouteDetails' \
             --tests 'com.OnETA.service.NotificationServiceTest.routeResetPinsTheNewDepartureWithoutAnyFrontendRequestField' \
