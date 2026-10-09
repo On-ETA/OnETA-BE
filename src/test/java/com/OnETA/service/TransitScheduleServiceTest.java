@@ -266,6 +266,46 @@ class TransitScheduleServiceTest {
                 LocalDate.of(2026, 8, 30))).isEqualTo("3");
         assertThat((String) ReflectionTestUtils.invokeMethod(service, "odsayDay",
                 LocalDate.of(2026, 8, 31))).isEqualTo("1");
+        assertThat((String) ReflectionTestUtils.invokeMethod(service, "odsayDay",
+                LocalDate.of(2026, 10, 9))).isEqualTo("3");
+    }
+
+    @Test
+    void hangulDayOdsayScheduleRequestUsesHolidayDayAndCorrectAccessWalk() {
+        var transit = mock(TransitApiService.class);
+        var publicData = mock(PublicDataTransitService.class);
+        var snapshots = mock(ScheduleSnapshotRepository.class);
+        var rest = new RestTemplate();
+        var server = MockRestServiceServer.bindTo(rest).build();
+        server.expect(requestTo(org.hamcrest.Matchers.containsString("subwayPathSchedule")))
+                .andExpect(queryParam("DAY", "3"))
+                .andExpect(queryParam("MODE", "4"))
+                .andExpect(queryParam("SID", "SANGSU"))
+                .andExpect(queryParam("EID", "HAPJEONG"))
+                .andRespond(withSuccess("""
+                        {"result":{"path":[{"info":{"departureTime":"2350"}}]}}
+                        """, MediaType.APPLICATION_JSON));
+
+        var service = new TransitScheduleService(transit, publicData, snapshots, new ObjectMapper(), rest);
+        ReflectionTestUtils.setField(service, "apiKey", "test");
+        ReflectionTestUtils.setField(service, "scheduleBaseUrl", "http://odsay/v1/api");
+
+        var subway = TransitDto.RouteSegment.builder().transitType("SUBWAY")
+                .transitName("6호선").startStation("상수").endStation("합정")
+                .odsayStartStationId("SANGSU").odsayEndStationId("HAPJEONG")
+                .durationMinutes(2).build();
+        var route = TransitDto.RouteOptionResponse.builder().provider("ODSAY")
+                .segments(List.of(
+                        TransitDto.RouteSegment.builder().transitType("WALK").durationMinutes(9).build(),
+                        subway,
+                        TransitDto.RouteSegment.builder().transitType("WALK").durationMinutes(1).build()))
+                .build();
+        var date = LocalDate.of(2026, 10, 9);
+
+        assertThat(service.previewDepartureForServiceDate(route,
+                NotificationScheduleType.LAST_TRANSIT, date, new java.util.HashMap<>()))
+                .isEqualTo(date.atTime(23, 41));
+        server.verify();
     }
 
     @Test
