@@ -60,6 +60,71 @@ class TransitScheduleServiceTest {
     }
 
     @Test
+    void todayPinnedLastWinsOverTomorrowSnapshotWhileItIsCatchable() {
+        var service = service("0530", "2330");
+        var n = notification(NotificationScheduleType.LAST_TRANSIT, 5);
+        var now = DATE.atTime(23, 12);
+        var today = new ScheduleSnapshot(n, DATE, NotificationScheduleType.LAST_TRANSIT,
+                "today", DATE.atTime(23, 22), DATE.atTime(23, 17),
+                DATE.atTime(22, 40), now, 37);
+        today.useSelectedPreviewSource();
+        var tomorrow = new ScheduleSnapshot(n, DATE.plusDays(1), NotificationScheduleType.LAST_TRANSIT,
+                "tomorrow", DATE.plusDays(1).atTime(23, 22),
+                DATE.plusDays(1).atTime(23, 17), DATE.plusDays(1).atTime(22, 40),
+                now, 37);
+        when(snapshotRepo(service).findFirstByNotificationIdAndScheduleTypeAndRouteHashOrderByServiceDateDesc(
+                eq(1L), eq(NotificationScheduleType.LAST_TRANSIT), anyString()))
+                .thenReturn(Optional.of(tomorrow));
+        when(snapshotRepo(service).findByNotificationIdAndServiceDateAndScheduleTypeAndRouteHash(
+                eq(1L), eq(DATE), eq(NotificationScheduleType.LAST_TRANSIT), anyString()))
+                .thenReturn(Optional.of(today));
+
+        assertThat(service.estimateDeparture(n, now, SEOUL)).isEqualTo(DATE.atTime(23, 22));
+        verifyNoInteractions(publicData(service));
+        verify(snapshotRepo(service), never()).save(any());
+    }
+
+    @Test
+    void kakaoSubwayOnlyLastPrefersVerifiedMetroTrainTimesOverAmbiguousTago() {
+        TransitApiService transit = mock(TransitApiService.class);
+        PublicDataTransitService publicData = mock(PublicDataTransitService.class);
+        ScheduleSnapshotRepository snapshots = mock(ScheduleSnapshotRepository.class);
+        var service = new TransitScheduleService(transit, publicData, snapshots,
+                new ObjectMapper(), new RestTemplate());
+        var metro = mock(SeoulMetroTrainScheduleService.class);
+        var tago = mock(TagoSubwayScheduleService.class);
+        service.setTagoSubwayScheduleService(tago);
+        service.setSeoulMetroTrainScheduleService(metro);
+        var six = TransitDto.RouteSegment.builder().transitType("SUBWAY").transitName("6호선")
+                .startStation("상수").endStation("합정").durationMinutes(2).build();
+        var two = TransitDto.RouteSegment.builder().transitType("SUBWAY").transitName("2호선")
+                .startStation("합정").endStation("신도림").durationMinutes(9).build();
+        var route = TransitDto.RouteOptionResponse.builder().provider("KAKAO")
+                .routeId("KAKAO_SANGSU_HAPJEONG_SINDORIM")
+                .totalDurationMinutes(37).transferCount(1)
+                .segments(List.of(
+                        TransitDto.RouteSegment.builder().transitType("WALK").durationMinutes(9).build(),
+                        six,
+                        TransitDto.RouteSegment.builder().transitType("WALK").durationMinutes(2).build(),
+                        two,
+                        TransitDto.RouteSegment.builder().transitType("WALK").durationMinutes(13).build()))
+                .build();
+        when(metro.resolve(eq(six), eq(DATE))).thenReturn(new SeoulBusScheduleService.Schedule(
+                "상수", "", "SEOUL_METRO:6호선", DATE.atTime(5, 30),
+                DATE.atTime(23, 50), 0, "합정", 0));
+        when(metro.resolve(eq(two), eq(DATE))).thenReturn(new SeoulBusScheduleService.Schedule(
+                "합정", "", "SEOUL_METRO:2호선", DATE.atTime(5, 30),
+                DATE.atTime(23, 53), 0, "신도림", 0));
+
+        assertThat(service.previewCurrentLastDeparture(route,
+                DATE.atTime(22, 47), new java.util.HashMap<>()))
+                .isEqualTo(DATE.atTime(23, 22));
+        verify(metro).resolve(eq(six), eq(DATE));
+        verify(metro).resolve(eq(two), eq(DATE));
+        verifyNoInteractions(tago);
+    }
+
+    @Test
     void pinnedLastKeepsLiveSeoulBusEvaluationWhenBindingIsAvailable() {
         var service = service("0530", "2330");
         var seoul = mock(SeoulBusScheduleService.class);
