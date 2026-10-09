@@ -52,9 +52,11 @@ class SeoulMetroTrainScheduleServiceTest {
         var service = new SeoulMetroTrainScheduleService(
                 new ObjectMapper(), http, "key", "https://metro.test/getTrainSch");
         for (int i = 0; i < 4; i++) {
-            server.expect(org.springframework.test.web.client.match.MockRestRequestMatchers
-                    .queryParam("wkndSe", "주말"))
-                    .andRespond(withSuccess(response(""), MediaType.APPLICATION_JSON));
+            server.expect(request -> {
+                String decoded = java.net.URLDecoder.decode(request.getURI().getRawQuery(),
+                        java.nio.charset.StandardCharsets.UTF_8);
+                assertThat(decoded).contains("wkndSe=주말");
+            }).andRespond(withSuccess(response(""), MediaType.APPLICATION_JSON));
         }
 
         assertThat(org.assertj.core.api.Assertions.catchThrowable(() ->
