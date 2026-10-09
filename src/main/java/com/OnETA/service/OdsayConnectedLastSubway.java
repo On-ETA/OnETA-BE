@@ -100,6 +100,54 @@ final class OdsayConnectedLastSubway {
         return rides.get(rides.size() - 1).getOdsayEndStationId();
     }
 
+    /**
+     * ODsay can otherwise pick a different subway interchange between SID and
+     * EID. Force the selected transfer stop when exactly two lines are involved.
+     * Keep strict leg verification even after supplying MID.
+     */
+    static Optional<String> transferId(TransitDto.RouteOptionResponse route) {
+        if (!supports(route)) return Optional.empty();
+        List<TransitDto.RouteSegment> transfers = rides(route);
+        if (transfers.size() != 2) return Optional.empty();
+        var before = transfers.get(0);
+        var after = transfers.get(1);
+        if (!sameStationName(before.getEndStation(), after.getStartStation())) {
+            return Optional.empty();
+        }
+        return Optional.of(before.getOdsayEndStationId());
+    }
+
+    private static boolean sameStationName(String before, String after) {
+        if (blank(before) || blank(after)) return false;
+        String left = before.trim().replaceAll("역$", "");
+        String right = after.trim().replaceAll("역$", "");
+        return left.equals(right);
+    }
+
+    /** Non-sensitive evidence about why a connected LAST answer was rejected. */
+    static String mismatchReason(TransitDto.RouteOptionResponse route, JsonNode response) {
+        if (!supports(route)) return "NOT_ELIGIBLE";
+        JsonNode paths = response == null ? null : response.path("result").path("path");
+        if (paths == null || !paths.isArray()) return "NO_PATH_ARRAY";
+        if (paths.isEmpty()) return "EMPTY_PATHS";
+        List<TransitDto.RouteSegment> expected = rides(route);
+        boolean candidateWithExpectedLegs = false;
+        boolean exactLegs = false;
+        for (JsonNode path : paths) {
+            var subPaths = path.path("subPath");
+            if (!subPaths.isArray()) continue;
+            List<JsonNode> legs = new ArrayList<>();
+            for (JsonNode leg : subPaths) {
+                if (leg.path("movingType").asInt(-1) == 1) legs.add(leg);
+            }
+            if (legs.size() != expected.size()) continue;
+            candidateWithExpectedLegs = true;
+            if (sameLegs(expected, legs)) exactLegs = true;
+        }
+        if (!candidateWithExpectedLegs) return "LEG_COUNT_OR_STRUCTURE_MISMATCH";
+        return exactLegs ? "TIMING_OR_TRANSFER_MISMATCH" : "LINE_OR_STATION_MISMATCH";
+    }
+
     private static boolean sameLegs(List<TransitDto.RouteSegment> rides, List<JsonNode> legs) {
         for (int i = 0; i < rides.size(); i++) {
             TransitDto.RouteSegment expected = rides.get(i);
