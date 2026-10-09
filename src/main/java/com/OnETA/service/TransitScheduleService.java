@@ -246,7 +246,8 @@ public class TransitScheduleService {
                 boolean hasSubway = route.getSegments().stream()
                         .anyMatch(s -> "SUBWAY".equals(s.getTransitType()));
                 var times = hasSubway
-                        ? resolveKakaoRouteSchedules(route, date)
+                        ? resolveKakaoRouteSchedules(route, date,
+                                type == NotificationScheduleType.LAST_TRANSIT && pureSubwayTransfer(route))
                         : seoulBusScheduleService.resolveRoute(route, date);
                 List<LocalDateTime> bounds = new ArrayList<>();
                 int prefix = 0, ride = 0;
@@ -419,13 +420,28 @@ public class TransitScheduleService {
                 com.OnETA.common.error.ErrorCode.TRANSIT_CONNECTION_UNVERIFIED);
     }
 
+    private static boolean pureSubwayTransfer(TransitDto.RouteOptionResponse route) {
+        if (route == null || route.getSegments() == null) return false;
+        var rides = route.getSegments().stream()
+                .filter(segment -> segment != null && !"WALK".equals(segment.getTransitType())).toList();
+        return rides.size() >= 2
+                && rides.stream().allMatch(segment -> "SUBWAY".equals(segment.getTransitType()));
+    }
+
     private List<SeoulBusScheduleService.Schedule> resolveKakaoRouteSchedules(
             TransitDto.RouteOptionResponse route, LocalDate serviceDate) {
+        return resolveKakaoRouteSchedules(route, serviceDate, false);
+    }
+
+    private List<SeoulBusScheduleService.Schedule> resolveKakaoRouteSchedules(
+            TransitDto.RouteOptionResponse route, LocalDate serviceDate, boolean verifyLastTrain) {
         List<SeoulBusScheduleService.Schedule> schedules = new ArrayList<>();
         for (TransitDto.RouteSegment segment : route.getSegments()) {
             if ("WALK".equals(segment.getTransitType())) continue;
             if ("SUBWAY".equals(segment.getTransitType())) {
-                schedules.add(resolveKakaoSubwaySchedule(segment, serviceDate));
+                schedules.add(verifyLastTrain
+                        ? resolveKakaoSubwayScheduleForLast(segment, serviceDate)
+                        : resolveKakaoSubwaySchedule(segment, serviceDate));
                 continue;
             }
             if ("BUS".equals(segment.getTransitType())) {
@@ -437,6 +453,31 @@ public class TransitScheduleService {
                     com.OnETA.common.error.ErrorCode.TRANSIT_SCHEDULE_UNSUPPORTED);
         }
         return schedules;
+    }
+
+    /**
+     * TAGO has no train IDs; both U/D can look reachable by coincidental
+     * station times. For LAST subway-to-subway transfers, prefer the Seoul Metro
+     * provider, which matches the same train number at both stations.
+     * Keep the conservative TAGO fallback if the verified provider is unavailable.
+     */
+    private SeoulBusScheduleService.Schedule resolveKakaoSubwayScheduleForLast(
+            TransitDto.RouteSegment segment, LocalDate serviceDate) {
+        if (seoulMetroTrainScheduleService != null) {
+            try {
+                var verified = seoulMetroTrainScheduleService.resolve(segment, serviceDate);
+                log.info("Kakao LAST verified subway leg: line={}, from={}, to={}, date={}, last={}",
+                        segment.getTransitName(), segment.getStartStation(), segment.getEndStation(),
+                        serviceDate, verified.last());
+                return verified;
+            } catch (RuntimeException e) {
+                log.info("Kakao LAST verified subway timetable unavailable: line={}, from={}, to={}, "
+                                + "date={}, reason={}; using conservative TAGO fallback",
+                        segment.getTransitName(), segment.getStartStation(), segment.getEndStation(),
+                        serviceDate, e.getClass().getSimpleName());
+            }
+        }
+        return resolveKakaoSubwaySchedule(segment, serviceDate);
     }
 
     private SeoulBusScheduleService.Schedule resolveKakaoSubwaySchedule(
@@ -515,6 +556,7 @@ public class TransitScheduleService {
             }
         }
         boolean seoul = SeoulBusScheduleService.usesSeoulBusSchedules(route);
+        boolean verifiedSubwayTransfer = seoul && pureSubwayTransfer(route);
         boolean singleBus = route.getSegments().stream()
                 .filter(segment -> segment != null && !"WALK".equals(segment.getTransitType())).count() == 1
                 && route.getSegments().stream().anyMatch(segment -> segment != null && "BUS".equals(segment.getTransitType()));
@@ -528,7 +570,9 @@ public class TransitScheduleService {
             TransitOperatingWindow window;
             if (seoul) {
                 var binding = "SUBWAY".equals(segment.getTransitType())
-                        ? resolveKakaoSubwaySchedule(segment, now.toLocalDate())
+                        ? (verifiedSubwayTransfer
+                                ? resolveKakaoSubwayScheduleForLast(segment, now.toLocalDate())
+                                : resolveKakaoSubwaySchedule(segment, now.toLocalDate()))
                         : seoulBusScheduleService.resolve(singleBus ? route : route.toBuilder().transferCount(0)
                                 .segments(List.of(segment)).build(), now.toLocalDate());
                 window = new TransitOperatingWindow(binding.first(), binding.last());
@@ -537,7 +581,9 @@ public class TransitScheduleService {
                 } else if (now.isBefore(window.first())) {
                     // Subway APIs accept a service date: use the actual preceding
                     // weekday timetable instead of shifting today's timetable.
-                    var preceding = resolveKakaoSubwaySchedule(segment, now.toLocalDate().minusDays(1));
+                    var preceding = verifiedSubwayTransfer
+                            ? resolveKakaoSubwayScheduleForLast(segment, now.toLocalDate().minusDays(1))
+                            : resolveKakaoSubwaySchedule(segment, now.toLocalDate().minusDays(1));
                     var previousWindow = new TransitOperatingWindow(preceding.first(), preceding.last());
                     if (previousWindow.contains(now)) {
                         binding = preceding;
@@ -842,6 +888,14 @@ public class TransitScheduleService {
             if (previous.isPresent() && previous.get().getEffectiveDepartureAt().isAfter(now)) {
                 return previous.get().getEffectiveDepartureAt();
             }
+        }
+        // A tomorrow snapshot may already exist (for example after a scheduler
+        // refresh). Prefer today's still-catchable selected departure, not the
+        // most recently stored service date. The screen shows only HH:mm.
+        var current = snapshotRepository.findByNotificationIdAndServiceDateAndScheduleTypeAndRouteHash(
+                notification.getId(), today, type, routeHash);
+        if (current.isPresent() && current.get().getEffectiveDepartureAt().isAfter(now)) {
+            return current.get().getEffectiveDepartureAt();
         }
         if (saved.isEmpty() && type == NotificationScheduleType.LAST_TRANSIT) {
             saved = snapshotRepository.findFirstByNotificationIdAndScheduleTypeAndRouteHashOrderByServiceDateDesc(
