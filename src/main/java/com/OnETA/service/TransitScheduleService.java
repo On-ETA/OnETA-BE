@@ -232,6 +232,14 @@ public class TransitScheduleService {
             return calculateConnectedFirstPlan(route, date, scheduleCache);
         }
 
+        // The LAST of each line is not necessarily the latest usable connected train.
+        // Prefer ODsay's whole-journey LAST itinerary when its exact legs match.
+        if (type == NotificationScheduleType.LAST_TRANSIT
+                && OdsayConnectedLastSubway.supports(route)) {
+            var connected = resolveConnectedLastSubway(route, date);
+            if (connected.isPresent()) return connectedLastPlan(route, connected.get());
+        }
+
         if (SeoulBusScheduleService.usesSeoulBusSchedules(route)) {
             long rides = route.getSegments().stream().filter(s -> !"WALK".equals(s.getTransitType())).count();
             if (rides > 1 || route.getSegments().stream().anyMatch(s -> "SUBWAY".equals(s.getTransitType()))) {
@@ -486,6 +494,16 @@ public class TransitScheduleService {
             throw new com.OnETA.common.exception.GlobalException(
                     com.OnETA.common.error.ErrorCode.TRANSIT_SCHEDULE_UNSUPPORTED);
         }
+        // Use the last *connected* train pair, not independent last trains whose
+        // upstream/downstream departures may not form a reachable transfer.
+        if (!now.toLocalTime().isBefore(LocalTime.of(6, 0))
+                && OdsayConnectedLastSubway.supports(route)) {
+            var connected = resolveConnectedLastSubway(route, now.toLocalDate());
+            if (connected.isPresent()) {
+                var departure = connected.get();
+                return departure.isAfter(now) ? connectedLastPlan(route, departure) : null;
+            }
+        }
         boolean seoul = SeoulBusScheduleService.usesSeoulBusSchedules(route);
         boolean singleBus = route.getSegments().stream()
                 .filter(segment -> segment != null && !"WALK".equals(segment.getTransitType())).count() == 1
@@ -579,6 +597,36 @@ public class TransitScheduleService {
         return new RouteSchedulePlan(plan.departure(), plan.durationMinutes(), source,
                 seoul && !singleBus ? objectMapper.writeValueAsString(bindings) : null,
                 !singleBus ? Math.max(60, prefix) : 0);
+    }
+
+    private Optional<LocalDateTime> resolveConnectedLastSubway(
+            TransitDto.RouteOptionResponse route, LocalDate day) {
+        try {
+            JsonNode timetable = request("/subwayPathSchedule", Map.of(
+                    "SID", OdsayConnectedLastSubway.originId(route),
+                    "EID", OdsayConnectedLastSubway.destinationId(route),
+                    "MODE", "4", "DAY", odsayDay(day)));
+            ensureNoOdsayError(timetable);
+            var departure = OdsayConnectedLastSubway.find(route, timetable, day);
+            log.info("Connected subway LAST: routeId={}, date={}, matched={}, selected={}",
+                    route.getRouteId(), day, departure.isPresent(), departure.orElse(null));
+            return departure;
+        } catch (RuntimeException e) {
+            log.warn("Connected subway LAST unavailable; retaining existing conservative estimate: routeId={}, errorType={}",
+                    route.getRouteId(), e.getClass().getSimpleName());
+            return Optional.empty();
+        }
+    }
+
+    private RouteSchedulePlan connectedLastPlan(
+            TransitDto.RouteOptionResponse route, LocalDateTime departure) {
+        int duration = route.getTotalDurationMinutes() == null
+                ? route.getSegments().stream().map(TransitDto.RouteSegment::getDurationMinutes)
+                        .filter(Objects::nonNull).mapToInt(Integer::intValue).sum()
+                : route.getTotalDurationMinutes();
+        int safeDuration = Math.max(1, duration);
+        return new RouteSchedulePlan(departure, safeDuration, "ODSAY", null,
+                Math.max(15, Math.min(60, safeDuration)));
     }
 
     public LocalDateTime previewDepartureForServiceDate(TransitDto.RouteOptionResponse route,
