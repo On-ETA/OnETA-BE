@@ -55,13 +55,8 @@ public class TagoSubwayScheduleService {
         String start = station(segment.getStartStation(), line);
         String end = station(segment.getEndStation(), line);
         String next = station(segment.getStations().get(1).getName(), line);
-        // On weekdays, also consider the Sunday/holiday schedule. Without a holiday
-        // calendar choose the earlier first/last boundary rather than a later promise.
-        List<String> days = switch (day.getDayOfWeek()) {
-            case SATURDAY -> List.of("02", "03");
-            case SUNDAY -> List.of("03");
-            default -> List.of("01", "03");
-        };
+        // Never mix weekday and public-holiday trains: they run on different timetables.
+        List<String> days = List.of(KoreanSubwayServiceDay.tagoDay(day));
         LocalDateTime first = null, last = null;
         for (String dayType : days) {
             List<LocalDateTime> firsts = new ArrayList<>(), lasts = new ArrayList<>();
