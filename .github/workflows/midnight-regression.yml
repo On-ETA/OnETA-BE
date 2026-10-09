@@ -30,6 +30,8 @@ jobs:
             --tests 'com.OnETA.service.TransitApiServiceTest' \
             --tests 'com.OnETA.service.TransitRouteOptimizationServiceTest' \
             --tests 'com.OnETA.service.TransitScheduleServiceTest.selectedJustAfterMidnightRemainsOnPreviousOperatingDayEvenWithLaterSnapshot' \
+            --tests 'com.OnETA.service.TransitScheduleServiceTest.todayPinnedLastWinsOverTomorrowSnapshotWhileItIsCatchable' \
+            --tests 'com.OnETA.service.TransitScheduleServiceTest.kakaoSubwayOnlyLastPrefersVerifiedMetroTrainTimesOverAmbiguousTago' \
             --tests 'com.OnETA.service.TransitScheduleServiceTest.selectedPastLastDepartureIsRejectedBeforeCreatingSnapshot' \
             --tests 'com.OnETA.service.TransitScheduleServiceTest.pinnedLastKeepsLiveSeoulBusEvaluationWhenBindingIsAvailable' \
             --tests 'com.OnETA.scheduler.FirstLastNotificationSchedulerTest.midnightDoesNotEvaluateTonightWhileSelectedPreviousLastIsFuture' \
