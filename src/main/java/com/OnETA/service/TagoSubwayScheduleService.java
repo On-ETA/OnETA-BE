@@ -60,6 +60,7 @@ public class TagoSubwayScheduleService {
         LocalDateTime first = null, last = null;
         for (String dayType : days) {
             List<LocalDateTime> firsts = new ArrayList<>(), lasts = new ArrayList<>();
+            Map<String, LocalDateTime> lastByDirection = new LinkedHashMap<>();
             for (String direction : List.of("U", "D")) {
                 List<LocalDateTime> valid = new ArrayList<>();
                 var starts = timetable(start, dayType, direction);
@@ -92,6 +93,7 @@ public class TagoSubwayScheduleService {
                         nextRejected, endRejected, valid.size());
                 if (!valid.isEmpty()) {
                     firsts.add(Collections.min(valid)); lasts.add(Collections.max(valid));
+                    lastByDirection.put(direction, Collections.max(valid));
                 }
             }
             if (firsts.isEmpty()) {
@@ -103,6 +105,12 @@ public class TagoSubwayScheduleService {
             // never the latest departure from the opposite direction.
             var f = Collections.min(firsts);
             var l = Collections.min(lasts);
+            if (lastByDirection.size() > 1) {
+                log.info("TAGO subway ambiguous directions: line={}, start={}, end={}, day={}, "
+                                + "lastByDirection={}, selectedEarlierLast={}",
+                        line, segment.getStartStation(), segment.getEndStation(), day,
+                        lastByDirection, l);
+            }
             if (first == null || f.isBefore(first)) first = f;
             if (last == null || l.isBefore(last)) last = l;
         }

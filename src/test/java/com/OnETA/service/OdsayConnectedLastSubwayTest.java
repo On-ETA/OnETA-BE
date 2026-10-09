@@ -27,6 +27,7 @@ class OdsayConnectedLastSubwayTest {
                 .contains(day.atTime(23, 26));
         assertThat(OdsayConnectedLastSubway.originId(route)).isEqualTo("600");
         assertThat(OdsayConnectedLastSubway.destinationId(route)).isEqualTo("201");
+        assertThat(OdsayConnectedLastSubway.transferId(route)).contains("601");
     }
 
     @Test
@@ -41,6 +42,23 @@ class OdsayConnectedLastSubwayTest {
                 transfer(),
                 leg("202", "201", "2호선", "23:48:00", "23:57:00")), day))
                 .isEmpty();
+    }
+
+    @Test
+    void mismatchDiagnosticDistinguishesAlternativeInterchangeAndUnreachableConnection() {
+        var different = timetable(
+                leg("600", "601", "6호선", "23:40:00", "23:42:00"),
+                transfer(),
+                leg("202", "201", "2호선", "23:48:00", "23:57:00"));
+        assertThat(OdsayConnectedLastSubway.mismatchReason(route(), different))
+                .isEqualTo("LINE_OR_STATION_MISMATCH");
+
+        var impossible = timetable(
+                leg("600", "601", "6호선", "23:40:00", "23:42:00"),
+                transfer(),
+                leg("200", "201", "2호선", "23:43:00", "23:57:00"));
+        assertThat(OdsayConnectedLastSubway.mismatchReason(route(), impossible))
+                .isEqualTo("TIMING_OR_TRANSFER_MISMATCH");
     }
 
     @Test
@@ -88,7 +106,9 @@ class OdsayConnectedLastSubwayTest {
         return TransitDto.RouteSegment.builder()
                 .transitType(type).transitName(line)
                 .odsayStartStationId(sid).odsayEndStationId(eid)
-                .startStation(startName).durationMinutes(duration).build();
+                .startStation(startName)
+                .endStation("6호선".equals(line) ? "합정역" : "2호선".equals(line) ? "신도림" : "")
+                .durationMinutes(duration).build();
     }
 
     private tools.jackson.databind.JsonNode timetable(String... legs) {
