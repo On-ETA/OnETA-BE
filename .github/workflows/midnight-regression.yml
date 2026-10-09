@@ -18,6 +18,11 @@ jobs:
       - name: Run midnight departure regression tests
         run: |
           ./gradlew test \
+            --tests 'com.OnETA.service.KoreanSubwayServiceDayTest' \
+            --tests 'com.OnETA.service.TagoSubwayScheduleServiceTest' \
+            --tests 'com.OnETA.service.SeoulMetroTrainScheduleServiceTest' \
+            --tests 'com.OnETA.service.TransitScheduleServiceTest.hangulDayOdsayScheduleRequestUsesHolidayDayAndCorrectAccessWalk' \
+            --tests 'com.OnETA.service.TransitScheduleServiceTest.mapsOdsaySubwayDayFromServiceDate' \
             --tests 'com.OnETA.service.SeoulBusScheduleServiceTest' \
             --tests 'com.OnETA.service.TransitApiServiceTest' \
             --tests 'com.OnETA.service.TransitRouteOptimizationServiceTest' \
