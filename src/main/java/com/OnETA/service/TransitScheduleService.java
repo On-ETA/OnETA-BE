@@ -906,11 +906,7 @@ public class TransitScheduleService {
     }
 
     private String odsayDay(LocalDate serviceDate) {
-        return switch (serviceDate.getDayOfWeek()) {
-            case SATURDAY -> "2";
-            case SUNDAY -> "3";
-            default -> "1";
-        };
+        return KoreanSubwayServiceDay.odsayDay(serviceDate);
     }
 
     private LocalDateTime serviceTime(TransitDto.RouteSegment s, NotificationScheduleType type, LocalDate serviceDate,
