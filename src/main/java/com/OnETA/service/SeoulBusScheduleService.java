@@ -106,7 +106,14 @@ public class SeoulBusScheduleService {
      */
     public List<TransitDto.RouteOptionResponse> discoverDirectNightRoutes(
             double originX, double originY, double destX, double destY) {
-        if (key.isBlank() || retryAfter.isAfter(clock.instant())) return List.of();
+        if (key.isBlank()) {
+            log.info("Direct night-bus discovery skipped: Seoul API key not configured");
+            return List.of();
+        }
+        if (retryAfter.isAfter(clock.instant())) {
+            log.info("Direct night-bus discovery skipped: Seoul API retry backoff active");
+            return List.of();
+        }
 
         try {
             List<Element> originStops =
@@ -127,8 +134,22 @@ public class SeoulBusScheduleService {
                     .toList();
 
             List<NightRouteCandidate> matches = new ArrayList<>();
+            int failedRouteLookups = 0;
             for (RouteSeed route : nightRoutes) {
-                List<Element> stops = routeStops(route.routeId(), "night-route-stations");
+                List<Element> stops;
+                try {
+                    stops = routeStops(route.routeId(), "night-route-stations");
+                } catch (GlobalException e) {
+                    failedRouteLookups++;
+                    log.warn("Direct night-bus line skipped: route={}, routeId={}, errorCode={}",
+                            route.routeName(), route.routeId(), e.getErrorCode().getCode());
+                    continue;
+                } catch (RuntimeException e) {
+                    failedRouteLookups++;
+                    log.warn("Direct night-bus line skipped: route={}, routeId={}, errorType={}",
+                            route.routeName(), route.routeId(), e.getClass().getSimpleName());
+                    continue;
+                }
                 for (int startIndex = 0; startIndex < stops.size(); startIndex++) {
                     Element originStop = originByStationId.get(stationIdOf(stops.get(startIndex)));
                     if (originStop == null) continue;
@@ -176,8 +197,8 @@ public class SeoulBusScheduleService {
                     .map(this::toNightRoute)
                     .toList();
 
-            log.info("Direct night-bus discovery: originStops={}, nightRoutesSeen={}, matches={}, selectedLines={}",
-                    originStops.size(), nightRoutes.size(), matches.size(),
+            log.info("Direct night-bus discovery: originStops={}, nightRoutesSeen={}, failedRouteLookups={}, matches={}, selectedLines={}",
+                    originStops.size(), nightRoutes.size(), failedRouteLookups, matches.size(),
                     selected.stream()
                             .flatMap(route -> route.getSegments().stream())
                             .filter(segment -> "BUS".equals(segment.getTransitType()))
