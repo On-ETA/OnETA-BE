@@ -38,8 +38,12 @@ public class SeoulBusScheduleService {
     private static final int NIGHT_ORIGIN_RADIUS_METERS = 1000;
     private static final int NIGHT_DESTINATION_RADIUS_METERS = 1200;
     private static final int MAX_DIRECT_NIGHT_ROUTES = 14;
+    private static final Duration NIGHT_ROUTE_LIST_TTL = Duration.ofMinutes(15);
+    private static final Duration ROUTE_LIST_BACKOFF = Duration.ofSeconds(60);
 
     private Instant retryAfter = Instant.EPOCH;
+    private Instant routeListRetryAfter = Instant.EPOCH;
+    private CachedNightRouteList cachedNightRouteList;
     private final Map<String, Cached> cache = new HashMap<>();
     private final Map<String, LiveCache> liveCache = new HashMap<>();
     private final Map<String, CachedRouteStops> routeStopsCache = new HashMap<>();
@@ -420,7 +424,12 @@ public class SeoulBusScheduleService {
                 .build();
     }
 
-    private List<RouteSeed> routeCandidates(String search) {
+    private synchronized List<RouteSeed> routeCandidates(String search) {
+        boolean nightList = "N".equalsIgnoreCase(search);
+        if (nightList && cachedNightRouteList != null
+                && cachedNightRouteList.expires().isAfter(clock.instant())) {
+            return cachedNightRouteList.routes();
+        }
         List<RouteSeed> fromDatabase = new ArrayList<>();
         if (seoulBusRouteRepository != null) {
             try {
@@ -441,6 +450,11 @@ public class SeoulBusScheduleService {
             return fromDatabase;
         }
 
+        if (routeListRetryAfter.isAfter(clock.instant())) {
+            if (fromDatabase.isEmpty()) throw unavailable();
+            return fromDatabase;
+        }
+
         try {
             List<RouteSeed> fromApi = request(
                     "/busRouteInfo/getBusRouteList",
@@ -456,7 +470,11 @@ public class SeoulBusScheduleService {
             Map<String, RouteSeed> merged = new LinkedHashMap<>();
             for (RouteSeed route : fromDatabase) merged.put(route.routeId(), route);
             for (RouteSeed route : fromApi) merged.put(route.routeId(), route);
-            return new ArrayList<>(merged.values());
+            List<RouteSeed> result = List.copyOf(merged.values());
+            if (nightList) {
+                cachedNightRouteList = new CachedNightRouteList(result, clock.instant().plus(NIGHT_ROUTE_LIST_TTL));
+            }
+            return result;
         } catch (GlobalException e) {
             if (fromDatabase.isEmpty()) throw e;
             log.info("Seoul night-bus route list API unavailable; using {} cached DB routes", fromDatabase.size());
@@ -582,7 +600,11 @@ public class SeoulBusScheduleService {
                 log.warn("Seoul API lookup failed: endpoint={}, failureType={}, httpStatus={}", path,
                         e.getClass().getSimpleName(), status);
             }
-            retryAfter = clock.instant().plusSeconds(60);
+            if ("/busRouteInfo/getBusRouteList".equals(path)) {
+                routeListRetryAfter = clock.instant().plus(ROUTE_LIST_BACKOFF);
+            } else {
+                retryAfter = clock.instant().plusSeconds(60);
+            }
             throw unavailable(); // Never expose URI containing the service key.
         }
     }
@@ -628,6 +650,7 @@ public class SeoulBusScheduleService {
     private static GlobalException unavailable() { return new GlobalException(ErrorCode.TRANSIT_SCHEDULE_UNAVAILABLE); }
     private record Binding(String stationId, String arsId, String routeId, int order, String endStationId, int endOrder) { }
     private record RouteSeed(String routeId, String routeName, String routeType) { }
+    private record CachedNightRouteList(List<RouteSeed> routes, Instant expires) { }
     private record CachedRouteStops(List<Element> stops, Instant expires) { }
     private record NightRouteCandidate(
             String routeId,
