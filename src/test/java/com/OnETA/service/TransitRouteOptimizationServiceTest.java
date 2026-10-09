@@ -175,6 +175,7 @@ class TransitRouteOptimizationServiceTest {
         var api = mock(TransitApiService.class);
         var schedules = mock(TransitScheduleService.class);
         var service = new TransitRouteOptimizationService(api, schedules);
+        setClock(service, LocalDateTime.of(2026, 10, 9, 2, 3));
         var route = route("BUS", "KAKAO", 20);
         when(api.searchScheduleCandidates(anyString(), anyDouble(), anyDouble(), any(),
                 anyDouble(), anyDouble(), any(), eq(Integer.MAX_VALUE))).thenReturn(List.of(route));
