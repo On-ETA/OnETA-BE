@@ -309,6 +309,56 @@ class TransitScheduleServiceTest {
     }
 
     @Test
+    void lastSubwayTransferUsesConnectedOdsayJourneyInsteadOfTwoIndependentLastTrains() {
+        var transit = mock(TransitApiService.class);
+        var publicData = mock(PublicDataTransitService.class);
+        var snapshots = mock(ScheduleSnapshotRepository.class);
+        var rest = new RestTemplate();
+        var server = MockRestServiceServer.bindTo(rest).build();
+        server.expect(requestTo(org.hamcrest.Matchers.containsString("subwayPathSchedule")))
+                .andExpect(queryParam("SID", "600"))
+                .andExpect(queryParam("EID", "201"))
+                .andExpect(queryParam("MODE", "4"))
+                .andExpect(queryParam("DAY", "3"))
+                .andRespond(withSuccess("""
+                        {"result":{"path":[{"info":{"departureTime":"23:40:00"},
+                          "subPath":[
+                            {"movingType":1,"startID":600,"endID":601,"laneName":"6호선",
+                             "departureTime":"23:40:00","arrivalTime":"23:42:00"},
+                            {"movingType":2,"sectionTime":2},
+                            {"movingType":1,"startID":200,"endID":201,"laneName":"2호선",
+                             "departureTime":"23:48:00","arrivalTime":"23:57:00"}]}]}}
+                        """, MediaType.APPLICATION_JSON));
+
+        var service = new TransitScheduleService(transit, publicData, snapshots, new ObjectMapper(), rest);
+        ReflectionTestUtils.setField(service, "apiKey", "test");
+        ReflectionTestUtils.setField(service, "scheduleBaseUrl", "http://odsay/v1/api");
+        LocalDate holiday = LocalDate.of(2026, 10, 9);
+
+        var six = TransitDto.RouteSegment.builder().transitType("SUBWAY").transitName("6호선")
+                .odsayStartStationId("600").odsayEndStationId("601")
+                .startStation("상수").endStation("합정").durationMinutes(2).build();
+        var two = TransitDto.RouteSegment.builder().transitType("SUBWAY").transitName("2호선")
+                .odsayStartStationId("200").odsayEndStationId("201")
+                .startStation("합정").endStation("신도림").durationMinutes(9).build();
+        var route = TransitDto.RouteOptionResponse.builder().provider("ODSAY")
+                .routeId("SANGSU_HAPJEONG_SINDORIM").totalDurationMinutes(37)
+                .segments(List.of(
+                        TransitDto.RouteSegment.builder().transitType("WALK").durationMinutes(9).build(),
+                        six,
+                        TransitDto.RouteSegment.builder().transitType("WALK").durationMinutes(2).build(),
+                        two,
+                        TransitDto.RouteSegment.builder().transitType("WALK").durationMinutes(13).build()))
+                .build();
+        // Both normal preview and current-service LAST must preserve the same
+        // connected departure; they may never silently jump to another route.
+        assertThat(service.previewCurrentLastDeparture(route,
+                holiday.atTime(20, 0), new java.util.HashMap<>()))
+                .isEqualTo(holiday.atTime(23, 26));
+        server.verify();
+    }
+
+    @Test
     void kakaoSubwayFallsBackToSeoulMetroWhenTagoWeekendScheduleIsEmpty() {
         TransitApiService transit = mock(TransitApiService.class);
         PublicDataTransitService publicData = mock(PublicDataTransitService.class);
