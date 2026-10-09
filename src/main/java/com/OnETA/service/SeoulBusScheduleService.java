@@ -37,8 +37,13 @@ public class SeoulBusScheduleService {
     private final SeoulBusRouteRepository seoulBusRouteRepository;
     private static final int NIGHT_ORIGIN_RADIUS_METERS = 1000;
     private static final int NIGHT_DESTINATION_RADIUS_METERS = 1200;
+    private static final int MAX_DIRECT_NIGHT_ROUTES = 14;
+    private static final Duration NIGHT_ROUTE_LIST_TTL = Duration.ofMinutes(15);
+    private static final Duration ROUTE_LIST_BACKOFF = Duration.ofSeconds(60);
 
     private Instant retryAfter = Instant.EPOCH;
+    private Instant routeListRetryAfter = Instant.EPOCH;
+    private CachedNightRouteList cachedNightRouteList;
     private final Map<String, Cached> cache = new HashMap<>();
     private final Map<String, LiveCache> liveCache = new HashMap<>();
     private final Map<String, CachedRouteStops> routeStopsCache = new HashMap<>();
@@ -92,14 +97,23 @@ public class SeoulBusScheduleService {
      */
     public Optional<TransitDto.RouteOptionResponse> discoverDirectNightRoute(
             double originX, double originY, double destX, double destY) {
-        if (key.isBlank() || retryAfter.isAfter(clock.instant())) return Optional.empty();
+        return discoverDirectNightRoutes(originX, originY, destX, destY).stream().findFirst();
+    }
+
+    /**
+     * Keep one best stop-pair per N-bus route, rather than only the globally
+     * shortest path: the shortest line may already have finished its last run.
+     */
+    public List<TransitDto.RouteOptionResponse> discoverDirectNightRoutes(
+            double originX, double originY, double destX, double destY) {
+        if (key.isBlank() || retryAfter.isAfter(clock.instant())) return List.of();
 
         try {
             List<Element> originStops =
                     nearbyByPosition(originX, originY, NIGHT_ORIGIN_RADIUS_METERS);
             if (originStops.isEmpty()) {
                 log.info("Direct night-bus discovery found no origin stops");
-                return Optional.empty();
+                return List.of();
             }
 
             Map<String, Element> originByStationId = new HashMap<>();
@@ -151,24 +165,30 @@ public class SeoulBusScheduleService {
                 }
             }
 
-            Optional<TransitDto.RouteOptionResponse> selected = matches.stream()
-                    .min(Comparator.comparingDouble(NightRouteCandidate::score))
-                    .map(this::toNightRoute);
+            Map<String, NightRouteCandidate> bestPerLine = new LinkedHashMap<>();
+            for (NightRouteCandidate match : matches) {
+                bestPerLine.merge(match.routeId(), match,
+                        (left, right) -> left.score() <= right.score() ? left : right);
+            }
+            List<TransitDto.RouteOptionResponse> selected = bestPerLine.values().stream()
+                    .sorted(Comparator.comparingDouble(NightRouteCandidate::score))
+                    .limit(MAX_DIRECT_NIGHT_ROUTES)
+                    .map(this::toNightRoute)
+                    .toList();
 
-            log.info("Direct night-bus discovery: originStops={}, nightRoutesSeen={}, matches={}, selected={}",
+            log.info("Direct night-bus discovery: originStops={}, nightRoutesSeen={}, matches={}, selectedLines={}",
                     originStops.size(), nightRoutes.size(), matches.size(),
-                    selected.flatMap(route -> route.getSegments().stream()
-                                    .filter(segment -> "BUS".equals(segment.getTransitType()))
-                                    .map(TransitDto.RouteSegment::getTransitName)
-                                    .findFirst())
-                            .orElse("none"));
+                    selected.stream()
+                            .flatMap(route -> route.getSegments().stream())
+                            .filter(segment -> "BUS".equals(segment.getTransitType()))
+                            .map(TransitDto.RouteSegment::getTransitName).toList());
             return selected;
         } catch (GlobalException e) {
             log.info("Direct night-bus discovery unavailable: {}", e.getErrorCode().getCode());
-            return Optional.empty();
+            return List.of();
         } catch (RuntimeException e) {
             log.warn("Direct night-bus discovery failed: {}", e.getClass().getSimpleName());
-            return Optional.empty();
+            return List.of();
         }
     }
 
@@ -404,7 +424,12 @@ public class SeoulBusScheduleService {
                 .build();
     }
 
-    private List<RouteSeed> routeCandidates(String search) {
+    private synchronized List<RouteSeed> routeCandidates(String search) {
+        boolean nightList = "N".equalsIgnoreCase(search);
+        if (nightList && cachedNightRouteList != null
+                && cachedNightRouteList.expires().isAfter(clock.instant())) {
+            return cachedNightRouteList.routes();
+        }
         List<RouteSeed> fromDatabase = new ArrayList<>();
         if (seoulBusRouteRepository != null) {
             try {
@@ -418,19 +443,43 @@ public class SeoulBusScheduleService {
                 log.warn("Seoul route DB lookup failed for '{}': {}", search, e.getClass().getSimpleName());
             }
         }
-        if (!fromDatabase.isEmpty()) return fromDatabase;
+        // A partially synced route table must not hide N-lines that exist in
+        // TOPIS. Seoul has 14 N routes; supplement incomplete DB sets with API.
+        if (!fromDatabase.isEmpty() && (!"N".equalsIgnoreCase(search)
+                || fromDatabase.stream().filter(seed -> TransitRouteClassifier.isNightBusName(seed.routeName())).count() >= 14)) {
+            return fromDatabase;
+        }
 
-        return request(
-                "/busRouteInfo/getBusRouteList",
-                Map.of("strSrch", search),
-                "route-list").stream()
-                .map(item -> new RouteSeed(
-                        text(item, "busRouteId"),
-                        text(item, "busRouteNm"),
-                        text(item, "busRouteType")))
-                .filter(route -> route.routeId().matches("[0-9]{9}")
-                        && !route.routeName().isBlank())
-                .toList();
+        if (routeListRetryAfter.isAfter(clock.instant())) {
+            if (fromDatabase.isEmpty()) throw unavailable();
+            return fromDatabase;
+        }
+
+        try {
+            List<RouteSeed> fromApi = request(
+                    "/busRouteInfo/getBusRouteList",
+                    Map.of("strSrch", search),
+                    "route-list").stream()
+                    .map(item -> new RouteSeed(
+                            text(item, "busRouteId"),
+                            text(item, "busRouteNm"),
+                            text(item, "busRouteType")))
+                    .filter(route -> route.routeId().matches("[0-9]{9}")
+                            && !route.routeName().isBlank())
+                    .toList();
+            Map<String, RouteSeed> merged = new LinkedHashMap<>();
+            for (RouteSeed route : fromDatabase) merged.put(route.routeId(), route);
+            for (RouteSeed route : fromApi) merged.put(route.routeId(), route);
+            List<RouteSeed> result = List.copyOf(merged.values());
+            if (nightList) {
+                cachedNightRouteList = new CachedNightRouteList(result, clock.instant().plus(NIGHT_ROUTE_LIST_TTL));
+            }
+            return result;
+        } catch (GlobalException e) {
+            if (fromDatabase.isEmpty()) throw e;
+            log.info("Seoul night-bus route list API unavailable; using {} cached DB routes", fromDatabase.size());
+            return fromDatabase;
+        }
     }
 
     private synchronized List<Element> routeStops(String routeId, String group) {
@@ -467,7 +516,8 @@ public class SeoulBusScheduleService {
                 .filter(e -> distance(x, y, stationXOf(e), stationYOf(e)) <= radiusMeters)
                 .sorted(Comparator.comparingDouble(
                         e -> distance(x, y, stationXOf(e), stationYOf(e))))
-                .limit(50)
+                // Dense areas such as Hongdae can have more than 50 stops
+                // inside 1 km: truncating here loses the relevant N-bus stop.
                 .toList();
     }
 
@@ -550,7 +600,11 @@ public class SeoulBusScheduleService {
                 log.warn("Seoul API lookup failed: endpoint={}, failureType={}, httpStatus={}", path,
                         e.getClass().getSimpleName(), status);
             }
-            retryAfter = clock.instant().plusSeconds(60);
+            if ("/busRouteInfo/getBusRouteList".equals(path)) {
+                routeListRetryAfter = clock.instant().plus(ROUTE_LIST_BACKOFF);
+            } else {
+                retryAfter = clock.instant().plusSeconds(60);
+            }
             throw unavailable(); // Never expose URI containing the service key.
         }
     }
@@ -596,6 +650,7 @@ public class SeoulBusScheduleService {
     private static GlobalException unavailable() { return new GlobalException(ErrorCode.TRANSIT_SCHEDULE_UNAVAILABLE); }
     private record Binding(String stationId, String arsId, String routeId, int order, String endStationId, int endOrder) { }
     private record RouteSeed(String routeId, String routeName, String routeType) { }
+    private record CachedNightRouteList(List<RouteSeed> routes, Instant expires) { }
     private record CachedRouteStops(List<Element> stops, Instant expires) { }
     private record NightRouteCandidate(
             String routeId,

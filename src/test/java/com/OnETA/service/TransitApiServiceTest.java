@@ -148,6 +148,47 @@ class TransitApiServiceTest {
     }
 
     @Test
+    void supplementsExistingNightOnlyPlannerRouteWithIndependentSeoulGraph() {
+        RestTemplate http = new RestTemplate();
+        MockRestServiceServer server = MockRestServiceServer.bindTo(http).build();
+        TransitApiService service = new TransitApiService(
+                mock(PublicDataTransitService.class), new ObjectMapper(), http);
+        ReflectionTestUtils.setField(service, "odsayApiKey", "odsay-key");
+        ReflectionTestUtils.setField(service, "odsayApiUrl",
+                "https://api.odsay.com/v1/api/searchPubTransPathR");
+
+        SeoulBusScheduleService seoul = mock(SeoulBusScheduleService.class);
+        TransitDto.RouteOptionResponse independent = TransitDto.RouteOptionResponse.builder()
+                .routeId("SEOUL_NIGHT_N51").provider("SEOUL_NIGHT").totalDurationMinutes(40)
+                .segments(java.util.List.of(
+                        TransitDto.RouteSegment.builder().transitType("WALK").durationMinutes(4).build(),
+                        TransitDto.RouteSegment.builder().transitType("BUS")
+                                .transitName("N51").nightBus(true).durationMinutes(32).build(),
+                        TransitDto.RouteSegment.builder().transitType("WALK").durationMinutes(4).build()))
+                .build();
+        when(seoul.discoverDirectNightRoutes(126.92555, 37.55087, 126.88852, 37.50975))
+                .thenReturn(java.util.List.of(independent));
+        ReflectionTestUtils.setField(service, "seoulBusScheduleService", seoul);
+
+        server.expect(queryParam("SX", "126.92555"))
+                .andRespond(withSuccess("""
+                        {"result":{"path":[{"info":{"totalTime":28,"payment":1400,"transitCount":0},
+                        "subPath":[{"trafficType":3,"sectionTime":3},
+                        {"trafficType":2,"sectionTime":22,"startName":"홍대입구","endName":"시청",
+                        "lane":[{"busNo":"N62","busID":55,"type":11}]},
+                        {"trafficType":3,"sectionTime":3}]}]}}
+                        """, MediaType.APPLICATION_JSON));
+
+        var results = service.searchScheduleCandidates(126.92555, 37.55087,
+                126.88852, 37.50975, 100);
+
+        assertThat(results).extracting(TransitDto.RouteOptionResponse::getProvider)
+                .containsExactly("ODSAY", "SEOUL_NIGHT");
+        assertThat(results.get(1).getSegments().get(1).getTransitName()).isEqualTo("N51");
+        server.verify();
+    }
+
+    @Test
     void fallsBackToOdsayDurationWhenRealtimeLookupFails() {
         PublicDataTransitService publicData = mock(PublicDataTransitService.class);
         when(publicData.findArrival(any(), any(), any(), any(), any(), any(), any(), any()))

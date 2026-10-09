@@ -3,16 +3,20 @@ package com.OnETA.service;
 import com.OnETA.common.error.ErrorCode;
 import com.OnETA.common.exception.GlobalException;
 import com.OnETA.dto.TransitDto;
+import com.OnETA.entity.SeoulBusRoute;
+import com.OnETA.repository.SeoulBusRouteRepository;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
+import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.web.client.RestTemplate;
 import java.time.*;
 import java.util.List;
 import static org.assertj.core.api.Assertions.*;
+import static org.mockito.Mockito.*;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.*;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.*;
 
@@ -109,6 +113,174 @@ class SeoulBusScheduleServiceTest {
                 .containsExactly("거리공원", "중간정류장", "홍대입구역");
         assertThat(TransitRouteClassifier.isNightOnlyRoute(route)).isTrue();
         server.verify();
+    }
+
+    @Test
+    void denseHongdaeStopsAndPartialDbDoNotHideN62FromSeoulApi() {
+        SeoulBusRouteRepository db = mock(SeoulBusRouteRepository.class);
+        SeoulBusRoute incomplete = mock(SeoulBusRoute.class);
+        when(incomplete.getRouteId()).thenReturn("100100051");
+        when(incomplete.getRouteNm()).thenReturn("N51");
+        when(db.findByRouteNmContaining("N")).thenReturn(List.of(incomplete));
+        var discovery = new SeoulBusScheduleService(http, "key", "https://seoul.test",
+                Clock.fixed(DAY.atTime(2, 3).atZone(ZoneId.of("Asia/Seoul")).toInstant(),
+                        ZoneId.of("Asia/Seoul")), db);
+
+        StringBuilder nearby = new StringBuilder();
+        for (int i = 0; i < 50; i++) {
+            nearby.append("<itemList><stId>").append(120000000 + i)
+                    .append("</stId><arsId>").append(10000 + i)
+                    .append("</arsId><stNm>일반정류장</stNm><tmX>126.92555</tmX>")
+                    .append("<tmY>37.55087</tmY></itemList>");
+        }
+        nearby.append("<itemList><stId>121000999</stId><arsId>17999</arsId>")
+                .append("<stNm>심야정류장</stNm><tmX>126.9265</tmX><tmY>37.5505</tmY></itemList>");
+        server.expect(queryParam("tmX", "126.92555"))
+                .andExpect(queryParam("radius", "1000"))
+                .andRespond(withSuccess(xml(nearby.toString()), MediaType.APPLICATION_XML));
+        server.expect(queryParam("strSrch", "N"))
+                .andRespond(withSuccess(xml("<itemList><busRouteId>100100062</busRouteId>"
+                        + "<busRouteNm>N62</busRouteNm><busRouteType>3</busRouteType></itemList>"),
+                        MediaType.APPLICATION_XML));
+        server.expect(queryParam("busRouteId", "100100051"))
+                .andRespond(withSuccess(xml(""), MediaType.APPLICATION_XML));
+        server.expect(queryParam("busRouteId", "100100062"))
+                .andRespond(withSuccess(xml(
+                        "<itemList><seq>1</seq><station>121000999</station>"
+                                + "<stationNm>심야정류장</stationNm><gpsX>126.9265</gpsX>"
+                                + "<gpsY>37.5505</gpsY><arsId>17999</arsId></itemList>"
+                                + "<itemList><seq>2</seq><station>121001999</station>"
+                                + "<stationNm>도착정류장</stationNm><gpsX>127.0670</gpsX>"
+                                + "<gpsY>37.5397</gpsY><arsId>27999</arsId></itemList>"),
+                        MediaType.APPLICATION_XML));
+
+        var discovered = discovery.discoverDirectNightRoutes(126.92555, 37.55087,
+                127.0670, 37.5397);
+
+        assertThat(discovered).hasSize(1);
+        assertThat(discovered.get(0).getSegments().get(1).getTransitName()).isEqualTo("N62");
+        assertThat(discovered.get(0).getProvider()).isEqualTo("SEOUL_NIGHT");
+        server.verify();
+    }
+
+    @Test
+    void discoveryKeepsOneBestStopPairForEachNightLine() {
+        String origin = "<itemList><stId>121000001</stId><arsId>17107</arsId>"
+                + "<stNm>출발정류장</stNm><tmX>126.92555</tmX>"
+                + "<tmY>37.55087</tmY></itemList>";
+        server.expect(queryParam("tmX", "126.92555"))
+                .andRespond(withSuccess(xml(origin), MediaType.APPLICATION_XML));
+        server.expect(queryParam("strSrch", "N"))
+                .andRespond(withSuccess(xml(
+                        "<itemList><busRouteId>100100051</busRouteId>"
+                                + "<busRouteNm>N51</busRouteNm><busRouteType>3</busRouteType></itemList>"
+                                + "<itemList><busRouteId>100100062</busRouteId>"
+                                + "<busRouteNm>N62</busRouteNm><busRouteType>3</busRouteType></itemList>"),
+                        MediaType.APPLICATION_XML));
+        for (String id : List.of("100100051", "100100062")) {
+            server.expect(queryParam("busRouteId", id))
+                    .andRespond(withSuccess(xml(
+                            "<itemList><seq>1</seq><station>121000001</station>"
+                                    + "<stationNm>출발정류장</stationNm><gpsX>126.92555</gpsX>"
+                                    + "<gpsY>37.55087</gpsY><arsId>17107</arsId></itemList>"
+                                    + "<itemList><seq>2</seq><station>121000002</station>"
+                                    + "<stationNm>도착정류장</stationNm><gpsX>126.93555</gpsX>"
+                                    + "<gpsY>37.56087</gpsY><arsId>17108</arsId></itemList>"),
+                            MediaType.APPLICATION_XML));
+        }
+        var results = service.discoverDirectNightRoutes(126.92555, 37.55087,
+                126.93555, 37.56087);
+
+        assertThat(results).hasSize(2);
+        assertThat(results).extracting(r -> r.getSegments().get(1).getTransitName())
+                .containsExactlyInAnyOrder("N51", "N62");
+        server.verify();
+    }
+
+
+    @Test
+    void mergedNightRouteListIsCachedForFifteenMinutesThenRefreshed() {
+        MutableClock clock = new MutableClock();
+        SeoulBusRouteRepository db = mock(SeoulBusRouteRepository.class);
+        SeoulBusRoute stored = mock(SeoulBusRoute.class);
+        when(stored.getRouteId()).thenReturn("100100051");
+        when(stored.getRouteNm()).thenReturn("N51");
+        when(db.findByRouteNmContaining("N")).thenReturn(List.of(stored));
+        var client = new SeoulBusScheduleService(http, "key", "https://seoul.test", clock, db);
+
+        server.expect(queryParam("strSrch", "N"))
+                .andRespond(withSuccess(xml("<itemList><busRouteId>100100062</busRouteId>"
+                        + "<busRouteNm>N62</busRouteNm><busRouteType>3</busRouteType></itemList>"),
+                        MediaType.APPLICATION_XML));
+        server.expect(queryParam("strSrch", "N"))
+                .andRespond(withSuccess(xml("<itemList><busRouteId>100100061</busRouteId>"
+                        + "<busRouteNm>N61</busRouteNm><busRouteType>3</busRouteType></itemList>"),
+                        MediaType.APPLICATION_XML));
+
+        List<?> first = ReflectionTestUtils.invokeMethod(client, "routeCandidates", "N");
+        List<?> cached = ReflectionTestUtils.invokeMethod(client, "routeCandidates", "N");
+        assertThat(first).hasSize(2);
+        assertThat(cached).isSameAs(first);
+        verify(db, org.mockito.Mockito.times(1)).findByRouteNmContaining("N");
+
+        clock.advance(Duration.ofMinutes(15).plusMillis(1));
+        List<?> refreshed = ReflectionTestUtils.invokeMethod(client, "routeCandidates", "N");
+        assertThat(refreshed).hasSize(2);
+        assertThat(refreshed.toString()).contains("N51", "N61").doesNotContain("N62");
+        verify(db, org.mockito.Mockito.times(2)).findByRouteNmContaining("N");
+        server.verify();
+    }
+
+    @Test
+    void failedNightRouteListUsesOwnBackoffAndKeepsDatabaseAndArrivalsAvailable() {
+        MutableClock clock = new MutableClock();
+        SeoulBusRouteRepository db = mock(SeoulBusRouteRepository.class);
+        SeoulBusRoute stored = mock(SeoulBusRoute.class);
+        when(stored.getRouteId()).thenReturn("100100051");
+        when(stored.getRouteNm()).thenReturn("N51");
+        when(db.findByRouteNmContaining("N")).thenReturn(List.of(stored));
+        var client = new SeoulBusScheduleService(http, "key", "https://seoul.test", clock, db);
+
+        server.expect(queryParam("strSrch", "N"))
+                .andRespond(withStatus(HttpStatus.SERVICE_UNAVAILABLE));
+        server.expect(queryParam("busRouteId", "100100051"))
+                .andRespond(withSuccess(xml(""), MediaType.APPLICATION_XML));
+        server.expect(queryParam("strSrch", "N"))
+                .andRespond(withSuccess(xml("<itemList><busRouteId>100100062</busRouteId>"
+                        + "<busRouteNm>N62</busRouteNm><busRouteType>3</busRouteType></itemList>"),
+                        MediaType.APPLICATION_XML));
+
+        List<?> fallback = ReflectionTestUtils.invokeMethod(client, "routeCandidates", "N");
+        assertThat(fallback).hasSize(1);
+        assertThat(fallback.toString()).contains("N51");
+        assertThat(ReflectionTestUtils.getField(client, "retryAfter")).isEqualTo(Instant.EPOCH);
+        assertThat((Instant) ReflectionTestUtils.getField(client, "routeListRetryAfter"))
+                .isAfter(clock.instant());
+
+        // Do not call the failing route-list endpoint again during its backoff.
+        List<?> repeatedFallback = ReflectionTestUtils.invokeMethod(client, "routeCandidates", "N");
+        assertThat(repeatedFallback).hasSize(1);
+
+        // A failed discovery must not put the separate arrival endpoint into backoff.
+        var schedule = new SeoulBusScheduleService.Schedule("100000001", "01001", "100100051",
+                DAY.atTime(0, 0), DAY.atTime(23, 59), 1, "100000002", 2);
+        assertThat(client.arrivals(schedule, DAY.atTime(12, 0))).isEmpty();
+
+        clock.advance(Duration.ofSeconds(61));
+        List<?> recovered = ReflectionTestUtils.invokeMethod(client, "routeCandidates", "N");
+        assertThat(recovered).hasSize(2);
+        assertThat(recovered.toString()).contains("N51", "N62");
+        server.verify();
+    }
+
+    private static final class MutableClock extends Clock {
+        private Instant now = DAY.atTime(12, 0).atZone(ZoneId.of("Asia/Seoul")).toInstant();
+
+        @Override public ZoneId getZone() { return ZoneId.of("Asia/Seoul"); }
+        @Override public Clock withZone(ZoneId zone) { return Clock.fixed(now, zone); }
+        @Override public Instant instant() { return now; }
+
+        void advance(Duration duration) { now = now.plus(duration); }
     }
 
     @Test
