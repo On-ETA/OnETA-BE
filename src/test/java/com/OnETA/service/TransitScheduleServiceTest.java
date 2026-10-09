@@ -318,6 +318,7 @@ class TransitScheduleServiceTest {
         server.expect(requestTo(org.hamcrest.Matchers.containsString("subwayPathSchedule")))
                 .andExpect(queryParam("SID", "600"))
                 .andExpect(queryParam("EID", "201"))
+                .andExpect(queryParam("MID", "601"))
                 .andExpect(queryParam("MODE", "4"))
                 .andExpect(queryParam("DAY", "3"))
                 .andRespond(withSuccess("""
