@@ -143,7 +143,9 @@ class TransitApiServiceTest {
                 .thenReturn(java.util.List.of(candidate));
         when(kakao.searchScheduleCandidates(126.8, 37.5, 127.0, 37.6, 7))
                 .thenReturn(java.util.List.of(candidate));
-        String odsayError = "{\\"error\\":[{\\"code\\":\\"429\\",\\"message\\":\\"Daily quota exceeded\\"}]}";
+        String odsayError = """
+                {"error":[{"code":"429","message":"Daily quota exceeded"}]}
+                """;
         server.expect(queryParam("SX", "126.8"))
                 .andRespond(withSuccess(odsayError, MediaType.APPLICATION_JSON));
         server.expect(queryParam("SX", "126.8"))
