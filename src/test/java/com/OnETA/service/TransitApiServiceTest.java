@@ -127,6 +127,43 @@ class TransitApiServiceTest {
     }
 
     @Test
+    void coordinateOnlySearchKeepsEndpointsAfterOdsayFallbackToKakao() {
+        RestTemplate client = new RestTemplate();
+        MockRestServiceServer server = MockRestServiceServer.bindTo(client).build();
+        TransitApiService service = new TransitApiService(mock(PublicDataTransitService.class),
+                new ObjectMapper(), client);
+        ReflectionTestUtils.setField(service, "odsayApiKey", "test-key");
+        ReflectionTestUtils.setField(service, "odsayApiUrl", "https://api.odsay.com/v1/api/searchPubTransPathR");
+        KakaoTransitClient kakao = mock(KakaoTransitClient.class);
+        when(kakao.isConfigured()).thenReturn(true);
+        ReflectionTestUtils.setField(service, "kakaoTransitClient", kakao);
+        var candidate = TransitDto.RouteOptionResponse.builder()
+                .provider("KAKAO").routeId("KAKAO_SAMPLE").segments(java.util.List.of()).build();
+        when(kakao.search(126.8, 37.5, 127.0, 37.6, Integer.MAX_VALUE))
+                .thenReturn(java.util.List.of(candidate));
+        when(kakao.searchScheduleCandidates(126.8, 37.5, 127.0, 37.6, 7))
+                .thenReturn(java.util.List.of(candidate));
+        String odsayError = "{\\"error\\":[{\\"code\\":\\"429\\",\\"message\\":\\"Daily quota exceeded\\"}]}";
+        server.expect(queryParam("SX", "126.8"))
+                .andRespond(withSuccess(odsayError, MediaType.APPLICATION_JSON));
+        server.expect(queryParam("SX", "126.8"))
+                .andRespond(withSuccess(odsayError, MediaType.APPLICATION_JSON));
+
+        var regular = service.searchRoutes(126.8, 37.5, 127.0, 37.6);
+        var schedule = service.searchScheduleCandidates(126.8, 37.5, 127.0, 37.6, 7);
+
+        assertThat(regular).hasSize(1);
+        assertThat(schedule).hasSize(1);
+        for (var result : java.util.List.of(regular.get(0), schedule.get(0))) {
+            assertThat(result.getOriginX()).isEqualTo(126.8);
+            assertThat(result.getOriginY()).isEqualTo(37.5);
+            assertThat(result.getDestX()).isEqualTo(127.0);
+            assertThat(result.getDestY()).isEqualTo(37.6);
+        }
+        server.verify();
+    }
+
+    @Test
     void completeSavedRouteCoordinatePairWinsOverOlderWrapperCoordinates() {
         TransitApiService service = new TransitApiService(mock(PublicDataTransitService.class),
                 new ObjectMapper(), mock(RestTemplate.class));
