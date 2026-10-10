@@ -50,7 +50,7 @@ class NotificationDuplicateTest {
         var request = request();
         request.setRouteName("another name");
         request.setRepeatDays(List.of("MON"));
-        request.setScheduleType(NotificationScheduleType.LAST_TRANSIT);
+        request.setScheduleType(NotificationScheduleType.NORMAL);
         assertThatThrownBy(() -> service.createArrivalNotification("me", request))
                 .isInstanceOfSatisfying(GlobalException.class,
                         e -> assertThat(e.getErrorCode()).isEqualTo(ErrorCode.NOTIFICATION_ALREADY_EXISTS));
@@ -133,6 +133,60 @@ class NotificationDuplicateTest {
         changed.getSegments().get(0).setStations(List.of(
                 TransitDto.RouteStation.builder().name("via B").build()));
         assertThat(NotificationRouteIdentity.of(changed)).isNotEqualTo(NotificationRouteIdentity.of(original));
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.EnumSource(value = NotificationScheduleType.class,
+            names = {"FIRST_TRANSIT", "LAST_TRANSIT"})
+    void transitCreateAndResetAllowRouteUsedByNormalNotification(NotificationScheduleType type) {
+        var normal = existing(10L, "old");
+        when(arrivals.findAllForDuplicateCheckByUserId(1L)).thenReturn(List.of(normal));
+        when(transit.readSavedRoute("new")).thenReturn(route("100"));
+        var create = request();
+        create.setScheduleType(type);
+        service.createArrivalNotification("me", create);
+        verify(arrivals).save(any());
+
+        var own = existing(11L, "old");
+        own.updateScheduleType(type);
+        when(arrivals.findById(11L)).thenReturn(Optional.of(own));
+        var update = new NotificationDto.UpdateArrivalRequest();
+        update.setRouteDetails("new");
+        service.updateArrivalNotification("me", 11L, update);
+        assertThat(own.getRouteDetails()).isEqualTo("new");
+    }
+
+    @Test
+    void normalCreateAndUpdateIgnoreTransitRoutes() {
+        var first = existing(11L, "old");
+        first.updateScheduleType(NotificationScheduleType.FIRST_TRANSIT);
+        var last = existing(12L, "old");
+        last.updateScheduleType(NotificationScheduleType.LAST_TRANSIT);
+        when(arrivals.findAllForDuplicateCheckByUserId(1L)).thenReturn(List.of(first, last));
+        when(transit.readSavedRoute("new")).thenReturn(route("100"));
+        service.createArrivalNotification("me", request());
+        verify(arrivals).save(any());
+        var own = existing(10L, "old");
+        when(arrivals.findById(10L)).thenReturn(Optional.of(own));
+        var update = new NotificationDto.UpdateArrivalRequest();
+        update.setRouteDetails("new");
+        service.updateArrivalNotification("me", 10L, update);
+        assertThat(own.getRouteDetails()).isEqualTo("new");
+    }
+
+    @Test
+    void convertingTransitToNormalChecksExistingNormalRoute() {
+        var own = existing(10L, "old");
+        own.updateScheduleType(NotificationScheduleType.LAST_TRANSIT);
+        when(arrivals.findById(10L)).thenReturn(Optional.of(own));
+        when(arrivals.findAllForDuplicateCheckByUserId(1L)).thenReturn(List.of(existing(11L, "old")));
+        var update = new NotificationDto.UpdateArrivalRequest();
+        update.setScheduleType(NotificationScheduleType.NORMAL);
+        update.setTargetArrivalTime(LocalTime.of(9, 0));
+        assertThatThrownBy(() -> service.updateArrivalNotification("me", 10L, update))
+                .isInstanceOfSatisfying(GlobalException.class,
+                        e -> assertThat(e.getErrorCode()).isEqualTo(ErrorCode.NOTIFICATION_ALREADY_EXISTS));
+        assertThat(own.getScheduleType()).isEqualTo(NotificationScheduleType.LAST_TRANSIT);
     }
 
     private ArrivalNotification existing(long id, String details) {

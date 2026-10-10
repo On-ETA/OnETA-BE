@@ -88,7 +88,10 @@ class NotificationSavedRouteValidationTest {
         duplicate.toggleActive(false);
         when(arrivals.findAllForDuplicateCheckByUserId(1L))
                 .thenReturn(List.of(saved(10L, "{}"), duplicate));
-        assertThatThrownBy(() -> service.createArrivalNotification("me", request(ROUTE)))
+        var normalRequest = request(ROUTE);
+        normalRequest.setScheduleType(NotificationScheduleType.NORMAL);
+        normalRequest.setTargetArrivalTime(LocalTime.of(9, 0));
+        assertThatThrownBy(() -> service.createArrivalNotification("me", normalRequest))
                 .isInstanceOfSatisfying(GlobalException.class,
                         e -> assertThat(e.getErrorCode()).isEqualTo(ErrorCode.NOTIFICATION_ALREADY_EXISTS));
         verify(arrivals, never()).save(any());

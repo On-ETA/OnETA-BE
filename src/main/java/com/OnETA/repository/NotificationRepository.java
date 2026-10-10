@@ -17,6 +17,11 @@ public interface NotificationRepository extends JpaRepository<Notification, Long
     @Query(value = "DELETE FROM notification_schedule_snapshots WHERE notification_id IN (:ids)", nativeQuery = true)
     int deleteScheduleSnapshotsByIds(@Param("ids") List<Long> ids);
 
+    // Route updates still need the managed notification and its lazy reminder offsets.
+    @Modifying(flushAutomatically = true)
+    @Query(value = "DELETE FROM notification_schedule_snapshots WHERE notification_id IN (:ids)", nativeQuery = true)
+    int deleteScheduleSnapshotsForUpdateByIds(@Param("ids") List<Long> ids);
+
     @Modifying(flushAutomatically = true, clearAutomatically = true)
     @Query(value = "DELETE FROM notification_deliveries WHERE notification_id IN (:ids)", nativeQuery = true)
     int deleteDeliveriesByIds(@Param("ids") List<Long> ids);

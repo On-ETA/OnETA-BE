@@ -41,7 +41,8 @@ jobs:
             --tests 'com.OnETA.service.TransitRouteOptimizationServiceTest' \
             --tests 'com.OnETA.service.TransitApiServiceTest' \
             --tests 'com.OnETA.service.NotificationServiceTest' \
-            --tests 'com.OnETA.service.NotificationSavedRouteValidationTest'
+            --tests 'com.OnETA.service.NotificationSavedRouteValidationTest' \
+            --tests 'com.OnETA.service.NotificationDuplicateTest'
 
       - name: Copy JAR to EC2
         if: github.event_name == 'push'
