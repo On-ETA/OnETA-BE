@@ -160,15 +160,21 @@ public class TransitApiService {
     }
 
     private static Double nestedEndpointCoordinate(JsonNode node, String endpoint, String axis) {
-        if (node == null) return null;
+        if (node == null || !node.isObject()) return null;
         for (String name : new String[]{endpoint + "Place", endpoint}) {
-            JsonNode place = node.path(name);
-            Double value = firstCoordinate(doubleOrNull(place, axis),
-                    doubleOrNull(place.path("raw"), axis),
-                    doubleOrNull(place.path("raw").path("raw"), axis));
+            JsonNode place = node.get(name);
+            if (place == null || !place.isObject()) continue;
+            JsonNode raw = place.get("raw");
+            JsonNode nestedRaw = raw == null || !raw.isObject() ? null : raw.get("raw");
+            Double value = firstCoordinate(safeCoordinate(place, axis),
+                    safeCoordinate(raw, axis), safeCoordinate(nestedRaw, axis));
             if (value != null) return value;
         }
         return null;
+    }
+
+    private static Double safeCoordinate(JsonNode node, String axis) {
+        return node == null || !node.isObject() ? null : doubleOrNull(node, axis);
     }
 
     private static String firstNonBlank(String... values) {
