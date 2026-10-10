@@ -36,6 +36,12 @@ public class TransitDto {
         private OffsetDateTime selectedDepartureAt;
         private String originAddress;
         private String destinationAddress;
+        // Exact request endpoints, not the coordinates of the first/last transit stop.
+        // Keep these in routeDetails so both NORMAL and FIRST/LAST route resets can reuse them.
+        private Double originX;
+        private Double originY;
+        private Double destX;
+        private Double destY;
         private Integer totalDurationMinutes;
         private Integer realTimeDurationMinutes;
         private Integer totalCost;

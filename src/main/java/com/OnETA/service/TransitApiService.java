@@ -110,6 +110,18 @@ public class TransitApiService {
             JsonNode root = objectMapper.readTree(routeDetails);
             JsonNode routeNode = root != null && root.path("route").isObject()
                     ? root.path("route") : root;
+            // Old saved segments omit nightBus. Jackson's strict primitive-null
+            // mode rejects the missing boolean instead of using false.
+            // Normalize only that absent legacy flag before deserialization.
+            if (routeNode != null && routeNode.path("segments").isArray()) {
+                for (JsonNode segmentNode : routeNode.path("segments")) {
+                    if (segmentNode instanceof tools.jackson.databind.node.ObjectNode segmentObject
+                            && (segmentObject.get("nightBus") == null
+                            || segmentObject.get("nightBus").isNull())) {
+                        segmentObject.put("nightBus", false);
+                    }
+                }
+            }
             TransitDto.RouteOptionResponse route =
                     objectMapper.treeToValue(routeNode, TransitDto.RouteOptionResponse.class);
             List<TransitDto.RouteSegment> segments = route.getSegments() == null
@@ -121,14 +133,60 @@ public class TransitApiService {
             String destinationAddress = firstNonBlank(route.getDestinationAddress(),
                     root == null ? null : root.path("destinationAddress").asText(null),
                     root == null ? null : root.path("destination").asText(null));
+            // Older routeDetails can store the selected address coordinates under
+            // origin/destination objects or the outer wrapper rather than route.
+            // Do not substitute a bus/subway stop for an unknown journey endpoint.
+            TransitDto.RouteSegment first = segments.isEmpty() ? null : segments.get(0);
+            TransitDto.RouteSegment last = segments.isEmpty() ? null : segments.get(segments.size() - 1);
+            Double firstWalkX = first != null && "WALK".equals(first.getTransitType()) ? first.getStartX() : null;
+            Double firstWalkY = first != null && "WALK".equals(first.getTransitType()) ? first.getStartY() : null;
+            Double lastWalkX = last != null && "WALK".equals(last.getTransitType()) ? last.getEndX() : null;
+            Double lastWalkY = last != null && "WALK".equals(last.getTransitType()) ? last.getEndY() : null;
             return route.toBuilder()
                     .originAddress(originAddress)
                     .destinationAddress(destinationAddress)
+                    .originX(firstCoordinate(route.getOriginX(), doubleOrNull(root, "originX"),
+                            nestedEndpointCoordinate(root, "origin", "x"),
+                            nestedEndpointCoordinate(routeNode, "origin", "x"), firstWalkX))
+                    .originY(firstCoordinate(route.getOriginY(), doubleOrNull(root, "originY"),
+                            nestedEndpointCoordinate(root, "origin", "y"),
+                            nestedEndpointCoordinate(routeNode, "origin", "y"), firstWalkY))
+                    .destX(firstCoordinate(route.getDestX(), doubleOrNull(root, "destX"),
+                            nestedEndpointCoordinate(root, "destination", "x"),
+                            nestedEndpointCoordinate(routeNode, "destination", "x"), lastWalkX))
+                    .destY(firstCoordinate(route.getDestY(), doubleOrNull(root, "destY"),
+                            nestedEndpointCoordinate(root, "destination", "y"),
+                            nestedEndpointCoordinate(routeNode, "destination", "y"), lastWalkY))
                     .segments(segments)
                     .build();
         } catch (Exception e) {
             throw new GlobalException(ErrorCode.INVALID_INPUT_VALUE, "저장된 경로 정보를 읽을 수 없습니다.");
         }
+    }
+
+    private static Double firstCoordinate(Double... values) {
+        for (Double value : values) {
+            if (value != null && Double.isFinite(value)) return value;
+        }
+        return null;
+    }
+
+    private static Double nestedEndpointCoordinate(JsonNode node, String endpoint, String axis) {
+        if (node == null || !node.isObject()) return null;
+        for (String name : new String[]{endpoint + "Place", endpoint}) {
+            JsonNode place = node.get(name);
+            if (place == null || !place.isObject()) continue;
+            JsonNode raw = place.get("raw");
+            JsonNode nestedRaw = raw == null || !raw.isObject() ? null : raw.get("raw");
+            Double value = firstCoordinate(safeCoordinate(place, axis),
+                    safeCoordinate(raw, axis), safeCoordinate(nestedRaw, axis));
+            if (value != null) return value;
+        }
+        return null;
+    }
+
+    private static Double safeCoordinate(JsonNode node, String axis) {
+        return node == null || !node.isObject() ? null : doubleOrNull(node, axis);
     }
 
     private static String firstNonBlank(String... values) {
@@ -303,10 +361,12 @@ public class TransitApiService {
         }
         final String resolvedOriginAddress = normalizeAddressText(originAddress);
         final String resolvedDestinationAddress = normalizeAddressText(destAddress);
+        final Double actualDestX = destX, actualDestY = destY;
         return searchRoutes(originX, originY, destX, destY).stream()
                 .map(route -> route.toBuilder()
                         .originAddress(resolvedOriginAddress)
                         .destinationAddress(resolvedDestinationAddress)
+                        .originX(originX).originY(originY).destX(actualDestX).destY(actualDestY)
                         .build())
                 .toList();
     }
@@ -325,10 +385,12 @@ public class TransitApiService {
         }
         final String resolvedOriginAddress = normalizeAddressText(originAddress);
         final String resolvedDestinationAddress = normalizeAddressText(destAddress);
+        final Double actualDestX = destX, actualDestY = destY;
         return searchScheduleCandidates(originX, originY, destX, destY, maxCandidates).stream()
                 .map(route -> route.toBuilder()
                         .originAddress(resolvedOriginAddress)
                         .destinationAddress(resolvedDestinationAddress)
+                        .originX(originX).originY(originY).destX(actualDestX).destY(actualDestY)
                         .build())
                 .toList();
     }
