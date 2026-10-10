@@ -250,6 +250,8 @@ public class TransitRouteOptimizationService {
                     .status(FirstLastRouteStatus.NIGHT_ONLY)
                     .build());
         }
+        result.sort(Comparator.comparingInt(item ->
+                item.getStatus() == FirstLastRouteStatus.NIGHT_ONLY ? 0 : 1));
         return result;
     }
 
