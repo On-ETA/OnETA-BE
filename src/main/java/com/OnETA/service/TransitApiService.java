@@ -148,6 +148,11 @@ public class TransitApiService {
                     .segments(segments)
                     .build();
         } catch (Exception e) {
+            // Keep the original exception attached for diagnosis without exposing
+            // stored address contents or provider payloads to API callers.
+            log.warn("Saved route coordinate restoration failed: errorType={}, source={}",
+                    e.getClass().getSimpleName(),
+                    e.getStackTrace().length == 0 ? "unknown" : e.getStackTrace()[0].toString());
             throw new GlobalException(ErrorCode.INVALID_INPUT_VALUE, "저장된 경로 정보를 읽을 수 없습니다.");
         }
     }
