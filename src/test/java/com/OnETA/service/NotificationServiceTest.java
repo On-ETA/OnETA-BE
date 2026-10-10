@@ -72,8 +72,8 @@ class NotificationServiceTest {
     }
 
     @ParameterizedTest
-    @EnumSource(value = NotificationScheduleType.class, names = {"FIRST_TRANSIT"})
-    void rejectsNightOnlyRouteForFirstSave(NotificationScheduleType type) {
+    @EnumSource(value = NotificationScheduleType.class, names = {"FIRST_TRANSIT", "LAST_TRANSIT"})
+    void rejectsNightOnlyRouteForFirstAndLastSave(NotificationScheduleType type) {
         var route = com.OnETA.dto.TransitDto.RouteOptionResponse.builder()
                 .provider("ODSAY").routeId("NIGHT_test")
                 .segments(List.of(
@@ -142,7 +142,7 @@ class NotificationServiceTest {
     }
 
     @Test
-    void savesNightBusLastNotificationWithoutLiveTimetableValidation() {
+    void normalNotificationStillAllowsNightBusRoute() {
         var route = com.OnETA.dto.TransitDto.RouteOptionResponse.builder()
                 .provider("SEOUL_NIGHT").routeId("NIGHT_test")
                 .segments(List.of(com.OnETA.dto.TransitDto.RouteSegment.builder()
@@ -151,9 +151,34 @@ class NotificationServiceTest {
         when(user.getId()).thenReturn(1L);
         when(users.findByEmail("test@example.com")).thenReturn(Optional.of(user));
         when(arrivals.save(any())).thenAnswer(i -> i.getArgument(0));
-        service.createArrivalNotification("test@example.com", request(NotificationScheduleType.LAST_TRANSIT));
+        var request = request(NotificationScheduleType.NORMAL);
+        request.setTargetArrivalTime(LocalTime.of(9, 0));
+        service.createArrivalNotification("test@example.com", request);
         verify(arrivals).save(any());
         verify(transit, never()).validateSeoulSchedule(any());
+    }
+
+    @Test
+    void resettingExistingLastToNightOnlyRouteIsRejectedWithT008() {
+        when(user.getId()).thenReturn(1L);
+        when(users.findByEmail("test@example.com")).thenReturn(Optional.of(user));
+        var notification = new ArrivalNotification(user, "막차 알림", List.of(10), 0,
+                null, "old", NotificationScheduleType.LAST_TRANSIT);
+        org.springframework.test.util.ReflectionTestUtils.setField(notification, "id", 19L);
+        when(arrivals.findById(19L)).thenReturn(Optional.of(notification));
+        when(transit.readSavedRoute("newN51")).thenReturn(com.OnETA.dto.TransitDto.RouteOptionResponse.builder()
+                .routeId("SEOUL_NIGHT_51")
+                .segments(List.of(com.OnETA.dto.TransitDto.RouteSegment.builder()
+                        .transitType("BUS").transitName("N51").nightBus(true).build()))
+                .build());
+        var request = new NotificationDto.UpdateArrivalRequest();
+        request.setRouteDetails("newN51");
+
+        assertThatThrownBy(() -> service.updateArrivalNotification("test@example.com", 19L, request))
+                .isInstanceOfSatisfying(GlobalException.class, e -> assertThat(e.getErrorCode())
+                        .isEqualTo(com.OnETA.common.error.ErrorCode.TRANSIT_NIGHT_ONLY_ROUTE));
+        assertThat(notification.getRouteDetails()).isEqualTo("old");
+        verify(notifications, never()).deleteScheduleSnapshotsByIds(anyList());
     }
 
     @Test
