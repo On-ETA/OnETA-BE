@@ -110,6 +110,18 @@ public class TransitApiService {
             JsonNode root = objectMapper.readTree(routeDetails);
             JsonNode routeNode = root != null && root.path("route").isObject()
                     ? root.path("route") : root;
+            // Old saved segments omit nightBus. Jackson's strict primitive-null
+            // mode rejects the missing boolean instead of using false.
+            // Normalize only that absent legacy flag before deserialization.
+            if (routeNode != null && routeNode.path("segments").isArray()) {
+                for (JsonNode segmentNode : routeNode.path("segments")) {
+                    if (segmentNode instanceof tools.jackson.databind.node.ObjectNode segmentObject
+                            && (segmentObject.get("nightBus") == null
+                            || segmentObject.get("nightBus").isNull())) {
+                        segmentObject.put("nightBus", false);
+                    }
+                }
+            }
             TransitDto.RouteOptionResponse route =
                     objectMapper.treeToValue(routeNode, TransitDto.RouteOptionResponse.class);
             List<TransitDto.RouteSegment> segments = route.getSegments() == null
@@ -148,10 +160,6 @@ public class TransitApiService {
                     .segments(segments)
                     .build();
         } catch (Exception e) {
-            // Keep the original exception attached for diagnosis without exposing
-            // stored address contents or provider payloads to API callers.
-            log.warn("Saved route coordinate restoration failed: errorType={}, reason={}",
-                    e.getClass().getSimpleName(), e.getMessage());
             throw new GlobalException(ErrorCode.INVALID_INPUT_VALUE, "저장된 경로 정보를 읽을 수 없습니다.");
         }
     }
