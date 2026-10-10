@@ -138,25 +138,27 @@ public class TransitApiService {
             // Do not substitute a bus/subway stop for an unknown journey endpoint.
             TransitDto.RouteSegment first = segments.isEmpty() ? null : segments.get(0);
             TransitDto.RouteSegment last = segments.isEmpty() ? null : segments.get(segments.size() - 1);
-            Double firstWalkX = first != null && "WALK".equals(first.getTransitType()) ? first.getStartX() : null;
-            Double firstWalkY = first != null && "WALK".equals(first.getTransitType()) ? first.getStartY() : null;
-            Double lastWalkX = last != null && "WALK".equals(last.getTransitType()) ? last.getEndX() : null;
-            Double lastWalkY = last != null && "WALK".equals(last.getTransitType()) ? last.getEndY() : null;
+            CoordinatePair origin = firstCompletePair(
+                    completePair(route.getOriginX(), route.getOriginY()),
+                    nodePair(root, "originX", "originY"),
+                    nestedEndpointPair(root, "origin"),
+                    nestedEndpointPair(routeNode, "origin"),
+                    first != null && "WALK".equals(first.getTransitType())
+                            ? completePair(first.getStartX(), first.getStartY()) : null);
+            CoordinatePair destination = firstCompletePair(
+                    completePair(route.getDestX(), route.getDestY()),
+                    nodePair(root, "destX", "destY"),
+                    nestedEndpointPair(root, "destination"),
+                    nestedEndpointPair(routeNode, "destination"),
+                    last != null && "WALK".equals(last.getTransitType())
+                            ? completePair(last.getEndX(), last.getEndY()) : null);
             return route.toBuilder()
                     .originAddress(originAddress)
                     .destinationAddress(destinationAddress)
-                    .originX(firstCoordinate(route.getOriginX(), doubleOrNull(root, "originX"),
-                            nestedEndpointCoordinate(root, "origin", "x"),
-                            nestedEndpointCoordinate(routeNode, "origin", "x"), firstWalkX))
-                    .originY(firstCoordinate(route.getOriginY(), doubleOrNull(root, "originY"),
-                            nestedEndpointCoordinate(root, "origin", "y"),
-                            nestedEndpointCoordinate(routeNode, "origin", "y"), firstWalkY))
-                    .destX(firstCoordinate(route.getDestX(), doubleOrNull(root, "destX"),
-                            nestedEndpointCoordinate(root, "destination", "x"),
-                            nestedEndpointCoordinate(routeNode, "destination", "x"), lastWalkX))
-                    .destY(firstCoordinate(route.getDestY(), doubleOrNull(root, "destY"),
-                            nestedEndpointCoordinate(root, "destination", "y"),
-                            nestedEndpointCoordinate(routeNode, "destination", "y"), lastWalkY))
+                    .originX(origin == null ? null : origin.x())
+                    .originY(origin == null ? null : origin.y())
+                    .destX(destination == null ? null : destination.x())
+                    .destY(destination == null ? null : destination.y())
                     .segments(segments)
                     .build();
         } catch (Exception e) {
@@ -164,29 +166,38 @@ public class TransitApiService {
         }
     }
 
-    private static Double firstCoordinate(Double... values) {
-        for (Double value : values) {
-            if (value != null && Double.isFinite(value)) return value;
+    private record CoordinatePair(Double x, Double y) {}
+
+    private static CoordinatePair completePair(Double x, Double y) {
+        return x != null && y != null && Double.isFinite(x) && Double.isFinite(y)
+                ? new CoordinatePair(x, y) : null;
+    }
+
+    private static CoordinatePair firstCompletePair(CoordinatePair... sources) {
+        for (CoordinatePair source : sources) {
+            if (source != null) return source;
         }
         return null;
     }
 
-    private static Double nestedEndpointCoordinate(JsonNode node, String endpoint, String axis) {
+    private static CoordinatePair nodePair(JsonNode node, String xField, String yField) {
+        if (node == null || !node.isObject()) return null;
+        return completePair(doubleOrNull(node, xField), doubleOrNull(node, yField));
+    }
+
+    private static CoordinatePair nestedEndpointPair(JsonNode node, String endpoint) {
         if (node == null || !node.isObject()) return null;
         for (String name : new String[]{endpoint + "Place", endpoint}) {
             JsonNode place = node.get(name);
             if (place == null || !place.isObject()) continue;
             JsonNode raw = place.get("raw");
-            JsonNode nestedRaw = raw == null || !raw.isObject() ? null : raw.get("raw");
-            Double value = firstCoordinate(safeCoordinate(place, axis),
-                    safeCoordinate(raw, axis), safeCoordinate(nestedRaw, axis));
-            if (value != null) return value;
+            JsonNode nestedRaw = raw != null && raw.isObject() ? raw.get("raw") : null;
+            CoordinatePair pair = firstCompletePair(
+                    nodePair(place, "x", "y"), nodePair(raw, "x", "y"),
+                    nodePair(nestedRaw, "x", "y"));
+            if (pair != null) return pair;
         }
         return null;
-    }
-
-    private static Double safeCoordinate(JsonNode node, String axis) {
-        return node == null || !node.isObject() ? null : doubleOrNull(node, axis);
     }
 
     private static String firstNonBlank(String... values) {
@@ -214,7 +225,19 @@ public class TransitApiService {
 
     public List<TransitDto.RouteOptionResponse> searchRoutes(
             Double originX, Double originY, Double destX, Double destY) {
-        return searchRoutes(originX, originY, destX, destY, Integer.MAX_VALUE, true);
+        return withEndpointCoordinates(
+                searchRoutes(originX, originY, destX, destY, Integer.MAX_VALUE, true),
+                originX, originY, destX, destY);
+    }
+
+    private static List<TransitDto.RouteOptionResponse> withEndpointCoordinates(
+            List<TransitDto.RouteOptionResponse> routes,
+            Double originX, Double originY, Double destX, Double destY) {
+        return routes.stream()
+                .map(route -> route.toBuilder()
+                        .originX(originX).originY(originY).destX(destX).destY(destY)
+                        .build())
+                .toList();
     }
 
     public List<TransitDto.RouteOptionResponse> searchScheduleCandidates(
@@ -288,7 +311,7 @@ public class TransitApiService {
             }
         }
 
-        return combined;
+        return withEndpointCoordinates(combined, originX, originY, destX, destY);
     }
 
     private List<TransitDto.RouteOptionResponse> searchRoutes(
