@@ -120,12 +120,15 @@ public class NotificationService {
                 .orElseThrow(() -> new com.OnETA.common.exception.GlobalException(com.OnETA.common.error.ErrorCode.USER_NOT_FOUND));
         ArrivalNotification notification = getArrivalNotificationByEmailAndId(email, id);
 
-        if (request.getRouteDetails() != null) {
-            validateUniqueRoute(notification.getUser().getId(), id, request.getRouteDetails(), false);
-        }
         validateReminderOffsets(request.getReminderOffsetMinutes(), false);
         NotificationScheduleType effectiveType = request.getScheduleType() == null
                 ? notification.getScheduleType() : request.getScheduleType();
+        if (request.getRouteDetails() != null || (!isTransit(effectiveType)
+                && isTransit(notification.getScheduleType()))) {
+            validateUniqueRoute(notification.getUser().getId(), id,
+                    request.getRouteDetails() == null ? notification.getRouteDetails() : request.getRouteDetails(),
+                    isTransit(effectiveType));
+        }
         if (com.OnETA.entity.NotificationCategory.of(effectiveType)
                 != com.OnETA.entity.NotificationCategory.of(notification.getScheduleType())) {
             validateCategoryLimit(notification.getUser().getId(), effectiveType);
@@ -147,7 +150,7 @@ public class NotificationService {
         // When the user chose a specific search result, pin the new result atomically.
         if (isTransit(effectiveType) && (request.getReminderOffsetMinutes() != null
                 || request.getRouteDetails() != null || request.getScheduleType() != null)) {
-            notificationRepository.deleteScheduleSnapshotsByIds(List.of(notification.getId()));
+            notificationRepository.deleteScheduleSnapshotsForUpdateByIds(List.of(notification.getId()));
             // A route reset carries a new preview inside routeDetails without an FE change.
             if (request.getRouteDetails() != null) {
                 var chosen = transitApiService.readSavedRoute(request.getRouteDetails());
@@ -266,12 +269,13 @@ public class NotificationService {
         }
     }
 
-    private void validateUniqueRoute(Long userId, Long excludedId, String details, boolean replacingTransit) {
+    private void validateUniqueRoute(Long userId, Long excludedId, String details, boolean transit) {
         // Validate incoming data even when this is the user's first saved route.
         var identity = NotificationRouteIdentity.of(transitApiService.readSavedRoute(details));
+        if (transit) return;
         var existing = arrivalNotificationRepository.findAllForDuplicateCheckByUserId(userId).stream()
                 .filter(n -> !n.isTransitArchived())
-                .filter(n -> !replacingTransit || !isTransit(n.getScheduleType()))
+                .filter(n -> !isTransit(n.getScheduleType()))
                 .filter(n -> excludedId == null || !excludedId.equals(n.getId())).toList();
         for (var notification : existing) {
             NotificationRouteIdentity savedIdentity;

@@ -140,6 +140,10 @@ class NotificationServiceTest {
 
         verify(schedules).pinSelectedDeparture(eq(notification), eq(selected),
                 eq(java.time.ZoneId.of("Asia/Seoul")));
+        var order = inOrder(notifications, schedules);
+        order.verify(notifications).deleteScheduleSnapshotsForUpdateByIds(List.of(17L));
+        order.verify(schedules).pinSelectedDeparture(eq(notification), eq(selected), any());
+        verify(notifications, never()).deleteScheduleSnapshotsByIds(anyList());
     }
 
     @Test
@@ -263,7 +267,7 @@ class NotificationServiceTest {
 
         assertThat(notification.getReminderOffsetMinutesList()).containsExactly(5, 30);
         assertThat(notification.getScheduleType()).isEqualTo(type);
-        verify(notifications).deleteScheduleSnapshotsByIds(List.of(7L));
+        verify(notifications).deleteScheduleSnapshotsForUpdateByIds(List.of(7L));
     }
 
     @ParameterizedTest
