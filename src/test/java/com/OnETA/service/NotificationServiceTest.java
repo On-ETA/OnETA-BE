@@ -60,6 +60,7 @@ class NotificationServiceTest {
 
         var notification = new ArrivalNotification(user, "경로", List.of(10), 0,
                 LocalTime.of(9, 0), "{}", NotificationScheduleType.NORMAL);
+        org.springframework.test.util.ReflectionTestUtils.setField(notification, "id", 1L);
         when(arrivals.findById(1L)).thenReturn(Optional.of(notification));
         var update = new NotificationDto.UpdateArrivalRequest();
         update.setScheduleType(type);
@@ -309,6 +310,7 @@ class NotificationServiceTest {
         when(users.findByEmail("test@example.com")).thenReturn(Optional.of(user));
         ArrivalNotification notification = new ArrivalNotification(user, "경로", List.of(10), 31,
                 LocalTime.of(9, 0), "{}", NotificationScheduleType.NORMAL);
+        org.springframework.test.util.ReflectionTestUtils.setField(notification, "id", 1L);
         when(arrivals.findById(1L)).thenReturn(Optional.of(notification));
         var update = new NotificationDto.UpdateArrivalRequest();
         update.setScheduleType(NotificationScheduleType.FIRST_TRANSIT);
