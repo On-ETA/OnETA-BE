@@ -144,11 +144,11 @@ class TransitRouteOptimizationServiceTest {
                 .thenReturn(now.toLocalDate().atTime(3, 10));
         var result = service.search("user@test.com", 126.8, 37.5, null,
                 127.0, 37.6, null, NotificationScheduleType.LAST_TRANSIT);
-        assertThat(result).extracting(r -> r.getRoute().getRouteId()).containsExactly("ORDINARY", "NIGHT");
+        assertThat(result).extracting(r -> r.getRoute().getRouteId()).containsExactly("NIGHT", "ORDINARY");
         assertThat(result).extracting(TransitDto.FirstLastRouteOptionResponse::getStatus)
-                .containsExactly(FirstLastRouteStatus.AVAILABLE, FirstLastRouteStatus.NIGHT_ONLY);
-        assertThat(result.get(0).getEstimatedDepartureAt().toLocalDate()).isEqualTo(now.toLocalDate());
-        assertThat(result.get(1).getEstimatedDepartureAt()).isNull();
+                .containsExactly(FirstLastRouteStatus.NIGHT_ONLY, FirstLastRouteStatus.AVAILABLE);
+        assertThat(result.get(1).getEstimatedDepartureAt().toLocalDate()).isEqualTo(now.toLocalDate());
+        assertThat(result.get(0).getEstimatedDepartureAt()).isNull();
         verify(schedules, never()).previewCurrentLastDeparture(eq(night), any(), anyMap());
         verify(schedules, never()).previewDepartureForServiceDate(any(), any(), any(), anyMap());
     }
@@ -395,7 +395,7 @@ class TransitRouteOptimizationServiceTest {
                 anyDouble(), anyDouble(), any(), eq(Integer.MAX_VALUE))).thenReturn(routes);
         assertThat(service.search("user@test.com", 126.8, 37.5, null,
                 127.0, 37.6, null, NotificationScheduleType.LAST_TRANSIT))
-                .extracting(r -> r.getRoute().getRouteId()).containsExactly("R1", "R0", "UNKNOWN");
+                .extracting(r -> r.getRoute().getRouteId()).containsExactly("UNKNOWN", "R1", "R0");
     }
 
     @Test
@@ -494,7 +494,7 @@ class TransitRouteOptimizationServiceTest {
     }
 
     @Test
-    void midnightAvailableRouteRanksBeforeUnverifiedNightOnlyRoute() {
+    void midnightNightOnlyRouteRanksBeforeAvailableRoute() {
         var api = mock(TransitApiService.class);
         var schedules = mock(TransitScheduleService.class);
         var service = new TransitRouteOptimizationService(api, schedules);
@@ -514,11 +514,11 @@ class TransitRouteOptimizationServiceTest {
                 127.0, 37.6, null, NotificationScheduleType.LAST_TRANSIT);
 
         assertThat(result).extracting(r -> r.getRoute().getRouteId())
-                .containsExactly("AVAILABLE", "N62_ONLY");
+                .containsExactly("N62_ONLY", "AVAILABLE");
         assertThat(result).extracting(TransitDto.FirstLastRouteOptionResponse::getStatus)
-                .containsExactly(FirstLastRouteStatus.AVAILABLE, FirstLastRouteStatus.NIGHT_ONLY);
-        assertThat(result.get(0).getEstimatedDepartureAt()).isNotNull();
-        assertThat(result.get(1).getEstimatedDepartureAt()).isNull();
+                .containsExactly(FirstLastRouteStatus.NIGHT_ONLY, FirstLastRouteStatus.AVAILABLE);
+        assertThat(result.get(1).getEstimatedDepartureAt()).isNotNull();
+        assertThat(result.get(0).getEstimatedDepartureAt()).isNull();
     }
 
     private void setClock(TransitRouteOptimizationService service, LocalDateTime now) {
