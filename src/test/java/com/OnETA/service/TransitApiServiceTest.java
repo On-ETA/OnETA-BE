@@ -26,6 +26,178 @@ import static org.springframework.test.web.client.response.MockRestResponseCreat
 
 class TransitApiServiceTest {
 
+    @Test
+    void scheduleSearchIncludesExactOriginAndDestinationCoordinatesNotStationCoordinates() {
+        RestTemplate client = new RestTemplate();
+        MockRestServiceServer server = MockRestServiceServer.bindTo(client).build();
+        TransitApiService service = new TransitApiService(mock(PublicDataTransitService.class),
+                new ObjectMapper(), client);
+        ReflectionTestUtils.setField(service, "odsayApiKey", "test-key");
+        ReflectionTestUtils.setField(service, "odsayApiUrl", "https://api.odsay.com/v1/api/searchPubTransPathR");
+        server.expect(queryParam("SX", "126.92463186895164"))
+                .andRespond(withSuccess("""
+                        {"result":{"path":[{"info":{"totalTime":34,"payment":0,"transitCount":0},
+                         "subPath":[
+                           {"trafficType":3,"sectionTime":11},
+                           {"trafficType":2,"sectionTime":12,"startName":"서교동","endName":"신도림역",
+                            "startX":126.92,"startY":37.54,"endX":126.89,"endY":37.51,
+                            "lane":[{"busNo":"N51","busID":123,"type":11}]},
+                           {"trafficType":3,"sectionTime":11}
+                         ]}]}}
+                        """, MediaType.APPLICATION_JSON));
+
+        var results = service.searchScheduleCandidates("test@example.com",
+                126.92463186895164, 37.550164265498864, "출발지",
+                126.88852, 37.50975, "목적지", 10);
+
+        assertThat(results).hasSize(1);
+        var route = results.get(0);
+        assertThat(route.getOriginX()).isEqualTo(126.92463186895164);
+        assertThat(route.getOriginY()).isEqualTo(37.550164265498864);
+        assertThat(route.getDestX()).isEqualTo(126.88852);
+        assertThat(route.getDestY()).isEqualTo(37.50975);
+        // The endpoint coordinates remain independent of transit stop locations.
+        assertThat(route.getOriginX()).isNotEqualTo(126.92);
+        assertThat(service.readSavedRoute(new ObjectMapper().writeValueAsString(route))
+                .getOriginX()).isEqualTo(126.92463186895164);
+        server.verify();
+    }
+
+    @Test
+    void oldWrappedRouteRestoresCoordinatesFromStoredPlaceObjectsNotBusStops() {
+        TransitApiService service = new TransitApiService(mock(PublicDataTransitService.class),
+                new ObjectMapper(), mock(RestTemplate.class));
+        var details = """
+                {"route":{"routeId":"SEOUL_NIGHT_old","provider":"SEOUL_NIGHT",
+                 "originAddress":"출발지","destinationAddress":"목적지",
+                 "segments":[
+                    {"transitType":"WALK","durationMinutes":11,"startX":null,"startY":null},
+                    {"transitType":"BUS","transitName":"N51","startX":126.92,"startY":37.54,
+                     "endX":126.89,"endY":37.51},
+                    {"transitType":"WALK","durationMinutes":11,"endX":null,"endY":null}]},
+                 "origin":{"label":"출발지","raw":{"x":126.92463186895164,"y":37.550164265498864}},
+                 "destination":{"label":"도착지","raw":{"x":126.88852,"y":37.50975}}}
+                """;
+        var result = service.readSavedRoute(details);
+        assertThat(result.getOriginX()).isEqualTo(126.92463186895164);
+        assertThat(result.getOriginY()).isEqualTo(37.550164265498864);
+        assertThat(result.getDestX()).isEqualTo(126.88852);
+        assertThat(result.getDestY()).isEqualTo(37.50975);
+    }
+
+    @Test
+    void partialSavedRouteCoordinateIsNotMixedWithDifferentPlaceOrWalkSource() {
+        TransitApiService service = new TransitApiService(mock(PublicDataTransitService.class),
+                new ObjectMapper(), mock(RestTemplate.class));
+        var result = service.readSavedRoute("""
+                {"route":{"routeId":"legacy","originX":126.9,"destY":37.9,
+                 "segments":[
+                    {"transitType":"WALK","startX":126.8,"startY":37.8},
+                    {"transitType":"BUS","transitName":"N51"},
+                    {"transitType":"WALK","endX":126.7,"endY":37.7}]},
+                 "origin":{"x":126.6,"raw":{"y":37.6}},
+                 "destination":{"x":126.5,"raw":{"y":37.5}}}
+                """);
+        // The incomplete route fields and nested place coordinates are discarded.
+        // A complete first/last WALK pair is usable, but its axes may not be
+        // combined with a stored route or a different layer of the place object.
+        assertThat(result.getOriginX()).isEqualTo(126.8);
+        assertThat(result.getOriginY()).isEqualTo(37.8);
+        assertThat(result.getDestX()).isEqualTo(126.7);
+        assertThat(result.getDestY()).isEqualTo(37.7);
+    }
+
+    @Test
+    void twoPartialCoordinateSourcesNeverCreateAnEndpointPair() {
+        TransitApiService service = new TransitApiService(mock(PublicDataTransitService.class),
+                new ObjectMapper(), mock(RestTemplate.class));
+        var result = service.readSavedRoute("""
+                {"route":{"routeId":"legacy","originX":126.9,"destY":37.9,
+                 "segments":[
+                    {"transitType":"WALK","startY":37.8},
+                    {"transitType":"BUS","transitName":"N51","startX":126.5,"startY":37.5},
+                    {"transitType":"WALK","endX":126.7}]},
+                 "origin":{"x":126.6,"raw":{"y":37.6}},
+                 "destination":{"x":126.5,"raw":{"y":37.5}}}
+                """);
+        assertThat(result.getOriginX()).isNull();
+        assertThat(result.getOriginY()).isNull();
+        assertThat(result.getDestX()).isNull();
+        assertThat(result.getDestY()).isNull();
+    }
+
+    @Test
+    void coordinateOnlySearchKeepsEndpointsAfterOdsayFallbackToKakao() {
+        RestTemplate client = new RestTemplate();
+        MockRestServiceServer server = MockRestServiceServer.bindTo(client).build();
+        TransitApiService service = new TransitApiService(mock(PublicDataTransitService.class),
+                new ObjectMapper(), client);
+        ReflectionTestUtils.setField(service, "odsayApiKey", "test-key");
+        ReflectionTestUtils.setField(service, "odsayApiUrl", "https://api.odsay.com/v1/api/searchPubTransPathR");
+        KakaoTransitClient kakao = mock(KakaoTransitClient.class);
+        when(kakao.isConfigured()).thenReturn(true);
+        ReflectionTestUtils.setField(service, "kakaoTransitClient", kakao);
+        var candidate = TransitDto.RouteOptionResponse.builder()
+                .provider("KAKAO").routeId("KAKAO_SAMPLE").segments(java.util.List.of()).build();
+        when(kakao.search(126.8, 37.5, 127.0, 37.6, Integer.MAX_VALUE))
+                .thenReturn(java.util.List.of(candidate));
+        when(kakao.searchScheduleCandidates(126.8, 37.5, 127.0, 37.6, 7))
+                .thenReturn(java.util.List.of(candidate));
+        String odsayError = """
+                {"error":[{"code":"429","message":"Daily quota exceeded"}]}
+                """;
+        server.expect(queryParam("SX", "126.8"))
+                .andRespond(withSuccess(odsayError, MediaType.APPLICATION_JSON));
+        server.expect(queryParam("SX", "126.8"))
+                .andRespond(withSuccess(odsayError, MediaType.APPLICATION_JSON));
+
+        var regular = service.searchRoutes(126.8, 37.5, 127.0, 37.6);
+        var schedule = service.searchScheduleCandidates(126.8, 37.5, 127.0, 37.6, 7);
+
+        assertThat(regular).hasSize(1);
+        assertThat(schedule).hasSize(1);
+        for (var result : java.util.List.of(regular.get(0), schedule.get(0))) {
+            assertThat(result.getOriginX()).isEqualTo(126.8);
+            assertThat(result.getOriginY()).isEqualTo(37.5);
+            assertThat(result.getDestX()).isEqualTo(127.0);
+            assertThat(result.getDestY()).isEqualTo(37.6);
+        }
+        server.verify();
+    }
+
+    @Test
+    void completeSavedRouteCoordinatePairWinsOverOlderWrapperCoordinates() {
+        TransitApiService service = new TransitApiService(mock(PublicDataTransitService.class),
+                new ObjectMapper(), mock(RestTemplate.class));
+        var result = service.readSavedRoute("""
+                {"route":{"routeId":"newer","originX":126.95,"originY":37.55,
+                    "destX":126.85,"destY":37.45,"segments":[{"transitType":"BUS"}]},
+                 "originX":126.6,"originY":37.6,"destX":126.7,"destY":37.7}
+                """);
+        assertThat(result.getOriginX()).isEqualTo(126.95);
+        assertThat(result.getOriginY()).isEqualTo(37.55);
+        assertThat(result.getDestX()).isEqualTo(126.85);
+        assertThat(result.getDestY()).isEqualTo(37.45);
+    }
+
+    @Test
+    void routeWithOnlyBusStationCoordinatesDoesNotInventAddressCoordinates() {
+        TransitApiService service = new TransitApiService(mock(PublicDataTransitService.class),
+                new ObjectMapper(), mock(RestTemplate.class));
+        var result = service.readSavedRoute("""
+                {"routeId":"SEOUL_NIGHT_old","provider":"SEOUL_NIGHT",
+                 "segments":[
+                    {"transitType":"WALK","durationMinutes":11,"startX":null,"startY":null},
+                    {"transitType":"BUS","transitName":"N51","startX":126.92,"startY":37.54,
+                     "endX":126.89,"endY":37.51},
+                    {"transitType":"WALK","durationMinutes":11,"endX":null,"endY":null}]}
+                """);
+        assertThat(result.getOriginX()).isNull();
+        assertThat(result.getOriginY()).isNull();
+        assertThat(result.getDestX()).isNull();
+        assertThat(result.getDestY()).isNull();
+    }
+
     @ParameterizedTest
     @CsvSource({
             "4, METROPOLITAN",
@@ -111,6 +283,10 @@ class TransitApiServiceTest {
                 service.searchRoutes(127.0, 36.3, 127.2, 36.5).get(0);
 
         assertThat(route.getRouteId()).startsWith("ROUTE_");
+        assertThat(route.getOriginX()).isEqualTo(127.0);
+        assertThat(route.getOriginY()).isEqualTo(36.3);
+        assertThat(route.getDestX()).isEqualTo(127.2);
+        assertThat(route.getDestY()).isEqualTo(36.5);
         assertThat(route.getRealTimeDurationMinutes()).isEqualTo(19);
         assertThat(route.getSegments().get(1).getLocalStationId()).isEqualTo("111000931");
         assertThat(route.getSegments().get(1).getBusType()).isEqualTo(BusType.TRUNK);
@@ -262,7 +438,14 @@ class TransitApiServiceTest {
         server.expect(requestTo(org.hamcrest.Matchers.containsString("searchPubTransPathR")))
                 .andRespond(withSuccess(body, MediaType.APPLICATION_JSON));
 
-        assertThat(service.searchScheduleCandidates(127.0, 37.5, 127.1, 37.6, 5)).hasSize(5);
+        var result = service.searchScheduleCandidates(127.0, 37.5, 127.1, 37.6, 5);
+        assertThat(result).hasSize(5);
+        assertThat(result).allSatisfy(route -> {
+            assertThat(route.getOriginX()).isEqualTo(127.0);
+            assertThat(route.getOriginY()).isEqualTo(37.5);
+            assertThat(route.getDestX()).isEqualTo(127.1);
+            assertThat(route.getDestY()).isEqualTo(37.6);
+        });
         verifyNoInteractions(realtime);
         server.verify();
     }

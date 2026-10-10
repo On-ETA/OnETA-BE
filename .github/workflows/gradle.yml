@@ -32,6 +32,17 @@ jobs:
       - name: Build
         run: ./gradlew clean build -x test
 
+      - name: Verify required transit query parameters
+        run: ./gradlew test --tests 'com.OnETA.common.exception.GlobalExceptionHandlerTest'
+
+      - name: Verify NIGHT_ONLY contract and endpoint coordinate persistence
+        run: |
+          ./gradlew test \
+            --tests 'com.OnETA.service.TransitRouteOptimizationServiceTest' \
+            --tests 'com.OnETA.service.TransitApiServiceTest' \
+            --tests 'com.OnETA.service.NotificationServiceTest' \
+            --tests 'com.OnETA.service.NotificationSavedRouteValidationTest'
+
       - name: Copy JAR to EC2
         if: github.event_name == 'push'
         uses: appleboy/scp-action@v1

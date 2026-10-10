@@ -306,11 +306,11 @@ public class NotificationService {
 
     private void validateRouteSchedule(NotificationScheduleType type, String details) {
         if (type == null || type == NotificationScheduleType.NORMAL) return;
-        // Registration/update validates only the persisted route payload.
-        // Night buses have a normal LAST operating window. FIRST keeps its
-        // existing policy; registration never depends on live API availability.
+        // N-only paths are informational in FIRST/LAST results: they can be
+        // selected for NORMAL notifications but not registered as FIRST/LAST.
+        // This also protects against clients ignoring the NIGHT_ONLY status.
         var route = transitApiService.readSavedRoute(details);
-        if (type == NotificationScheduleType.FIRST_TRANSIT && TransitRouteClassifier.isNightOnlyRoute(route)) {
+        if (TransitRouteClassifier.isNightOnlyRoute(route)) {
             throw new com.OnETA.common.exception.GlobalException(
                     com.OnETA.common.error.ErrorCode.TRANSIT_NIGHT_ONLY_ROUTE);
         }

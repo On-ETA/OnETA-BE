@@ -70,9 +70,10 @@ public class GlobalExceptionHandler {
             MissingServletRequestParameterException e, HttpServletResponse response) {
         log.error("MissingServletRequestParameterException: {}", e.getMessage(), e);
         response.setStatus(ErrorCode.MISSING_REQUEST_PARAMETER.getStatus().value());
+        String message = "필수 파라미터 " + e.getParameterName() + "가 누락되었습니다.";
         return ApiResponse.error(
                 ErrorCode.MISSING_REQUEST_PARAMETER.getCode(),
-                ErrorCode.MISSING_REQUEST_PARAMETER.getMessage());
+                message);
     }
 
     /** 지원하지 않는 HTTP 메서드 */

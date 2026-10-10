@@ -108,17 +108,20 @@ class TransitRouteOptimizationServiceTest {
     }
 
     @Test
-    void unknownNightDepartureCannotBypassFirstSearchWindow() {
+    void firstSearchReturnsNOnlyPathAsInformationalEvenWithoutTimetable() {
         var api = mock(TransitApiService.class);
         var schedules = mock(TransitScheduleService.class);
         var service = new TransitRouteOptimizationService(api, schedules);
         var night = nightRoute("NIGHT", "N62", 35);
         when(api.searchScheduleCandidates(anyString(), anyDouble(), anyDouble(), any(),
                 anyDouble(), anyDouble(), any(), eq(Integer.MAX_VALUE))).thenReturn(List.of(night));
-        assertThatThrownBy(() -> service.search("user@test.com", 126.8, 37.5, null,
-                127.0, 37.6, null, NotificationScheduleType.FIRST_TRANSIT))
-                .isInstanceOfSatisfying(GlobalException.class,
-                        e -> assertThat(e.getErrorCode()).isEqualTo(ErrorCode.TRANSIT_ROUTE_NOT_FOUND));
+        var result = service.search("user@test.com", 126.8, 37.5, null,
+                127.0, 37.6, null, NotificationScheduleType.FIRST_TRANSIT);
+        assertThat(result).hasSize(1);
+        assertThat(result.get(0).getStatus()).isEqualTo(FirstLastRouteStatus.NIGHT_ONLY);
+        assertThat(result.get(0).getEstimatedDepartureAt()).isNull();
+        assertThat(result.get(0).getRoute().getSelectedDepartureAt()).isNull();
+        verifyNoInteractions(schedules);
     }
 
     @Test
@@ -142,15 +145,16 @@ class TransitRouteOptimizationServiceTest {
         var result = service.search("user@test.com", 126.8, 37.5, null,
                 127.0, 37.6, null, NotificationScheduleType.LAST_TRANSIT);
         assertThat(result).extracting(r -> r.getRoute().getRouteId()).containsExactly("NIGHT", "ORDINARY");
-        assertThat(result).allSatisfy(r -> {
-            assertThat(r.getStatus()).isEqualTo(FirstLastRouteStatus.AVAILABLE);
-            assertThat(r.getEstimatedDepartureAt().toLocalDate()).isEqualTo(now.toLocalDate());
-        });
+        assertThat(result).extracting(TransitDto.FirstLastRouteOptionResponse::getStatus)
+                .containsExactly(FirstLastRouteStatus.NIGHT_ONLY, FirstLastRouteStatus.AVAILABLE);
+        assertThat(result.get(1).getEstimatedDepartureAt().toLocalDate()).isEqualTo(now.toLocalDate());
+        assertThat(result.get(0).getEstimatedDepartureAt()).isNull();
+        verify(schedules, never()).previewCurrentLastDeparture(eq(night), any(), anyMap());
         verify(schedules, never()).previewDepartureForServiceDate(any(), any(), any(), anyMap());
     }
 
     @Test
-    void evaluatesNightBusEvenWhenItIsSixthProviderCandidate() {
+    void sixthProviderNightBusIsStillShownButNeverAsAvailable() {
         var api = mock(TransitApiService.class);
         var schedules = mock(TransitScheduleService.class);
         var service = new TransitRouteOptimizationService(api, schedules);
@@ -166,8 +170,10 @@ class TransitRouteOptimizationServiceTest {
         var result = service.search("user@test.com", 126.8, 37.5, null,
                 127.0, 37.6, null, NotificationScheduleType.LAST_TRANSIT);
         assertThat(result).extracting(r -> r.getRoute().getRouteId()).containsExactly("NIGHT_SIXTH");
-        assertThat(result.get(0).getStatus()).isEqualTo(FirstLastRouteStatus.AVAILABLE);
-        verify(schedules, times(6)).previewCurrentLastDeparture(any(), any(), anyMap());
+        assertThat(result.get(0).getStatus()).isEqualTo(FirstLastRouteStatus.NIGHT_ONLY);
+        assertThat(result.get(0).getEstimatedDepartureAt()).isNull();
+        verify(schedules, times(5)).previewCurrentLastDeparture(any(), any(), anyMap());
+        verify(schedules, never()).previewCurrentLastDeparture(eq(night), any(), anyMap());
     }
 
     @Test
@@ -389,7 +395,7 @@ class TransitRouteOptimizationServiceTest {
                 anyDouble(), anyDouble(), any(), eq(Integer.MAX_VALUE))).thenReturn(routes);
         assertThat(service.search("user@test.com", 126.8, 37.5, null,
                 127.0, 37.6, null, NotificationScheduleType.LAST_TRANSIT))
-                .extracting(r -> r.getRoute().getRouteId()).containsExactly("R1", "R0");
+                .extracting(r -> r.getRoute().getRouteId()).containsExactly("UNKNOWN", "R1", "R0");
     }
 
     @Test
@@ -416,7 +422,7 @@ class TransitRouteOptimizationServiceTest {
     }
 
     @Test
-    void midnightKnownEndedNightRouteIsNotMisrepresentedAsAvailable() {
+    void midnightKnownEndedNightRouteRemainsInformationalOnly() {
         var api = mock(TransitApiService.class);
         var schedules = mock(TransitScheduleService.class);
         var service = new TransitRouteOptimizationService(api, schedules);
@@ -429,14 +435,66 @@ class TransitRouteOptimizationServiceTest {
         when(schedules.previewCurrentLastDeparture(eq(night), eq(now), anyMap()))
                 .thenReturn(null);
 
-        assertThatThrownBy(() -> service.search("user@test.com", 126.8, 37.5, null,
-                127.0, 37.6, null, NotificationScheduleType.LAST_TRANSIT))
-                .isInstanceOfSatisfying(GlobalException.class,
-                        e -> assertThat(e.getErrorCode()).isEqualTo(ErrorCode.TRANSIT_ROUTE_NOT_FOUND));
+        var result = service.search("user@test.com", 126.8, 37.5, null,
+                127.0, 37.6, null, NotificationScheduleType.LAST_TRANSIT);
+        assertThat(result).hasSize(1);
+        assertThat(result.get(0).getStatus()).isEqualTo(FirstLastRouteStatus.NIGHT_ONLY);
+        assertThat(result.get(0).getEstimatedDepartureAt()).isNull();
+        verify(schedules, never()).previewCurrentLastDeparture(eq(night), any(), anyMap());
     }
 
     @Test
-    void midnightAvailableRouteRanksBeforeUnverifiedNightOnlyRoute() {
+    void n51WithCatchableLastTrainLikeTimeStillReturnsNightOnlyNullDeparture() {
+        var api = mock(TransitApiService.class);
+        var schedules = mock(TransitScheduleService.class);
+        var service = new TransitRouteOptimizationService(api, schedules);
+        var now = LocalDateTime.of(2026, 10, 9, 23, 51);
+        setClock(service, now);
+        var night = nightRoute("SEOUL_NIGHT_N51", "N51", 34).toBuilder()
+                .provider("SEOUL_NIGHT")
+                .selectedDepartureAt(java.time.OffsetDateTime.parse("2026-10-10T02:31:00+09:00"))
+                .build();
+        when(api.searchScheduleCandidates(anyString(), anyDouble(), anyDouble(), any(),
+                anyDouble(), anyDouble(), any(), eq(Integer.MAX_VALUE))).thenReturn(List.of(night));
+
+        var result = service.search("user@test.com", 126.8, 37.5, null,
+                127.0, 37.6, null, NotificationScheduleType.LAST_TRANSIT);
+
+        assertThat(result).hasSize(1);
+        assertThat(result.get(0).getRoute().getRouteId()).isEqualTo("SEOUL_NIGHT_N51");
+        assertThat(result.get(0).getStatus()).isEqualTo(FirstLastRouteStatus.NIGHT_ONLY);
+        assertThat(result.get(0).getEstimatedDepartureAt()).isNull();
+        assertThat(result.get(0).getRoute().getSelectedDepartureAt()).isNull();
+        verifyNoInteractions(schedules);
+    }
+
+    @Test
+    void mixedNightAndOrdinaryTransitIsNotAutomaticallyNightOnly() {
+        var api = mock(TransitApiService.class);
+        var schedules = mock(TransitScheduleService.class);
+        var service = new TransitRouteOptimizationService(api, schedules);
+        var now = LocalDateTime.of(2026, 10, 9, 23, 0);
+        setClock(service, now);
+        var night = nightRoute("MIXED", "N51", 34);
+        var mixed = night.toBuilder()
+                .segments(java.util.stream.Stream.concat(night.getSegments().stream(),
+                        java.util.stream.Stream.of(TransitDto.RouteSegment.builder()
+                                .transitType("SUBWAY").transitName("2호선").durationMinutes(8).build()))
+                        .toList()).build();
+        when(api.searchScheduleCandidates(anyString(), anyDouble(), anyDouble(), any(),
+                anyDouble(), anyDouble(), any(), eq(Integer.MAX_VALUE))).thenReturn(List.of(mixed));
+        when(schedules.previewCurrentLastDeparture(eq(mixed), eq(now), anyMap()))
+                .thenReturn(now.plusMinutes(20));
+
+        var result = service.search("user@test.com", 126.8, 37.5, null,
+                127.0, 37.6, null, NotificationScheduleType.LAST_TRANSIT);
+
+        assertThat(result).hasSize(1);
+        assertThat(result.get(0).getStatus()).isEqualTo(FirstLastRouteStatus.AVAILABLE);
+    }
+
+    @Test
+    void midnightNightOnlyRouteRanksBeforeAvailableRoute() {
         var api = mock(TransitApiService.class);
         var schedules = mock(TransitScheduleService.class);
         var service = new TransitRouteOptimizationService(api, schedules);
@@ -456,11 +514,11 @@ class TransitRouteOptimizationServiceTest {
                 127.0, 37.6, null, NotificationScheduleType.LAST_TRANSIT);
 
         assertThat(result).extracting(r -> r.getRoute().getRouteId())
-                .containsExactly("AVAILABLE", "N62_ONLY");
+                .containsExactly("N62_ONLY", "AVAILABLE");
         assertThat(result).extracting(TransitDto.FirstLastRouteOptionResponse::getStatus)
-                .containsExactly(FirstLastRouteStatus.AVAILABLE, FirstLastRouteStatus.NIGHT_ONLY);
-        assertThat(result.get(0).getEstimatedDepartureAt()).isNotNull();
-        assertThat(result.get(1).getEstimatedDepartureAt()).isNull();
+                .containsExactly(FirstLastRouteStatus.NIGHT_ONLY, FirstLastRouteStatus.AVAILABLE);
+        assertThat(result.get(1).getEstimatedDepartureAt()).isNotNull();
+        assertThat(result.get(0).getEstimatedDepartureAt()).isNull();
     }
 
     private void setClock(TransitRouteOptimizationService service, LocalDateTime now) {
