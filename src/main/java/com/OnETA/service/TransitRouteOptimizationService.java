@@ -39,8 +39,14 @@ public class TransitRouteOptimizationService {
 
         List<TransitDto.RouteOptionResponse> routes = transitApiService.searchScheduleCandidates(
                 email, originX, originY, originAddress, destX, destY, destAddress, Integer.MAX_VALUE);
+        // An N-only path is informational in both FIRST and LAST, regardless of
+        // whether a timetable would let us estimate a vehicle's departure.
+        List<TransitDto.RouteOptionResponse> nightOnlyRoutes = routes.stream()
+                .filter(TransitRouteClassifier::isNightOnlyRoute).toList();
+        List<TransitDto.RouteOptionResponse> notificationRoutes = routes.stream()
+                .filter(route -> !TransitRouteClassifier.isNightOnlyRoute(route)).toList();
         if (scheduleType == NotificationScheduleType.LAST_TRANSIT) {
-            return searchLast(routes, LocalDateTime.now(clock.withZone(SEOUL)));
+            return searchLast(notificationRoutes, nightOnlyRoutes, LocalDateTime.now(clock.withZone(SEOUL)));
         }
         LocalDateTime now = LocalDateTime.now(clock.withZone(SEOUL));
         Map<String, LocalDateTime> scheduleCache = new HashMap<>();
@@ -51,7 +57,7 @@ public class TransitRouteOptimizationService {
         for (LocalDate serviceDate : serviceDays) {
             boolean futureOnly = scheduleType != NotificationScheduleType.FIRST_TRANSIT;
             List<Candidate> candidates = evaluateCandidates(
-                    routes, scheduleType, serviceDate, now, scheduleCache, failures, futureOnly);
+                    notificationRoutes, scheduleType, serviceDate, now, scheduleCache, failures, futureOnly);
             if (candidates.isEmpty()) continue;
 
             if (scheduleType == NotificationScheduleType.FIRST_TRANSIT) {
@@ -63,22 +69,26 @@ public class TransitRouteOptimizationService {
                 // must not keep today's FIRST alive; advance the whole search to the next day.
                 if (!earliest.departure().isAfter(now)) continue;
             }
-            return rank(candidates, scheduleType);
+            return appendNightOnlyRoutes(rank(candidates, scheduleType), nightOnlyRoutes, scheduleType);
         }
 
+        if (!nightOnlyRoutes.isEmpty()) {
+            return appendNightOnlyRoutes(List.of(), nightOnlyRoutes, scheduleType);
+        }
         if (failures.unavailable) throw new GlobalException(ErrorCode.TRANSIT_SCHEDULE_UNAVAILABLE);
         if (failures.unsupported) throw new GlobalException(ErrorCode.TRANSIT_SCHEDULE_UNSUPPORTED);
         throw new GlobalException(ErrorCode.TRANSIT_ROUTE_NOT_FOUND);
     }
 
     private List<TransitDto.FirstLastRouteOptionResponse> searchLast(
-            List<TransitDto.RouteOptionResponse> routes, LocalDateTime now) {
+            List<TransitDto.RouteOptionResponse> routes,
+            List<TransitDto.RouteOptionResponse> nightOnlyRoutes,
+            LocalDateTime now) {
         Map<String, LocalDateTime> cache = new HashMap<>();
         FailureState failures = new FailureState();
         List<Candidate> active = new ArrayList<>();
-        // Retain only night-only routes whose timetable could NOT be verified.
-        // A route with a known, already-ended operating interval must not reappear here.
-        List<TransitDto.RouteOptionResponse> unverifiedNightRoutes = new ArrayList<>();
+        // All N-only candidates are informational, not LAST notification options.
+        // Calculate and rank notification times only for non-N-only routes.
         for (var route : routes) {
             try {
                 LocalDateTime departure = transitScheduleService.previewCurrentLastDeparture(route, now, cache);
@@ -86,42 +96,22 @@ public class TransitRouteOptimizationService {
                 boolean currentInterval = future && isWithinCurrentLastInterval(departure, now);
                 boolean searchWindow = future && isWithinSearchWindow(
                         departure, NotificationScheduleType.LAST_TRANSIT);
-                if (TransitRouteClassifier.isNightOnlyRoute(route)) {
-                    log.info("NIGHT_LAST_PREVIEW routeId={}, now={}, departure={}, decision={}",
-                            route.getRouteId(), now, departure,
-                            departure == null ? "NO_CATCHABLE_DEPARTURE"
-                                    : !future ? "DEPARTURE_PASSED"
-                                    : !currentInterval ? "OUTSIDE_CURRENT_INTERVAL"
-                                    : !searchWindow ? "OUTSIDE_LAST_SEARCH_WINDOW" : "AVAILABLE");
-                }
                 if (future && currentInterval && searchWindow) {
                     active.add(new Candidate(route, departure));
                 }
             } catch (GlobalException e) {
                 recordFailure(failures, e);
-                if (TransitRouteClassifier.isNightOnlyRoute(route)) {
-                    unverifiedNightRoutes.add(route);
-                    log.info("NIGHT_LAST_PREVIEW routeId={}, now={}, decision=TIME_TABLE_ERROR, code={}",
-                            route.getRouteId(), now, e.getErrorCode().getCode());
-                }
             } catch (RuntimeException e) {
                 failures.unavailable = true;
-                if (TransitRouteClassifier.isNightOnlyRoute(route)) {
-                    unverifiedNightRoutes.add(route);
-                    log.info("NIGHT_LAST_PREVIEW routeId={}, now={}, decision=RUNTIME_ERROR, exception={}",
-                            route.getRouteId(), now, e.getClass().getSimpleName());
-                }
                 log.warn("Current LAST window lookup failed: routeId={}, type={}",
                         route.getRouteId(), e.getClass().getSimpleName());
             }
         }
         if (!active.isEmpty()) {
-            return appendUnverifiedNightRoutes(rank(active, NotificationScheduleType.LAST_TRANSIT),
-                    unverifiedNightRoutes, NotificationScheduleType.LAST_TRANSIT);
+            return appendNightOnlyRoutes(rank(active, NotificationScheduleType.LAST_TRANSIT),
+                    nightOnlyRoutes, NotificationScheduleType.LAST_TRANSIT);
         }
-        // Do not switch to tomorrow's operating day after midnight, even when the
-        // current schedule provider is unavailable. An unverified direct N-bus path
-        // may still be shown as informational NIGHT_ONLY, never as AVAILABLE.
+        // Do not switch to tomorrow's operating day after midnight.
 
         // Do not show tomorrow's 23:xx as if it were today's still-catchable last.
         // The existing frontend only prints HH:mm, so crossing service days here is unsafe.
@@ -131,12 +121,12 @@ public class TransitRouteOptimizationService {
             var upcoming = evaluateCandidates(routes, NotificationScheduleType.LAST_TRANSIT,
                     now.toLocalDate(), now, cache, failures, true);
             if (!upcoming.isEmpty()) {
-                return appendUnverifiedNightRoutes(rank(upcoming, NotificationScheduleType.LAST_TRANSIT),
-                        unverifiedNightRoutes, NotificationScheduleType.LAST_TRANSIT);
+                return appendNightOnlyRoutes(rank(upcoming, NotificationScheduleType.LAST_TRANSIT),
+                        nightOnlyRoutes, NotificationScheduleType.LAST_TRANSIT);
             }
         }
-        if (!unverifiedNightRoutes.isEmpty()) {
-            return appendUnverifiedNightRoutes(List.of(), unverifiedNightRoutes,
+        if (!nightOnlyRoutes.isEmpty()) {
+            return appendNightOnlyRoutes(List.of(), nightOnlyRoutes,
                     NotificationScheduleType.LAST_TRANSIT);
         }
         if (failures.unavailable) throw new GlobalException(ErrorCode.TRANSIT_SCHEDULE_UNAVAILABLE);
@@ -241,20 +231,20 @@ public class TransitRouteOptimizationService {
                 .toList();
     }
 
-    /** Display an unverified night-only route without inventing a departure or allowing LAST signup. */
-    private List<TransitDto.FirstLastRouteOptionResponse> appendUnverifiedNightRoutes(
+    /** Display N-only paths as informational alternatives, never as FIRST/LAST notification options. */
+    private List<TransitDto.FirstLastRouteOptionResponse> appendNightOnlyRoutes(
             List<TransitDto.FirstLastRouteOptionResponse> available,
-            List<TransitDto.RouteOptionResponse> unverifiedNightRoutes,
+            List<TransitDto.RouteOptionResponse> nightOnlyRoutes,
             NotificationScheduleType scheduleType) {
-        if (unverifiedNightRoutes.isEmpty()) return available;
+        if (nightOnlyRoutes.isEmpty()) return available;
         List<TransitDto.FirstLastRouteOptionResponse> result = new ArrayList<>(available);
-        for (var route : unverifiedNightRoutes) {
+        for (var route : nightOnlyRoutes) {
             boolean alreadyIncluded = result.stream().anyMatch(item ->
                     java.util.Objects.equals(item.getRoute().getRouteId(), route.getRouteId())
                             && java.util.Objects.equals(item.getRoute().getProvider(), route.getProvider()));
             if (alreadyIncluded) continue;
             result.add(TransitDto.FirstLastRouteOptionResponse.builder()
-                    .route(route)
+                    .route(route.toBuilder().selectedDepartureAt(null).build())
                     .scheduleType(scheduleType)
                     .estimatedDepartureAt(null)
                     .status(FirstLastRouteStatus.NIGHT_ONLY)
@@ -264,7 +254,6 @@ public class TransitRouteOptimizationService {
     }
 
     // Preview departures are local Seoul times; filter the trip departure, including access walking.
-    // Unknown departure times cannot establish eligibility and are never returned as NIGHT_ONLY.
     private boolean isWithinSearchWindow(LocalDateTime departure, NotificationScheduleType type) {
         LocalTime time = departure.toLocalTime();
         if (type == NotificationScheduleType.LAST_TRANSIT) {
