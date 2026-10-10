@@ -37,7 +37,7 @@ jobs:
 
       - name: Verify NIGHT_ONLY contract and endpoint coordinate persistence
         run: |
-          ./gradlew test --info \
+          ./gradlew test \
             --tests 'com.OnETA.service.TransitRouteOptimizationServiceTest' \
             --tests 'com.OnETA.service.TransitApiServiceTest' \
             --tests 'com.OnETA.service.NotificationServiceTest' \
