@@ -6,15 +6,21 @@ import java.util.Locale;
 import java.util.regex.Pattern;
 
 public final class TransitRouteClassifier {
-    private static final Pattern SEOUL_NIGHT_BUS_NAME = Pattern.compile("^N\\d{1,3}$");
+    private static final Pattern SEOUL_NIGHT_BUS_NAME = Pattern.compile("^(N\\d{1,3})(?:\\(심야\\))?$");
 
     private TransitRouteClassifier() {
     }
 
     public static boolean isNightBusName(String transitName) {
-        if (transitName == null || transitName.isBlank()) return false;
+        return canonicalNightBusName(transitName) != null;
+    }
+
+    /** Return the Seoul line number for bare and provider-labelled night buses. */
+    public static String canonicalNightBusName(String transitName) {
+        if (transitName == null || transitName.isBlank()) return null;
         String normalized = transitName.replaceAll("\\s+", "").toUpperCase(Locale.ROOT);
-        return SEOUL_NIGHT_BUS_NAME.matcher(normalized).matches();
+        var matcher = SEOUL_NIGHT_BUS_NAME.matcher(normalized);
+        return matcher.matches() ? matcher.group(1) : null;
     }
 
     public static boolean containsNightBus(TransitDto.RouteOptionResponse route) {

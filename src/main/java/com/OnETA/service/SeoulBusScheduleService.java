@@ -235,7 +235,9 @@ public class SeoulBusScheduleService {
     }
 
     public synchronized Schedule resolve(TransitDto.RouteOptionResponse route, LocalDate day) {
-        var bus = singleBus(route);
+        var originalBus = singleBus(route);
+        String nightBusName = TransitRouteClassifier.canonicalNightBusName(originalBus.getTransitName());
+        var bus = nightBusName == null ? originalBus : originalBus.toBuilder().transitName(nightBusName).build();
         if (!today().equals(day)) throw unsupported(); // API has no service-date parameter.
         String cacheKey = day + ":" + bus.getTransitName() + ":" + bus.getStartStation() + ":"
                 + bus.getEndStation() + ":" + bus.getStartX() + ":" + bus.getStartY() + ":"
