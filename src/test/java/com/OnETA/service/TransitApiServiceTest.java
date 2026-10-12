@@ -47,7 +47,7 @@ class TransitApiServiceTest {
                     .isInstanceOfSatisfying(GlobalException.class, e -> assertThat(e.getErrorCode())
                             .isEqualTo(ErrorCode.TRANSIT_NIGHT_BUS_OUTSIDE_HOURS));
         }
-        verify(provider).resolve(any(), any());
+        org.mockito.Mockito.verify(provider).resolve(any(), any());
     }
 
     @ParameterizedTest
