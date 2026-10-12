@@ -418,6 +418,59 @@ class NotificationDeliveryServiceTest {
         assertThat(fixture.delivery.getStatus()).isEqualTo(NotificationDeliveryStatus.SENT);
     }
 
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.EnumSource(com.OnETA.entity.NotificationScheduleType.class)
+    void resolvesLazyNotificationWithinTransactionButSendsOutsideTransaction(
+            com.OnETA.entity.NotificationScheduleType scheduleType) {
+        TestFixture fixture = fixture();
+        var transactionManager = mock(PlatformTransactionManager.class);
+        var transactionActive = new java.util.concurrent.atomic.AtomicBoolean();
+        when(transactionManager.getTransaction(any())).thenAnswer(invocation -> {
+            transactionActive.set(true);
+            return mock(org.springframework.transaction.TransactionStatus.class);
+        });
+        doAnswer(invocation -> {
+            transactionActive.set(false);
+            return null;
+        }).when(transactionManager).commit(any());
+        doAnswer(invocation -> {
+            transactionActive.set(false);
+            return null;
+        }).when(transactionManager).rollback(any());
+        ReflectionTestUtils.setField(fixture.service, "transactionManager", transactionManager);
+
+        var initializer = mock(org.hibernate.proxy.LazyInitializer.class);
+        when(initializer.getImplementation()).thenAnswer(invocation -> {
+            if (!transactionActive.get()) {
+                throw new org.hibernate.LazyInitializationException("Could not initialize proxy - no session");
+            }
+            return fixture.notification;
+        });
+        var proxy = mock(com.OnETA.entity.Notification.class,
+                withSettings().extraInterfaces(org.hibernate.proxy.HibernateProxy.class));
+        when(((org.hibernate.proxy.HibernateProxy) proxy).asHibernateProxy())
+                .thenReturn((org.hibernate.proxy.HibernateProxy) proxy);
+        when(((org.hibernate.proxy.HibernateProxy) proxy).getHibernateLazyInitializer())
+                .thenReturn(initializer);
+        ReflectionTestUtils.setField(fixture.delivery, "notification", proxy);
+        when(proxy.getRepeatDays()).thenReturn(21);
+        when(proxy.getReminderOffsetMinutesList()).thenReturn(List.of(10));
+        when(proxy.getReminderOffsetMinutes()).thenReturn(10);
+        when(fixture.notification.getScheduleType()).thenReturn(scheduleType);
+        doAnswer(invocation -> {
+            assertThat(transactionActive.get()).isFalse();
+            return null;
+        }).when(fixture.fcm).sendPushMessage(any(), any(), any(), any(), any());
+
+        fixture.service.processPending();
+
+        String expectedType = scheduleType == com.OnETA.entity.NotificationScheduleType.NORMAL
+                ? "normal" : "firstandlast";
+        verify(fixture.fcm).sendPushMessage("token", "title", "body",
+                LocalDateTime.of(2026, 8, 10, 9, 10), java.util.Map.of("type", expectedType));
+        assertThat(fixture.delivery.getStatus()).isEqualTo(NotificationDeliveryStatus.SENT);
+    }
+
     private TestFixture fixture() {
         NotificationDeliveryRepository deliveries = mock(NotificationDeliveryRepository.class);
         ArrivalNotificationRepository notifications = mock(ArrivalNotificationRepository.class);
