@@ -27,6 +27,30 @@ import static org.springframework.test.web.client.response.MockRestResponseCreat
 class TransitApiServiceTest {
 
     @ParameterizedTest
+    @CsvSource({"13:00,false", "02:00,true"})
+    void savedKakaoNightLabelCannotBypassOperatingHoursWithFalseFlag(String arrival, boolean allowed) {
+        var route = nightValidationRoute(java.util.List.of(
+                nightValidationSegment("WALK", "", 6),
+                nightValidationSegment("BUS", "N51(심야)", 31),
+                nightValidationSegment("WALK", "", 18))).toBuilder().provider("KAKAO").build();
+        var provider = mock(SeoulBusScheduleService.class);
+        var day = java.time.LocalDate.of(2026, 10, 12);
+        when(provider.today()).thenReturn(day);
+        when(provider.resolve(any(), any())).thenReturn(new SeoulBusScheduleService.Schedule(
+                "stop", "ars", "line", day.atTime(23, 0), day.plusDays(1).atTime(5, 0)));
+        var service = nightValidationService(provider);
+        var details = new ObjectMapper().writeValueAsString(java.util.Map.of("route", route));
+        if (allowed) {
+            service.validateNightBusOperatingTime(details, java.time.LocalTime.parse(arrival));
+        } else {
+            assertThatThrownBy(() -> service.validateNightBusOperatingTime(details, java.time.LocalTime.parse(arrival)))
+                    .isInstanceOfSatisfying(GlobalException.class, e -> assertThat(e.getErrorCode())
+                            .isEqualTo(ErrorCode.TRANSIT_NIGHT_BUS_OUTSIDE_HOURS));
+        }
+        verify(provider).resolve(any(), any());
+    }
+
+    @ParameterizedTest
     @CsvSource({"23:25,true", "00:10,true", "05:25,true", "14:15,false", "23:24,false", "05:26,false"})
     void normalNightBusUsesBoardingTimeAndHandlesMidnight(String arrival, boolean allowed) {
         var route = nightValidationRoute(java.util.List.of(

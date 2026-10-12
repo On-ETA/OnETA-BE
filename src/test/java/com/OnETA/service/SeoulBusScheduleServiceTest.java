@@ -53,9 +53,12 @@ class SeoulBusScheduleServiceTest {
                 .andRespond(withSuccess(xml(station("100000002", "01002", "도착역", "126.96", "37.56")), MediaType.APPLICATION_XML));
     }
     private void mapping(boolean reverse, String type) {
+        mapping(reverse, type, "603");
+    }
+    private void mapping(boolean reverse, String type, String routeName) {
         nearby();
-        server.expect(queryParam("strSrch", "603"))
-                .andRespond(withSuccess(xml("<itemList><busRouteId>100100088</busRouteId><busRouteNm>603</busRouteNm><busRouteType>"+type+"</busRouteType></itemList>"), MediaType.APPLICATION_XML));
+        server.expect(queryParam("strSrch", routeName))
+                .andRespond(withSuccess(xml("<itemList><busRouteId>100100088</busRouteId><busRouteNm>"+routeName+"</busRouteNm><busRouteType>"+type+"</busRouteType></itemList>"), MediaType.APPLICATION_XML));
         if (!"8".equals(type)) server.expect(queryParam("busRouteId", "100100088"))
                 .andRespond(withSuccess(xml("<itemList><seq>"+(reverse?2:1)+"</seq><station>100000001</station><stationNm>출발역</stationNm><transYn>N</transYn></itemList>"
                         +"<itemList><seq>"+(reverse?1:2)+"</seq><station>100000002</station><stationNm>도착역</stationNm><transYn>N</transYn></itemList>"), MediaType.APPLICATION_XML));
@@ -329,6 +332,22 @@ class SeoulBusScheduleServiceTest {
         assertThat(service.resolve(route(), DAY)).isEqualTo(schedule);
         server.verify();
     }
+    @Test
+    void resolvesProviderNightLabelUsingCanonicalSeoulLine() {
+        mapping(false, "3", "N51");
+        times("23:00", "05:00");
+        var original = route();
+        var bus = original.getSegments().get(1).toBuilder().transitName("N51(심야)").build();
+        var labelled = original.toBuilder().segments(List.of(
+                original.getSegments().get(0), bus, original.getSegments().get(2))).build();
+
+        var schedule = service.resolve(labelled, DAY);
+
+        assertThat(schedule.first()).isEqualTo(DAY.atTime(23, 0));
+        assertThat(schedule.last()).isEqualTo(DAY.plusDays(1).atTime(5, 0));
+        server.verify();
+    }
+
     @Test
     void normalizesTimeOnlyMidnightLastBus() {
         mapping(false, "3"); times("05:30", "00:30");

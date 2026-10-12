@@ -93,9 +93,10 @@ class KakaoTransitClientTest {
         assertThat(bus.getBusType()).isEqualTo(expected);
     }
 
-    @Test
-    void marksKakaoNightBusByRouteName() {
-        String body = BODY.replace("\"name\":\"8543\"", "\"name\":\"N62\"");
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"N62", "N62(심야)"})
+    void marksKakaoNightBusByRouteName(String routeName) {
+        String body = BODY.replace("\"name\":\"8543\"", "\"name\":\"" + routeName + "\"");
 
         var bus = kakao.parse(body).get(0).getSegments().get(1);
 

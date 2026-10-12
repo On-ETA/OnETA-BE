@@ -41,6 +41,9 @@ jobs:
       - name: Verify NIGHT_ONLY contract and endpoint coordinate persistence
         run: |
           ./gradlew test \
+            --tests 'com.OnETA.service.TransitRouteClassifierTest' \
+            --tests 'com.OnETA.service.KakaoTransitClientTest.marksKakaoNightBusByRouteName' \
+            --tests 'com.OnETA.service.SeoulBusScheduleServiceTest.resolvesProviderNightLabelUsingCanonicalSeoulLine' \
             --tests 'com.OnETA.service.TransitRouteOptimizationServiceTest' \
             --tests 'com.OnETA.service.TransitApiServiceTest' \
             --tests 'com.OnETA.service.NotificationServiceTest' \

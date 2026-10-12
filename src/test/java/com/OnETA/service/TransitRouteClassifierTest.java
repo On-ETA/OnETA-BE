@@ -13,6 +13,10 @@ class TransitRouteClassifierTest {
     void recognizesSeoulNightBusNames() {
         assertThat(TransitRouteClassifier.isNightBusName("N62")).isTrue();
         assertThat(TransitRouteClassifier.isNightBusName(" n13 ")).isTrue();
+        assertThat(TransitRouteClassifier.isNightBusName("N51(심야)")).isTrue();
+        assertThat(TransitRouteClassifier.canonicalNightBusName(" n51 ( 심야 ) ")).isEqualTo("N51");
+        assertThat(TransitRouteClassifier.isNightBusName("N51(일반)")).isFalse();
+        assertThat(TransitRouteClassifier.isNightBusName("N51-1")).isFalse();
         assertThat(TransitRouteClassifier.isNightBusName("273")).isFalse();
         assertThat(TransitRouteClassifier.isNightBusName("M7731")).isFalse();
     }
