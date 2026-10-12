@@ -141,16 +141,12 @@ public class NotificationDeliveryService {
                     .execute(status -> claim(deliveryId));
             if (!Boolean.TRUE.equals(claimed)) return;
 
-            NotificationDelivery delivery = deliveryRepository.findById(deliveryId).orElse(null);
-            if (delivery == null || delivery.getStatus() != NotificationDeliveryStatus.SENDING) return;
-            ArrivalNotification notification = (ArrivalNotification)
-                    org.hibernate.Hibernate.unproxy(delivery.getNotification());
-            String type = notification.getScheduleType() == com.OnETA.entity.NotificationScheduleType.FIRST_TRANSIT
-                    || notification.getScheduleType() == com.OnETA.entity.NotificationScheduleType.LAST_TRANSIT
-                    ? "firstandlast" : "normal";
+            PushPayload payload = new TransactionTemplate(transactionManager)
+                    .execute(status -> loadPushPayload(deliveryId));
+            if (payload == null) return;
             fcmPushService.sendPushMessage(
-                    delivery.getDeviceToken(), delivery.getTitle(), delivery.getBody(),
-                    delivery.getHardDeadlineAt(), Map.of("type", type));
+                    payload.deviceToken(), payload.title(), payload.body(),
+                    payload.hardDeadlineAt(), Map.of("type", payload.type()));
             new TransactionTemplate(transactionManager)
                     .executeWithoutResult(status -> markSent(deliveryId));
         } catch (Exception e) {
@@ -162,6 +158,23 @@ public class NotificationDeliveryService {
         } finally {
             fcmSemaphore.release();
         }
+    }
+
+    // Resolve lazy entities while the session is open; only immutable values leave the transaction.
+    private PushPayload loadPushPayload(Long deliveryId) {
+        NotificationDelivery delivery = deliveryRepository.findById(deliveryId).orElse(null);
+        if (delivery == null || delivery.getStatus() != NotificationDeliveryStatus.SENDING) return null;
+        ArrivalNotification notification = (ArrivalNotification)
+                org.hibernate.Hibernate.unproxy(delivery.getNotification());
+        String type = notification.getScheduleType() == com.OnETA.entity.NotificationScheduleType.FIRST_TRANSIT
+                || notification.getScheduleType() == com.OnETA.entity.NotificationScheduleType.LAST_TRANSIT
+                ? "firstandlast" : "normal";
+        return new PushPayload(delivery.getDeviceToken(), delivery.getTitle(), delivery.getBody(),
+                delivery.getHardDeadlineAt(), type);
+    }
+
+    private record PushPayload(String deviceToken, String title, String body,
+                               LocalDateTime hardDeadlineAt, String type) {
     }
 
     protected boolean claim(Long deliveryId) {

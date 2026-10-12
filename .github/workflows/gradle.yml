@@ -35,6 +35,9 @@ jobs:
       - name: Verify required transit query parameters
         run: ./gradlew test --tests 'com.OnETA.common.exception.GlobalExceptionHandlerTest'
 
+      - name: Verify notification delivery transaction boundaries and retries
+        run: ./gradlew test --tests 'com.OnETA.service.NotificationDeliveryServiceTest'
+
       - name: Verify NIGHT_ONLY contract and endpoint coordinate persistence
         run: |
           ./gradlew test \
