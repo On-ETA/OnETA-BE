@@ -26,6 +26,108 @@ import static org.springframework.test.web.client.response.MockRestResponseCreat
 
 class TransitApiServiceTest {
 
+    @ParameterizedTest
+    @CsvSource({"23:25,true", "00:10,true", "05:25,true", "14:15,false", "23:24,false", "05:26,false"})
+    void normalNightBusUsesBoardingTimeAndHandlesMidnight(String arrival, boolean allowed) {
+        var route = nightValidationRoute(java.util.List.of(
+                nightValidationSegment("WALK", "", 11),
+                nightValidationSegment("BUS", "N51", 20),
+                nightValidationSegment("WALK", "", 5)));
+        var provider = mock(SeoulBusScheduleService.class);
+        var day = java.time.LocalDate.of(2026, 10, 12);
+        when(provider.today()).thenReturn(day);
+        when(provider.resolve(any(), any())).thenReturn(new SeoulBusScheduleService.Schedule(
+                "stop", "ars", "line", day.atTime(23, 0), day.plusDays(1).atTime(5, 0)));
+        var service = nightValidationService(provider);
+        var details = new ObjectMapper().writeValueAsString(route);
+        if (allowed) {
+            service.validateNightBusOperatingTime(details, java.time.LocalTime.parse(arrival));
+        } else {
+            assertThatThrownBy(() -> service.validateNightBusOperatingTime(details, java.time.LocalTime.parse(arrival)))
+                    .isInstanceOfSatisfying(GlobalException.class, e -> assertThat(e.getErrorCode())
+                            .isEqualTo(ErrorCode.TRANSIT_NIGHT_BUS_OUTSIDE_HOURS));
+        }
+    }
+
+    @Test
+    void morningArrivalIsAllowedWhenBoardingBeforeLastBus() {
+        var provider = mock(SeoulBusScheduleService.class);
+        var day = java.time.LocalDate.of(2026, 10, 12);
+        when(provider.today()).thenReturn(day);
+        when(provider.resolve(any(), any())).thenReturn(new SeoulBusScheduleService.Schedule(
+                "stop", "ars", "line", day.atStartOfDay(), day.atTime(5, 0)));
+        var route = nightValidationRoute(java.util.List.of(
+                nightValidationSegment("BUS", "N51", 70), nightValidationSegment("WALK", "", 5)));
+        nightValidationService(provider).validateNightBusOperatingTime(
+                new ObjectMapper().writeValueAsString(route), java.time.LocalTime.of(6, 10));
+    }
+
+    @Test
+    void validatesEarlierNightBusIncludingLaterTransferWait() {
+        var provider = mock(SeoulBusScheduleService.class);
+        var day = java.time.LocalDate.of(2026, 10, 12);
+        when(provider.today()).thenReturn(day);
+        when(provider.resolve(any(), any())).thenAnswer(invocation -> {
+            TransitDto.RouteOptionResponse leg = invocation.getArgument(0);
+            return "N51".equals(leg.getSegments().get(0).getTransitName())
+                    ? new SeoulBusScheduleService.Schedule("s1", "a1", "r1", day.atStartOfDay(), day.atTime(0, 35))
+                    : new SeoulBusScheduleService.Schedule("s2", "a2", "r2", day.atTime(1, 0), day.atTime(5, 0));
+        });
+        var route = nightValidationRoute(java.util.List.of(
+                nightValidationSegment("BUS", "N51", 20), nightValidationSegment("WALK", "", 5),
+                nightValidationSegment("BUS", "N62", 20).toBuilder().scheduledWaitMinutes(10).build(),
+                nightValidationSegment("WALK", "", 5)));
+        var service = nightValidationService(provider);
+        var details = new ObjectMapper().writeValueAsString(route);
+        // N62 boarding 01:05 and N51 boarding 00:30 are both valid.
+        service.validateNightBusOperatingTime(details, java.time.LocalTime.of(1, 30));
+        // N62 remains valid, but N51 boarding 00:40 is after its last bus.
+        assertThatThrownBy(() -> service.validateNightBusOperatingTime(details, java.time.LocalTime.of(1, 40)))
+                .isInstanceOfSatisfying(GlobalException.class, e -> assertThat(e.getErrorCode())
+                        .isEqualTo(ErrorCode.TRANSIT_NIGHT_BUS_OUTSIDE_HOURS));
+    }
+
+    @Test
+    void ordinaryBusDoesNotRequireNightTimetable() {
+        var provider = mock(SeoulBusScheduleService.class);
+        var route = nightValidationRoute(java.util.List.of(nightValidationSegment("BUS", "603", 20)));
+        nightValidationService(provider).validateNightBusOperatingTime(
+                new ObjectMapper().writeValueAsString(route), java.time.LocalTime.of(14, 15));
+        verifyNoInteractions(provider);
+    }
+
+    @Test
+    void unknownNightTimetableCannotBypassValidation() {
+        var provider = mock(SeoulBusScheduleService.class);
+        var day = java.time.LocalDate.of(2026, 10, 12);
+        when(provider.today()).thenReturn(day);
+        when(provider.resolve(any(), any())).thenThrow(new GlobalException(ErrorCode.TRANSIT_SCHEDULE_UNSUPPORTED));
+        var details = new ObjectMapper().writeValueAsString(nightValidationRoute(
+                java.util.List.of(nightValidationSegment("BUS", "N51", 20))));
+        assertThatThrownBy(() -> nightValidationService(provider).validateNightBusOperatingTime(
+                details, java.time.LocalTime.of(2, 0)))
+                .isInstanceOfSatisfying(GlobalException.class, e -> assertThat(e.getErrorCode())
+                        .isEqualTo(ErrorCode.TRANSIT_NIGHT_BUS_HOURS_UNVERIFIED));
+    }
+
+    private TransitApiService nightValidationService(SeoulBusScheduleService provider) {
+        var service = new TransitApiService(mock(PublicDataTransitService.class),
+                new ObjectMapper(), mock(RestTemplate.class));
+        ReflectionTestUtils.setField(service, "seoulBusScheduleService", provider);
+        return service;
+    }
+
+    private TransitDto.RouteOptionResponse nightValidationRoute(java.util.List<TransitDto.RouteSegment> segments) {
+        return TransitDto.RouteOptionResponse.builder().provider("ODSAY").totalDurationMinutes(60)
+                .segments(segments).build();
+    }
+
+    private TransitDto.RouteSegment nightValidationSegment(String type, String name, int minutes) {
+        // The N-name detection must work even when a legacy client omits nightBus=true.
+        return TransitDto.RouteSegment.builder().transitType(type).transitName(name)
+                .durationMinutes(minutes).build();
+    }
+
     @Test
     void scheduleSearchIncludesExactOriginAndDestinationCoordinatesNotStationCoordinates() {
         RestTemplate client = new RestTemplate();

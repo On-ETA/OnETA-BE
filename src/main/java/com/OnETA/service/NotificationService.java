@@ -137,6 +137,10 @@ public class NotificationService {
                 ? notification.getTargetArrivalTime() : request.getTargetArrivalTime());
         validateRouteSchedule(effectiveType, request.getRouteDetails() == null
                 ? notification.getRouteDetails() : request.getRouteDetails());
+        validateNormalNightBusHours(effectiveType,
+                request.getRouteDetails() == null ? notification.getRouteDetails() : request.getRouteDetails(),
+                request.getTargetArrivalTime() == null
+                        ? notification.getTargetArrivalTime() : request.getTargetArrivalTime());
 
         Integer requestedRepeatDays = isTransit(effectiveType) ? Integer.valueOf(0)
                 : request.getRepeatDays() == null ? null : repeatDaysService.toMask(request.getRepeatDays());
@@ -306,6 +310,15 @@ public class NotificationService {
         validateTargetArrivalTime(request.getScheduleType(), request.getTargetArrivalTime());
         validateRouteSchedule(request.getScheduleType(), request.getRouteDetails());
         validateReminderOffsets(request.getReminderOffsetMinutes(), true);
+        validateNormalNightBusHours(request.getScheduleType(), request.getRouteDetails(),
+                request.getTargetArrivalTime());
+    }
+
+    private void validateNormalNightBusHours(NotificationScheduleType type, String details,
+                                             java.time.LocalTime arrivalTime) {
+        if (type == null || type == NotificationScheduleType.NORMAL) {
+            transitApiService.validateNightBusOperatingTime(details, arrivalTime);
+        }
     }
 
     private void validateRouteSchedule(NotificationScheduleType type, String details) {

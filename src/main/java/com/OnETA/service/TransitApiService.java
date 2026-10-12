@@ -81,6 +81,62 @@ public class TransitApiService {
         seoulBusScheduleService.resolveRoute(route, seoulBusScheduleService.today());
     }
 
+    /** Validate each night-bus boarding time, working backwards from arrival at the destination. */
+    public void validateNightBusOperatingTime(String details, java.time.LocalTime arrivalTime) {
+        var route = readSavedRoute(details);
+        if (!TransitRouteClassifier.containsNightBus(route)) return;
+        if (arrivalTime == null || seoulBusScheduleService == null) {
+            throw new GlobalException(ErrorCode.TRANSIT_NIGHT_BUS_HOURS_UNVERIFIED);
+        }
+        long remainingMinutes = 0;
+        var day = seoulBusScheduleService.today();
+        var segments = route.getSegments();
+        for (int i = segments.size() - 1; i >= 0; i--) {
+            var segment = segments.get(i);
+            if (segment == null || segment.getDurationMinutes() == null
+                    || segment.getDurationMinutes() < 0 || segment.getDurationMinutes() > 1440) {
+                throw new GlobalException(ErrorCode.TRANSIT_NIGHT_BUS_HOURS_UNVERIFIED);
+            }
+            remainingMinutes += segment.getDurationMinutes();
+            if (remainingMinutes >= 1440) {
+                throw new GlobalException(ErrorCode.TRANSIT_NIGHT_BUS_HOURS_UNVERIFIED);
+            }
+            if ("BUS".equals(segment.getTransitType())
+                    && (segment.isNightBus() || TransitRouteClassifier.isNightBusName(segment.getTransitName()))) {
+                // Seoul bindings resolve by line name and exact stop sequence, also for ODsay routes.
+                var leg = route.toBuilder().provider("SEOUL_NIGHT").transferCount(0)
+                        .totalDurationMinutes(Math.max(1, segment.getDurationMinutes()))
+                        .segments(List.of(segment)).build();
+                SeoulBusScheduleService.Schedule schedule;
+                try {
+                    schedule = seoulBusScheduleService.resolve(leg, day);
+                } catch (GlobalException e) {
+                    if (e.getErrorCode() != ErrorCode.TRANSIT_SCHEDULE_UNSUPPORTED) throw e;
+                    throw new GlobalException(ErrorCode.TRANSIT_NIGHT_BUS_HOURS_UNVERIFIED);
+                }
+                if (schedule == null || schedule.first() == null || schedule.last() == null
+                        || !schedule.last().isAfter(schedule.first())
+                        || java.time.Duration.between(schedule.first(), schedule.last()).toMinutes() >= 1440) {
+                    throw new GlobalException(ErrorCode.TRANSIT_NIGHT_BUS_HOURS_UNVERIFIED);
+                }
+                var boarding = arrivalTime.minusMinutes(remainingMinutes);
+                var first = schedule.first().toLocalTime();
+                var last = schedule.last().toLocalTime();
+                boolean operating = last.isBefore(first)
+                        ? !boarding.isBefore(first) || !boarding.isAfter(last)
+                        : !boarding.isBefore(first) && !boarding.isAfter(last);
+                if (!operating) throw new GlobalException(ErrorCode.TRANSIT_NIGHT_BUS_OUTSIDE_HOURS);
+            }
+            // Waiting for this leg affects earlier boarding times, not this bus's boarding time.
+            if ("BUS".equals(segment.getTransitType()) && segment.getScheduledWaitMinutes() != null) {
+                if (segment.getScheduledWaitMinutes() < 0 || segment.getScheduledWaitMinutes() > 1440) {
+                    throw new GlobalException(ErrorCode.TRANSIT_NIGHT_BUS_HOURS_UNVERIFIED);
+                }
+                remainingMinutes += segment.getScheduledWaitMinutes();
+            }
+        }
+    }
+
     /**
      * Recalculates a saved route using current bus arrival predictions.
      * Non-bus section times remain based on ODsay's estimate.
