@@ -42,7 +42,7 @@ class NotificationDeliveryServiceTest {
         when(user.getId()).thenReturn(1L);
         when(tokens.findByUserId(1L)).thenReturn(Optional.of(new UserDeviceToken(user, "token")));
         ArrivalNotification notification = new ArrivalNotification(user, "경로", List.of(10), 0,
-                null, "{}", type);
+                null, "{\"originAddress\":\"집\",\"destinationAddress\":\"학교\"}", type);
         NotificationDeliveryService service = new NotificationDeliveryService(deliveries,
                 mock(ArrivalNotificationRepository.class), tokens, mock(FcmPushService.class),
                 mock(PlatformTransactionManager.class), retryProperties(),
@@ -52,8 +52,10 @@ class NotificationDeliveryServiceTest {
                 10, scheduled.plusMinutes(10), DeliveryPhase.BASE)).isTrue();
         ArgumentCaptor<NotificationDelivery> saved = ArgumentCaptor.forClass(NotificationDelivery.class);
         verify(deliveries).save(saved.capture());
-        assertThat(saved.getValue().getBody()).doesNotContain("null", "목표 시간")
-                .contains(type == com.OnETA.entity.NotificationScheduleType.FIRST_TRANSIT ? "첫차" : "막차");
+        String category = type == com.OnETA.entity.NotificationScheduleType.FIRST_TRANSIT ? "첫차" : "막차";
+        assertThat(saved.getValue().getTitle()).isEqualTo(category + " · 출발까지 10분");
+        assertThat(saved.getValue().getBody()).doesNotContain("null", "목표 도착", "예상 출발")
+                .contains("집 → 학교", "출발 권장 시간 18:10", category);
     }
 
     @Test
@@ -275,6 +277,9 @@ class NotificationDeliveryServiceTest {
         verify(notification, never()).completeOneTimeNotification();
         ArgumentCaptor<NotificationDelivery> deliveryCaptor = ArgumentCaptor.forClass(NotificationDelivery.class);
         verify(deliveries).save(deliveryCaptor.capture());
+        assertThat(deliveryCaptor.getValue().getTitle()).isEqualTo("내 일정 · 출발까지 10분");
+        assertThat(deliveryCaptor.getValue().getBody()).isEqualTo(
+                "출근\n출발 권장 시간 18:09 · 목표 도착 18:30\n예상 소요 시간: 30분");
         assertThat(deliveryCaptor.getValue().getScheduledAt()).isEqualTo(scheduledAt);
         assertThat(deliveryCaptor.getValue().getHardDeadlineAt())
                 .isEqualTo(LocalDateTime.of(2026, 8, 10, 9, 9, 58));

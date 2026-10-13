@@ -11,6 +11,8 @@ import com.OnETA.repository.UserDeviceTokenRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Value;
+import tools.jackson.databind.json.JsonMapper;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -21,6 +23,8 @@ import java.time.LocalDateTime;
 import java.time.Duration;
 import java.time.Clock;
 import java.time.ZoneOffset;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -48,6 +52,12 @@ public class NotificationDeliveryService {
     private final ScheduledExecutorService notificationRetryExecutor;
     private final Semaphore fcmSemaphore;
 
+    @Value("${app.time-zone:Asia/Seoul}")
+    private String timeZone = "Asia/Seoul";
+
+    private static final JsonMapper ROUTE_MAPPER = JsonMapper.builder().build();
+    private static final DateTimeFormatter TIME_FORMAT = DateTimeFormatter.ofPattern("HH:mm");
+
     private Clock clock = Clock.systemUTC();
     private final ConcurrentMap<Long, ScheduledFuture<?>> retryTasks = new ConcurrentHashMap<>();
 
@@ -72,8 +82,12 @@ public class NotificationDeliveryService {
                 notification.getId(), deliveryDate, reminderOffsetMinutes, phase).isPresent()) return false;
         boolean[] created = {false};
         userDeviceTokenRepository.findByUserId(notification.getUser().getId()).ifPresent(token -> {
-            String title = "출발 알림: " + notification.getName();
-            String body = notificationBody(notification, estimatedDuration);
+            LocalDateTime departureAt = phase == DeliveryPhase.RECOVERY
+                    ? hardDeadlineAt : scheduledAt.plusMinutes(reminderOffsetMinutes);
+            int minutesUntilDeparture = (int) Math.max(0,
+                    (Duration.between(scheduledAt, departureAt).getSeconds() + 59) / 60);
+            String title = notificationTitle(notification, minutesUntilDeparture);
+            String body = notificationBody(notification, estimatedDuration, departureAt);
             deliveryRepository.save(new NotificationDelivery(notification, deliveryDate, reminderOffsetMinutes,
                     phase, token.getDeviceToken(), title, body, scheduledAt, hardDeadlineAt));
             created[0] = true;
@@ -98,8 +112,9 @@ public class NotificationDeliveryService {
                                                LocalDate deliveryDate, LocalDateTime scheduledAt,
                                                int reminderOffsetMinutes) {
         userDeviceTokenRepository.findByUserId(notification.getUser().getId()).ifPresent(token -> {
-            String title = "출발 알림: " + notification.getName();
-            String body = notificationBody(notification, estimatedDuration);
+            LocalDateTime departureAt = scheduledAt.plusMinutes(reminderOffsetMinutes);
+            String title = notificationTitle(notification, reminderOffsetMinutes);
+            String body = notificationBody(notification, estimatedDuration, departureAt);
             LocalDateTime hardDeadlineAt = scheduledAt.plusMinutes(
                     reminderOffsetMinutes);
         deliveryRepository.save(new NotificationDelivery(
@@ -108,15 +123,49 @@ public class NotificationDeliveryService {
         });
     }
 
-    private String notificationBody(ArrivalNotification notification, int estimatedDuration) {
+    private String notificationTitle(ArrivalNotification notification, int reminderOffsetMinutes) {
+        String category = switch (notification.getScheduleType() == null
+                ? com.OnETA.entity.NotificationScheduleType.NORMAL : notification.getScheduleType()) {
+            case FIRST_TRANSIT -> "첫차";
+            case LAST_TRANSIT -> "막차";
+            default -> "내 일정";
+        };
+        return category + " · " + (reminderOffsetMinutes > 0
+                ? "출발까지 " + reminderOffsetMinutes + "분" : "출발 시간입니다");
+    }
+
+    private String notificationBody(ArrivalNotification notification, int estimatedDuration,
+                                    LocalDateTime departureAt) {
+        String departureTime = departureAt.atOffset(ZoneOffset.UTC)
+                .atZoneSameInstant(ZoneId.of(timeZone)).format(TIME_FORMAT);
+        String prefix = notificationRoute(notification) + "\n출발 권장 시간 " + departureTime;
         if (notification.getScheduleType() == com.OnETA.entity.NotificationScheduleType.FIRST_TRANSIT) {
-            return "첫차 이용을 위한 예상 출발 알림입니다. 여유 있게 정류장 또는 역으로 이동해주세요.";
+            return prefix + "\n첫차 이용을 위해 여유 있게 정류장 또는 역으로 이동해주세요.";
         }
         if (notification.getScheduleType() == com.OnETA.entity.NotificationScheduleType.LAST_TRANSIT) {
-            return "막차 이용을 위한 예상 출발 알림입니다. 환승 여유를 두고 정류장 또는 역으로 이동해주세요.";
+            return prefix + "\n막차 이용을 위해 환승 여유를 두고 정류장 또는 역으로 이동해주세요.";
         }
-        return String.format("지금 출발하시면 목표 시간(%s)에 도착할 수 있습니다. (예상 소요 시간: %d분)",
-                notification.getTargetArrivalTime(), estimatedDuration);
+        String targetTime = notification.getTargetArrivalTime() == null ? ""
+                : " · 목표 도착 " + notification.getTargetArrivalTime().format(TIME_FORMAT);
+        return prefix + targetTime + "\n예상 소요 시간: " + estimatedDuration + "분";
+    }
+
+    private String notificationRoute(ArrivalNotification notification) {
+        String details = notification.getRouteDetails();
+        if (details != null && !details.isBlank()) {
+            try {
+                var route = ROUTE_MAPPER.readTree(details);
+                String origin = route.path("originAddress").asText("").trim();
+                String destination = route.path("destinationAddress").asText("").trim();
+                if (!origin.isBlank() && !destination.isBlank()) {
+                    return origin + " → " + destination;
+                }
+            } catch (RuntimeException e) {
+                log.debug("Cannot read notification route for push. notificationId={}", notification.getId());
+            }
+        }
+        String name = notification.getName();
+        return name == null || name.isBlank() ? "등록한 경로" : name;
     }
 
     public void processPending() {
