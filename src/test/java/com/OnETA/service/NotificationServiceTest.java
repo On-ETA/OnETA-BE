@@ -41,11 +41,41 @@ class NotificationServiceTest {
         var request = request(NotificationScheduleType.NORMAL);
         request.setTargetArrivalTime(LocalTime.of(14, 15));
         doThrow(new GlobalException(com.OnETA.common.error.ErrorCode.TRANSIT_NIGHT_BUS_OUTSIDE_HOURS))
-                .when(transit).validateNightBusOperatingTime("{}", LocalTime.of(14, 15));
+                .when(schedules).validateNormalOperatingTime("{}", LocalTime.of(14, 15), 0);
         assertThatThrownBy(() -> service.createArrivalNotification("test@example.com", request))
                 .isInstanceOfSatisfying(GlobalException.class, e -> assertThat(e.getErrorCode())
                         .isEqualTo(com.OnETA.common.error.ErrorCode.TRANSIT_NIGHT_BUS_OUTSIDE_HOURS));
         verify(arrivals, never()).save(any());
+    }
+
+    @Test
+    void ordinaryBusOutsideHoursAlsoRejectsBeforeSaving() {
+        var request = request(NotificationScheduleType.NORMAL);
+        request.setTargetArrivalTime(LocalTime.of(1, 0));
+        doThrow(new GlobalException(com.OnETA.common.error.ErrorCode.TRANSIT_NORMAL_OUTSIDE_HOURS))
+                .when(schedules).validateNormalOperatingTime("{}", LocalTime.of(1, 0), 0);
+        assertThatThrownBy(() -> service.createArrivalNotification("test@example.com", request))
+                .isInstanceOf(GlobalException.class);
+        verify(arrivals, never()).save(any());
+    }
+
+    @Test
+    void reactivationFailureLeavesNotificationInactive() {
+        when(user.getId()).thenReturn(1L);
+        when(users.findByEmail("test@example.com")).thenReturn(Optional.of(user));
+        var notification = new ArrivalNotification(user, "경로", List.of(10), 0,
+                LocalTime.of(1, 0), "{}", NotificationScheduleType.NORMAL);
+        notification.toggleActive(false);
+        when(arrivals.findById(1L)).thenReturn(Optional.of(notification));
+        doThrow(new GlobalException(com.OnETA.common.error.ErrorCode.TRANSIT_NORMAL_HOURS_UNVERIFIED))
+                .when(schedules).validateNormalOperatingTime("{}", LocalTime.of(1, 0), 0);
+        var request = new NotificationDto.ToggleStatusRequest();
+        request.setIsActive(true);
+        assertThatThrownBy(() -> service.toggleStatus("test@example.com", 1L, request))
+                .isInstanceOf(GlobalException.class);
+        assertThat(notification.getIsActive()).isFalse();
+        request.setIsActive(false);
+        service.toggleStatus("test@example.com", 1L, request);
     }
 
     @Test
@@ -58,14 +88,14 @@ class NotificationServiceTest {
         var update = new NotificationDto.UpdateArrivalRequest();
         update.setTargetArrivalTime(LocalTime.of(14, 15));
         doThrow(new GlobalException(com.OnETA.common.error.ErrorCode.TRANSIT_NIGHT_BUS_OUTSIDE_HOURS))
-                .when(transit).validateNightBusOperatingTime("{}", LocalTime.of(14, 15));
+                .when(schedules).validateNormalOperatingTime("{}", LocalTime.of(14, 15), 0);
         assertThatThrownBy(() -> service.updateArrivalNotification("test@example.com", 1L, update))
                 .isInstanceOf(GlobalException.class);
         assertThat(notification.getTargetArrivalTime()).isEqualTo(LocalTime.of(2, 0));
         // Changing to an operating time can proceed using the same saved route.
         update.setTargetArrivalTime(LocalTime.of(3, 0));
         service.updateArrivalNotification("test@example.com", 1L, update);
-        verify(transit).validateNightBusOperatingTime("{}", LocalTime.of(3, 0));
+        verify(schedules).validateNormalOperatingTime("{}", LocalTime.of(3, 0), 0);
         assertThat(notification.getTargetArrivalTime()).isEqualTo(LocalTime.of(3, 0));
     }
 
@@ -81,7 +111,7 @@ class NotificationServiceTest {
         var update = new NotificationDto.UpdateArrivalRequest();
         update.setRouteDetails("new");
         doThrow(new GlobalException(com.OnETA.common.error.ErrorCode.TRANSIT_NIGHT_BUS_OUTSIDE_HOURS))
-                .when(transit).validateNightBusOperatingTime("new", LocalTime.of(14, 15));
+                .when(schedules).validateNormalOperatingTime("new", LocalTime.of(14, 15), 0);
         assertThatThrownBy(() -> service.updateArrivalNotification("test@example.com", 1L, update))
                 .isInstanceOf(GlobalException.class);
         assertThat(notification.getRouteDetails()).isEqualTo("old");

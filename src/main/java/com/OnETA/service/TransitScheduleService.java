@@ -73,6 +73,164 @@ public class TransitScheduleService {
         this.restTemplate = restTemplate;
     }
 
+    /** Registration validation only: search results and first/last scheduling remain unchanged. */
+    public void validateNormalOperatingTime(String details, LocalTime arrivalTime, Integer repeatDays) {
+        var route = transitApiService.readSavedRoute(details);
+        if (arrivalTime == null || route.getSegments() == null || route.getSegments().isEmpty()) {
+            throw normalHoursUnverified(null);
+        }
+        long journeyMinutes = 0;
+        for (var segment : route.getSegments()) {
+            if (segment == null || segment.getDurationMinutes() == null
+                    || segment.getDurationMinutes() < 0 || segment.getDurationMinutes() > 1440
+                    || !Set.of("WALK", "BUS", "SUBWAY").contains(Objects.toString(segment.getTransitType(), ""))) {
+                throw normalHoursUnverified(segment);
+            }
+            int wait = segment.getScheduledWaitMinutes() == null ? 0 : segment.getScheduledWaitMinutes();
+            if (wait < 0 || wait > 1440) throw normalHoursUnverified(segment);
+            journeyMinutes += segment.getDurationMinutes() + ("WALK".equals(segment.getTransitType()) ? 0 : wait);
+        }
+        if (journeyMinutes <= 0 || journeyMinutes >= 1440
+                || route.getSegments().stream().noneMatch(s -> !"WALK".equals(s.getTransitType()))) {
+            throw normalHoursUnverified(null);
+        }
+        if (repeatDays != null && (repeatDays < 0 || (repeatDays & ~127) != 0)) {
+            throw normalHoursUnverified(null);
+        }
+        LocalDateTime now = LocalDateTime.ofInstant(clock.instant(), ZoneId.of("Asia/Seoul"));
+        LocalDate firstDate = now.toLocalDate();
+        if (firstDate.atTime(arrivalTime).minusMinutes(journeyMinutes).isBefore(now)) {
+            firstDate = firstDate.plusDays(1);
+        }
+        Map<String, TransitOperatingWindow> windows = new HashMap<>();
+        Map<String, LocalDateTime> scheduleCache = new HashMap<>();
+        boolean oneTime = repeatDays == null || repeatDays == 0;
+        for (int d = 0; d < (oneTime ? 1 : 7); d++) {
+            LocalDate date = firstDate.plusDays(d);
+            if (!oneTime && (repeatDays & (1 << (date.getDayOfWeek().getValue() - 1))) == 0) continue;
+            LocalDateTime boarding = date.atTime(arrivalTime);
+            var segments = route.getSegments();
+            for (int i = segments.size() - 1; i >= 0; i--) {
+                var segment = segments.get(i);
+                boarding = boarding.minusMinutes(segment.getDurationMinutes());
+                if (!"WALK".equals(segment.getTransitType())) {
+                    validateNormalBoarding(route, segment, i, boarding, windows, scheduleCache);
+                    boarding = boarding.minusMinutes(segment.getScheduledWaitMinutes() == null
+                            ? 0 : segment.getScheduledWaitMinutes());
+                }
+            }
+        }
+    }
+
+    private void validateNormalBoarding(TransitDto.RouteOptionResponse route, TransitDto.RouteSegment segment,
+                                        int index, LocalDateTime boarding,
+                                        Map<String, TransitOperatingWindow> windows,
+                                        Map<String, LocalDateTime> scheduleCache) {
+        try {
+            if ("BUS".equals(segment.getTransitType())) {
+                TransitOperatingWindow window = windows.get("bus|" + index);
+                if (window == null) {
+                    LocalDate today = LocalDateTime.ofInstant(clock.instant(), ZoneId.of("Asia/Seoul")).toLocalDate();
+                    if (SeoulBusScheduleService.usesSeoulBusSchedules(route)
+                            || segment.isNightBus() || TransitRouteClassifier.isNightBusName(segment.getTransitName())) {
+                        if (seoulBusScheduleService == null) throw normalHoursUnverified(segment);
+                        var leg = route.toBuilder().provider("SEOUL_NIGHT").transferCount(0)
+                                .totalDurationMinutes(Math.max(1, segment.getDurationMinutes()))
+                                .segments(List.of(segment)).build();
+                        var schedule = seoulBusScheduleService.resolve(leg, seoulBusScheduleService.today());
+                        window = checkedNormalWindow(schedule.first(), schedule.last(), segment);
+                    } else {
+                        if (segment.getOdsayStartStationId() == null
+                                || (segment.getOdsayRouteId() == null && segment.getLocalRouteId() == null)) {
+                            throw normalHoursUnverified(segment);
+                        }
+                        window = checkedNormalWindow(
+                                serviceTimeCached(segment, NotificationScheduleType.FIRST_TRANSIT, today, scheduleCache),
+                                serviceTimeCached(segment, NotificationScheduleType.LAST_TRANSIT, today, scheduleCache), segment);
+                    }
+                    windows.put("bus|" + index, window);
+                }
+                // Bus APIs expose recurring stop times, not historical service-date timetables.
+                LocalTime first = window.first().toLocalTime();
+                LocalTime last = window.last().toLocalTime();
+                LocalTime at = boarding.toLocalTime();
+                boolean within = last.isBefore(first)
+                        ? !at.isBefore(first) || !at.isAfter(last)
+                        : !at.isBefore(first) && !at.isAfter(last);
+                if (!within) throw normalOutsideHours(segment);
+                return;
+            }
+            // A post-midnight train may still belong to the preceding service day's timetable.
+            LocalDate day = boarding.toLocalDate();
+            TransitOperatingWindow current = normalSubwayWindow(route, segment, index, day, windows, scheduleCache);
+            if (!boarding.isBefore(current.first()) && !boarding.isAfter(current.last())) return;
+            if (boarding.isBefore(current.first())) {
+                TransitOperatingWindow previous = normalSubwayWindow(route, segment, index,
+                        day.minusDays(1), windows, scheduleCache);
+                if (!boarding.isBefore(previous.first()) && !boarding.isAfter(previous.last())) return;
+            }
+            throw normalOutsideHours(segment);
+        } catch (com.OnETA.common.exception.GlobalException e) {
+            if (e.getErrorCode() == com.OnETA.common.error.ErrorCode.TRANSIT_NIGHT_BUS_OUTSIDE_HOURS
+                    || e.getErrorCode() == com.OnETA.common.error.ErrorCode.TRANSIT_NORMAL_OUTSIDE_HOURS
+                    || e.getErrorCode() == com.OnETA.common.error.ErrorCode.TRANSIT_NIGHT_BUS_HOURS_UNVERIFIED
+                    || e.getErrorCode() == com.OnETA.common.error.ErrorCode.TRANSIT_NORMAL_HOURS_UNVERIFIED) throw e;
+            throw normalHoursUnverified(segment);
+        } catch (RuntimeException e) {
+            log.warn("Normal route timetable verification failed: line={}, exception={}",
+                    segment.getTransitName(), e.getClass().getSimpleName());
+            throw normalHoursUnverified(segment);
+        }
+    }
+
+    private TransitOperatingWindow normalSubwayWindow(TransitDto.RouteOptionResponse route,
+            TransitDto.RouteSegment segment, int index, LocalDate day,
+            Map<String, TransitOperatingWindow> windows, Map<String, LocalDateTime> scheduleCache) {
+        String key = "subway|" + index + "|" + day;
+        if (windows.containsKey(key)) return windows.get(key);
+        TransitOperatingWindow window;
+        if (SeoulBusScheduleService.usesSeoulBusSchedules(route)) {
+            var schedule = resolveKakaoSubwaySchedule(segment, day);
+            window = checkedNormalWindow(schedule.first(), schedule.last(), segment);
+        } else {
+            if (segment.getOdsayStartStationId() == null || segment.getOdsayEndStationId() == null) {
+                throw normalHoursUnverified(segment);
+            }
+            window = checkedNormalWindow(
+                    serviceTimeCached(segment, NotificationScheduleType.FIRST_TRANSIT, day, scheduleCache),
+                    serviceTimeCached(segment, NotificationScheduleType.LAST_TRANSIT, day, scheduleCache), segment);
+        }
+        windows.put(key, window);
+        return window;
+    }
+
+    private TransitOperatingWindow checkedNormalWindow(LocalDateTime first, LocalDateTime last,
+                                                        TransitDto.RouteSegment segment) {
+        if (first == null || last == null) throw normalHoursUnverified(segment);
+        var window = new TransitOperatingWindow(first, last);
+        long minutes = Duration.between(window.first(), window.last()).toMinutes();
+        if (minutes <= 0 || minutes >= 1440) throw normalHoursUnverified(segment);
+        return window;
+    }
+
+    private com.OnETA.common.exception.GlobalException normalOutsideHours(TransitDto.RouteSegment segment) {
+        boolean night = segment.isNightBus() || TransitRouteClassifier.isNightBusName(segment.getTransitName());
+        var code = night ? com.OnETA.common.error.ErrorCode.TRANSIT_NIGHT_BUS_OUTSIDE_HOURS
+                : com.OnETA.common.error.ErrorCode.TRANSIT_NORMAL_OUTSIDE_HOURS;
+        String line = segment.getTransitName() == null || segment.getTransitName().isBlank()
+                ? "해당 교통수단" : segment.getTransitName();
+        return new com.OnETA.common.exception.GlobalException(code,
+                "선택한 도착 시간은 " + line + " 운행 시간에 맞지 않습니다. 도착 시간을 변경해주세요.");
+    }
+
+    private com.OnETA.common.exception.GlobalException normalHoursUnverified(TransitDto.RouteSegment segment) {
+        boolean night = segment != null && (segment.isNightBus()
+                || TransitRouteClassifier.isNightBusName(segment.getTransitName()));
+        return new com.OnETA.common.exception.GlobalException(night
+                ? com.OnETA.common.error.ErrorCode.TRANSIT_NIGHT_BUS_HOURS_UNVERIFIED
+                : com.OnETA.common.error.ErrorCode.TRANSIT_NORMAL_HOURS_UNVERIFIED);
+    }
+
     @Transactional
     public Decision evaluate(ArrivalNotification notification, LocalDate date, LocalDateTime now, ZoneId zone) {
         NotificationScheduleType type = notification.getScheduleType();
