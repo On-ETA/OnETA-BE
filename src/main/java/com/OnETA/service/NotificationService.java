@@ -137,10 +137,12 @@ public class NotificationService {
                 ? notification.getTargetArrivalTime() : request.getTargetArrivalTime());
         validateRouteSchedule(effectiveType, request.getRouteDetails() == null
                 ? notification.getRouteDetails() : request.getRouteDetails());
-        validateNormalNightBusHours(effectiveType,
+        validateNormalOperatingHours(effectiveType,
                 request.getRouteDetails() == null ? notification.getRouteDetails() : request.getRouteDetails(),
                 request.getTargetArrivalTime() == null
-                        ? notification.getTargetArrivalTime() : request.getTargetArrivalTime());
+                        ? notification.getTargetArrivalTime() : request.getTargetArrivalTime(),
+                request.getRepeatDays() == null ? notification.getRepeatDays()
+                        : repeatDaysService.toMask(request.getRepeatDays()));
 
         Integer requestedRepeatDays = isTransit(effectiveType) ? Integer.valueOf(0)
                 : request.getRepeatDays() == null ? null : repeatDaysService.toMask(request.getRepeatDays());
@@ -255,6 +257,10 @@ public class NotificationService {
         userRepository.findForNotificationByEmail(email)
                 .orElseThrow(() -> new com.OnETA.common.exception.GlobalException(com.OnETA.common.error.ErrorCode.USER_NOT_FOUND));
         ArrivalNotification notification = getArrivalNotificationByEmailAndId(email, id);
+        if (Boolean.TRUE.equals(request.getIsActive())) {
+            validateNormalOperatingHours(notification.getScheduleType(), notification.getRouteDetails(),
+                    notification.getTargetArrivalTime(), notification.getRepeatDays());
+        }
         notification.toggleActive(request.getIsActive());
     }
 
@@ -310,14 +316,14 @@ public class NotificationService {
         validateTargetArrivalTime(request.getScheduleType(), request.getTargetArrivalTime());
         validateRouteSchedule(request.getScheduleType(), request.getRouteDetails());
         validateReminderOffsets(request.getReminderOffsetMinutes(), true);
-        validateNormalNightBusHours(request.getScheduleType(), request.getRouteDetails(),
-                request.getTargetArrivalTime());
+        validateNormalOperatingHours(request.getScheduleType(), request.getRouteDetails(),
+                request.getTargetArrivalTime(), repeatDaysService.toMask(request.getRepeatDays()));
     }
 
-    private void validateNormalNightBusHours(NotificationScheduleType type, String details,
-                                             java.time.LocalTime arrivalTime) {
+    private void validateNormalOperatingHours(NotificationScheduleType type, String details,
+                                             java.time.LocalTime arrivalTime, Integer repeatDays) {
         if (type == null || type == NotificationScheduleType.NORMAL) {
-            transitApiService.validateNightBusOperatingTime(details, arrivalTime);
+            transitScheduleService.validateNormalOperatingTime(details, arrivalTime, repeatDays);
         }
     }
 

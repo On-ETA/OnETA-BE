@@ -38,6 +38,8 @@ public enum ErrorCode {
     TRANSIT_NIGHT_ONLY_ROUTE(HttpStatus.UNPROCESSABLE_ENTITY, "T008", "심야버스로만 이동 가능한 경로는 첫차·막차 알림으로 등록할 수 없습니다."),
     TRANSIT_NIGHT_BUS_OUTSIDE_HOURS(HttpStatus.UNPROCESSABLE_ENTITY, "T009", "선택한 도착 시간으로는 심야버스 운행 시간에 탑승할 수 없습니다. 도착 시간을 변경해주세요."),
     TRANSIT_NIGHT_BUS_HOURS_UNVERIFIED(HttpStatus.UNPROCESSABLE_ENTITY, "T010", "심야버스 운행 시간을 확인할 수 없어 알림을 등록할 수 없습니다. 경로를 다시 조회해주세요."),
+    TRANSIT_NORMAL_OUTSIDE_HOURS(HttpStatus.UNPROCESSABLE_ENTITY, "T011", "선택한 도착 시간에는 경로의 대중교통을 이용할 수 없습니다. 도착 시간을 변경해주세요."),
+    TRANSIT_NORMAL_HOURS_UNVERIFIED(HttpStatus.UNPROCESSABLE_ENTITY, "T012", "경로의 운행 시간을 확인할 수 없어 알림을 등록할 수 없습니다. 잠시 후 다시 시도해주세요."),
     DEVICE_TOKEN_CONFLICT(HttpStatus.CONFLICT, "N003", "이미 다른 사용자에게 등록된 디바이스 토큰입니다."),
     PUSH_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "N004", "푸시 발송에 실패했습니다. 서버 설정과 디바이스 토큰을 확인해주세요."),
 
