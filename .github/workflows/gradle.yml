@@ -46,6 +46,8 @@ jobs:
             --tests 'com.OnETA.service.SeoulMetroTrainScheduleServiceTest' \
             --tests 'com.OnETA.service.TransitRouteClassifierTest' \
             --tests 'com.OnETA.service.KakaoTransitClientTest.marksKakaoNightBusByRouteName' \
+            --tests 'com.OnETA.service.KakaoTransitClientTest.supplementsOdsayFirstLastCandidatesWithKakaoMetropolitanRoutes' \
+            --tests 'com.OnETA.service.TransitScheduleServiceTest' \
             --tests 'com.OnETA.service.SeoulBusScheduleServiceTest.resolvesProviderNightLabelUsingCanonicalSeoulLine' \
             --tests 'com.OnETA.service.TransitRouteOptimizationServiceTest' \
             --tests 'com.OnETA.service.TransitApiServiceTest' \
