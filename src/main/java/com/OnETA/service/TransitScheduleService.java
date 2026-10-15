@@ -1523,10 +1523,11 @@ public class TransitScheduleService {
             ensureNoOdsayError(response);
             JsonNode result = response.path("result");
             JsonNode lanes = result.path("lane");
-            int laneCount = lanes.isArray() ? lanes.size() : 0;
+            List<JsonNode> laneRows = odsayRows(lanes);
+            int laneCount = laneRows.size();
             boolean matched = false;
             LocalDateTime serviceTime = null;
-            if (lanes.isArray()) for (JsonNode lane : lanes) {
+            for (JsonNode lane : laneRows) {
                 if (same(lane.path("busID"), s.getOdsayRouteId())
                         || same(lane.path("busLocalBlID"), s.getLocalRouteId())) {
                     matched = true;
@@ -1550,6 +1551,11 @@ public class TransitScheduleService {
                     }
                     break;
                 }
+            }
+            if (s.getBusType() == com.OnETA.dto.BusType.METROPOLITAN
+                    || s.getBusType() == com.OnETA.dto.BusType.OTHER) {
+                log.info("FIRST_LAST_ODsay_BUS_RESULT: line={}, busType={}, scheduleType={}, date={}, laneCount={}, matched={}, timeFound={}",
+                        s.getTransitName(), s.getBusType(), type, serviceDate, laneCount, matched, serviceTime != null);
             }
             log.debug("BUS schedule lookup: scheduleType={}, stationId={}, odsayRouteId={}, localRouteId={}, laneCount={}, routeMatched={}, serviceTimePresent={}",
                     type, s.getOdsayStartStationId(), s.getOdsayRouteId(), s.getLocalRouteId(), laneCount, matched, serviceTime != null);
