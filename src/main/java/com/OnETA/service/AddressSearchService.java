@@ -89,5 +89,31 @@ public class AddressSearchService {
         }
     }
 
+    /** Best-effort lookup for push labels; a provider failure must not block delivery. */
+    public String reverseGeocode(Double x, Double y) {
+        if (x == null || y == null || !Double.isFinite(x) || !Double.isFinite(y)
+                || x < 124 || x > 132 || y < 33 || y > 39 || restApiKey.isBlank()) return null;
+        URI uri = UriComponentsBuilder.fromUriString("https://dapi.kakao.com/v2/local/geo/coord2address.json")
+                .queryParam("x", x).queryParam("y", y).queryParam("input_coord", "WGS84")
+                .build().toUri();
+        HttpHeaders headers = new HttpHeaders();
+        headers.set(HttpHeaders.AUTHORIZATION, "KakaoAK " + restApiKey.trim());
+        try {
+            com.OnETA.common.ExternalApiCallCounter.record("KAKAO", "coord2address");
+            String body = restTemplate.exchange(uri, HttpMethod.GET,
+                    new HttpEntity<>(headers), String.class).getBody();
+            JsonNode root = objectMapper.readTree(body);
+            if (root == null) return null;
+            for (JsonNode item : root.path("documents")) {
+                String address = item.path("road_address").path("address_name").asText("").strip();
+                if (address.isBlank()) address = item.path("address").path("address_name").asText("").strip();
+                if (!address.isBlank()) return address;
+            }
+        } catch (Exception ignored) {
+            // Keep credentials and provider details out of logs and push messages.
+        }
+        return null;
+    }
+
 }
 

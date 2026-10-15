@@ -97,5 +97,42 @@ class AddressSearchServiceTest {
         assertThatThrownBy(() -> unconfigured.search("학교")).isInstanceOf(GlobalException.class);
         verifyNoInteractions(client);
     }
+    @Test
+    void reverseGeocodePrefersRoadAddressAndFallsBackToJibun() {
+        when(client.exchange(any(URI.class), eq(HttpMethod.GET), any(HttpEntity.class), eq(String.class)))
+                .thenAnswer(invocation -> {
+                    URI uri = invocation.getArgument(0);
+                    assertThat(uri.getPath()).isEqualTo("/v2/local/geo/coord2address.json");
+                    assertThat(uri.getQuery()).contains("x=126.9", "y=37.5", "input_coord=WGS84");
+                    return ResponseEntity.ok("""
+                            {"documents":[{"road_address":{"address_name":"도로명 주소"},"address":{"address_name":"지번 주소"}}]}
+                            """);
+                });
+        assertThat(service.reverseGeocode(126.9, 37.5)).isEqualTo("도로명 주소");
+        when(client.exchange(any(URI.class), eq(HttpMethod.GET), any(HttpEntity.class), eq(String.class)))
+                .thenReturn(ResponseEntity.ok("""
+                        {"documents":[{"road_address":null,"address":{"address_name":"지번 주소"}}]}
+                        """));
+        assertThat(service.reverseGeocode(126.9, 37.5)).isEqualTo("지번 주소");
+    }
+
+    @Test
+    void reverseGeocodeFailureDoesNotBlockPush() {
+        when(client.exchange(any(URI.class), eq(HttpMethod.GET), any(HttpEntity.class), eq(String.class)))
+                .thenThrow(new RuntimeException("provider unavailable"));
+        assertThat(service.reverseGeocode(126.9, 37.5)).isNull();
+    }
+
+    @Test
+    void reverseGeocodeRejectsIncompleteOrInvalidCoordinates() {
+        assertThat(service.reverseGeocode(null, 37.5)).isNull();
+        assertThat(service.reverseGeocode(126.9, null)).isNull();
+        assertThat(service.reverseGeocode(Double.NaN, 37.5)).isNull();
+        assertThat(service.reverseGeocode(37.5, 126.9)).isNull();
+        assertThat(new AddressSearchService(new ObjectMapper(), client, "")
+                .reverseGeocode(126.9, 37.5)).isNull();
+        verifyNoInteractions(client);
+    }
+
 }
 
