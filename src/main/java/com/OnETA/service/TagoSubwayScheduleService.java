@@ -137,10 +137,14 @@ public class TagoSubwayScheduleService {
         var matches = rows.stream().filter(r -> normalizeName(field(r, "subwayStationName")).equals(normalizeName(name))
                 && normalizeLine(field(r, "subwayRouteName")).equals(line)).toList();
         if (matches.size() != 1 || field(matches.get(0), "subwayStationId").isBlank()) {
-            log.error("TAGO T005: stage=STATION_LINE_MAPPING, stationName={}, line={}, responseRows={}, nameMatches={}, lineMatches={}, matchedId={}",
+            List<String> candidateLines = rows.stream()
+                    .filter(r -> normalizeName(field(r, "subwayStationName")).equals(normalizeName(name)))
+                    .map(r -> field(r, "subwayRouteName"))
+                    .distinct().limit(10).toList();
+            log.error("TAGO T005: stage=STATION_LINE_MAPPING, stationName={}, line={}, responseRows={}, nameMatches={}, lineMatches={}, matchedId={}, candidateLines={}",
                     name, line, rows.size(),
                     rows.stream().filter(r -> normalizeName(field(r, "subwayStationName")).equals(normalizeName(name))).count(),
-                    matches.size(), matches.size() == 1 ? field(matches.get(0), "subwayStationId") : "");
+                    matches.size(), matches.size() == 1 ? field(matches.get(0), "subwayStationId") : "", candidateLines);
             throw unsupported();
         }
         return field(matches.get(0), "subwayStationId");
