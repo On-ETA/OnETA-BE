@@ -100,7 +100,7 @@ class TransitScheduleServiceTest {
 
         server.expect(requestTo(org.hamcrest.Matchers.containsString("/pointSearch")))
                 .andRespond(withSuccess("""
-                    {"result":{"station":[{"stationID":101,"stationClass":1,"stationName":"서울역",
+                    {"result":{"station":[{"stationID":101,"stationClass":1,"stationName":"서울역버스환승센터",
                     "x":127.1,"y":37.2}]}}
                     """, MediaType.APPLICATION_JSON));
         server.expect(requestTo(org.hamcrest.Matchers.containsString("/pointSearch")))
@@ -120,6 +120,13 @@ class TransitScheduleServiceTest {
                     """, MediaType.APPLICATION_JSON));
 
         var route = metropolitanRoute();
+        var original = route.getSegments().get(1);
+        // Kakao sometimes marks a real regional/metropolitan service as OTHER.
+        var unknownType = original.toBuilder().busType(com.OnETA.dto.BusType.OTHER).build();
+        route = route.toBuilder().segments(List.of(route.getSegments().get(0),
+                unknownType, route.getSegments().get(2))).build();
+        assertThat(service.previewDepartureForServiceDate(route, NotificationScheduleType.FIRST_TRANSIT,
+                DATE, new java.util.HashMap<>())).isEqualTo(DATE.atTime(5, 24));
         assertThat(service.previewDepartureForServiceDate(route, NotificationScheduleType.LAST_TRANSIT,
                 DATE, new java.util.HashMap<>())).isEqualTo(DATE.atTime(23, 34));
         server.verify();
