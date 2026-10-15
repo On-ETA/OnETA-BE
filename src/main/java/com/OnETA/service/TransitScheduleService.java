@@ -437,14 +437,17 @@ public class TransitScheduleService {
                     prefix += Math.max(0, segment.getDurationMinutes() == null ? 0 : segment.getDurationMinutes());
                 }
                 var plan = TransitScheduleCalculator.conservative(route.getSegments(), bounds, type);
+                boolean odsayStopTimes = times.stream().anyMatch(this::isOdsayMetropolitanBinding);
                 return new RouteSchedulePlan(plan.departure(), plan.durationMinutes(),
-                        "SEOUL_BUS_TRANSFER", objectMapper.writeValueAsString(times), Math.max(60, prefix));
+                        odsayStopTimes ? "ODSAY" : "SEOUL_BUS_TRANSFER",
+                        odsayStopTimes ? null : objectMapper.writeValueAsString(times), Math.max(60, prefix));
             }
 
-            var times = seoulBusScheduleService.resolve(route, date);
+            var times = resolveKakaoBusSchedule(route, date);
             LocalDateTime boarding = type == NotificationScheduleType.FIRST_TRANSIT ? times.first() : times.last();
             var plan = TransitScheduleCalculator.calculate(route.getSegments(), List.of(boarding), type);
-            return new RouteSchedulePlan(plan.departure(), plan.durationMinutes(), "SEOUL_BUS", null, 0);
+            return new RouteSchedulePlan(plan.departure(), plan.durationMinutes(),
+                    isOdsayMetropolitanBinding(times) ? "ODSAY" : "SEOUL_BUS", null, 0);
         }
 
         List<TransitDto.RouteSegment> segments = route.getSegments();
@@ -650,8 +653,10 @@ public class TransitScheduleService {
         int duration = Math.toIntExact((seconds + 59) / 60);
         if (kakao) {
             String details = objectMapper.writeValueAsString(providerSchedules);
+            boolean odsayStopTimes = providerSchedules.stream().anyMatch(this::isOdsayMetropolitanBinding);
             return new RouteSchedulePlan(departure, duration,
-                    "SEOUL_BUS_TRANSFER", details, Math.max(60, duration));
+                    odsayStopTimes ? "ODSAY" : "SEOUL_BUS_TRANSFER",
+                    odsayStopTimes ? null : details, Math.max(60, duration));
         }
         int lead = Math.max(15, Math.min(60, duration));
         return new RouteSchedulePlan(departure, duration, "ODSAY", null, lead);
@@ -701,7 +706,7 @@ public class TransitScheduleService {
                 continue;
             }
             if ("BUS".equals(segment.getTransitType())) {
-                schedules.add(seoulBusScheduleService.resolve(
+                schedules.add(resolveKakaoBusSchedule(
                         route.toBuilder().transferCount(0).segments(List.of(segment)).build(), serviceDate));
                 continue;
             }
@@ -767,6 +772,147 @@ public class TransitScheduleService {
             unavailable.addSuppressed(ex);
             throw unavailable;
         }
+    }
+
+    /**
+     * Seoul-only stop timetable lookups cannot cover every metropolitan bus.
+     * Resolve the exact Kakao boarding stop and downstream stop through ODsay,
+     * which publishes first/last times by stop and direction.
+     */
+    private SeoulBusScheduleService.Schedule resolveKakaoBusSchedule(
+            TransitDto.RouteOptionResponse route, LocalDate serviceDate) {
+        try {
+            return seoulBusScheduleService.resolve(route, serviceDate);
+        } catch (com.OnETA.common.exception.GlobalException seoulFailure) {
+            var rides = route.getSegments().stream()
+                    .filter(segment -> segment != null && "BUS".equals(segment.getTransitType()))
+                    .toList();
+            if (!SeoulBusScheduleService.isKakao(route) || rides.size() != 1
+                    || rides.get(0).getBusType() != com.OnETA.dto.BusType.METROPOLITAN) {
+                throw seoulFailure;
+            }
+            try {
+                return resolveOdsayMetropolitanStopSchedule(rides.get(0), serviceDate);
+            } catch (RuntimeException odsayFailure) {
+                log.info("Kakao metropolitan timetable fallback rejected: routeId={}, line={}, date={}, errorType={}",
+                        route.getRouteId(), rides.get(0).getTransitName(), serviceDate,
+                        odsayFailure.getClass().getSimpleName());
+                if (odsayFailure instanceof com.OnETA.common.exception.GlobalException global) {
+                    global.addSuppressed(seoulFailure);
+                    throw global;
+                }
+                seoulFailure.addSuppressed(odsayFailure);
+                throw seoulFailure;
+            }
+        }
+    }
+
+    private SeoulBusScheduleService.Schedule resolveOdsayMetropolitanStopSchedule(
+            TransitDto.RouteSegment segment, LocalDate serviceDate) {
+        if (!isApiKeyConfigured() || segment.getStartX() == null || segment.getStartY() == null
+                || segment.getEndX() == null || segment.getEndY() == null
+                || segment.getTransitName() == null || segment.getTransitName().isBlank()) {
+            throw connectionUnverified();
+        }
+
+        List<JsonNode> starts = findOdsayBusStops(
+                segment.getStartX(), segment.getStartY(), segment.getStartStation());
+        List<JsonNode> ends = findOdsayBusStops(
+                segment.getEndX(), segment.getEndY(), segment.getEndStation());
+        List<SeoulBusScheduleService.Schedule> matched = new ArrayList<>();
+        Map<String, List<JsonNode>> upstreamLanes = new HashMap<>();
+        for (JsonNode start : starts) {
+            String startId = start.path("stationID").asText("");
+            JsonNode details = request("/busStationInfo", Map.of("stationID", startId));
+            ensureNoOdsayError(details);
+            upstreamLanes.put(startId, odsayRows(details.path("result").path("lane")));
+        }
+        Map<String, List<JsonNode>> downstreamLanes = new HashMap<>();
+        for (JsonNode end : ends) {
+            String endId = end.path("stationID").asText("");
+            JsonNode details = request("/busStationInfo", Map.of("stationID", endId));
+            ensureNoOdsayError(details);
+            downstreamLanes.put(endId, odsayRows(details.path("result").path("lane")));
+        }
+        // A route at the boarding stop must also appear later along that SAME
+        // route ID at the alighting stop. An identical bus number is not enough.
+        for (JsonNode start : starts) {
+            String startId = start.path("stationID").asText("");
+            for (JsonNode startLane : upstreamLanes.getOrDefault(startId, List.of())) {
+                if (!sameBusName(startLane.path("busNo").asText(""), segment.getTransitName())) continue;
+                String busId = startLane.path("busID").asText("");
+                int startOrder = startLane.path("busStationIdx").asInt(-1);
+                if (busId.isBlank() || startOrder < 0) continue;
+
+                for (JsonNode end : ends) {
+                    String endId = end.path("stationID").asText("");
+                    for (JsonNode endLane : downstreamLanes.getOrDefault(endId, List.of())) {
+                        if (!busId.equals(endLane.path("busID").asText(""))
+                                || !sameBusName(endLane.path("busNo").asText(""), segment.getTransitName())
+                                || endLane.path("busStationIdx").asInt(-1) <= startOrder) continue;
+                        LocalDateTime first = parseTime(startLane.path("busFirstTime").asText(null), serviceDate);
+                        LocalDateTime last = parseTime(startLane.path("busLastTime").asText(null), serviceDate);
+                        if (first == null || last == null) continue;
+                        if (last.isBefore(first)) last = last.plusDays(1);
+                        if (!last.isAfter(first) || Duration.between(first, last).toHours() >= 24) continue;
+                        matched.add(new SeoulBusScheduleService.Schedule(
+                                startId, "", "ODSAY_METRO:" + busId, first, last, startOrder,
+                                endId, endLane.path("busStationIdx").asInt(-1)));
+                    }
+                }
+            }
+        }
+
+        var unique = matched.stream().distinct().toList();
+        log.info("Kakao metropolitan stop timetable: line={}, start={}, end={}, startStops={}, endStops={}, matches={}",
+                segment.getTransitName(), segment.getStartStation(), segment.getEndStation(),
+                starts.size(), ends.size(), unique.size());
+        if (unique.size() != 1) throw connectionUnverified();
+        return unique.get(0);
+    }
+
+    private List<JsonNode> findOdsayBusStops(Double x, Double y, String name) {
+        if (name == null || name.isBlank() || !Double.isFinite(x) || !Double.isFinite(y)) {
+            throw connectionUnverified();
+        }
+        JsonNode root = request("/pointSearch", Map.of(
+                "x", Double.toString(x), "y", Double.toString(y),
+                "radius", "120", "stationClass", "1"));
+        ensureNoOdsayError(root);
+        List<JsonNode> matches = new ArrayList<>();
+        for (JsonNode stop : odsayRows(root.path("result").path("station"))) {
+            if (stop.path("stationClass").asInt(-1) != 1
+                    || !sameBusName(stop.path("stationName").asText(""), name)
+                    || stop.path("stationID").asText("").isBlank()) continue;
+            double sx = stop.path("x").asDouble(Double.NaN);
+            double sy = stop.path("y").asDouble(Double.NaN);
+            if (!Double.isFinite(sx) || !Double.isFinite(sy)
+                    || Math.abs(sx - x) > 0.002 || Math.abs(sy - y) > 0.002) continue;
+            matches.add(stop);
+        }
+        return matches.stream().limit(5).toList();
+    }
+
+    private static List<JsonNode> odsayRows(JsonNode value) {
+        if (value.isArray()) {
+            List<JsonNode> rows = new ArrayList<>();
+            value.forEach(rows::add);
+            return rows;
+        }
+        return value.isObject() ? List.of(value) : List.of();
+    }
+
+    private static boolean sameBusName(String left, String right) {
+        if (left == null || right == null) return false;
+        // Permit punctuation/spacing differences, but not partial station names.
+        String a = left.replaceAll("[^\\p{L}\\p{N}]", "");
+        String b = right.replaceAll("[^\\p{L}\\p{N}]", "");
+        return !a.isBlank() && a.equalsIgnoreCase(b);
+    }
+
+    private boolean isOdsayMetropolitanBinding(SeoulBusScheduleService.Schedule schedule) {
+        return schedule != null && schedule.routeId() != null
+                && schedule.routeId().startsWith("ODSAY_METRO:");
     }
 
     /** Latest estimated connected departure in an operating interval already in progress. */
@@ -845,7 +991,7 @@ public class TransitScheduleService {
                         ? (verifiedSubwayTransfer
                                 ? resolveKakaoSubwayScheduleForLast(segment, now.toLocalDate())
                                 : resolveKakaoSubwaySchedule(segment, now.toLocalDate()))
-                        : seoulBusScheduleService.resolve(singleBus ? route : route.toBuilder().transferCount(0)
+                        : resolveKakaoBusSchedule(singleBus ? route : route.toBuilder().transferCount(0)
                                 .segments(List.of(segment)).build(), now.toLocalDate());
                 window = new TransitOperatingWindow(binding.first(), binding.last());
                 if ("BUS".equals(segment.getTransitType())) {
@@ -958,9 +1104,11 @@ public class TransitScheduleService {
             }
             prefix += segment.getDurationMinutes();
         }
-        String source = seoul ? (singleBus ? "SEOUL_BUS" : "SEOUL_BUS_TRANSFER") : "ODSAY";
+        boolean odsayStopTimes = bindings.stream().anyMatch(this::isOdsayMetropolitanBinding);
+        String source = seoul && !odsayStopTimes
+                ? (singleBus ? "SEOUL_BUS" : "SEOUL_BUS_TRANSFER") : "ODSAY";
         return new RouteSchedulePlan(plan.departure(), plan.durationMinutes(), source,
-                seoul && !singleBus ? objectMapper.writeValueAsString(bindings) : null,
+                seoul && !singleBus && !odsayStopTimes ? objectMapper.writeValueAsString(bindings) : null,
                 !singleBus ? Math.max(60, prefix) : 0);
     }
 

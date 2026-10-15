@@ -85,6 +85,101 @@ class TransitScheduleServiceTest {
     }
 
     @Test
+    void kakaoGyeonggiMetropolitanUsesVerifiedOdsayStopTimeWhenSeoulHasNoRoute() {
+        RestTemplate rest = new RestTemplate();
+        MockRestServiceServer server = MockRestServiceServer.bindTo(rest).build();
+        var seoul = mock(SeoulBusScheduleService.class);
+        when(seoul.resolve(any(), eq(DATE))).thenThrow(new com.OnETA.common.exception.GlobalException(
+                com.OnETA.common.error.ErrorCode.TRANSIT_SCHEDULE_UNSUPPORTED));
+        var service = new TransitScheduleService(mock(TransitApiService.class),
+                mock(PublicDataTransitService.class), mock(ScheduleSnapshotRepository.class),
+                new ObjectMapper(), rest);
+        ReflectionTestUtils.setField(service, "seoulBusScheduleService", seoul);
+        ReflectionTestUtils.setField(service, "apiKey", "test");
+        ReflectionTestUtils.setField(service, "scheduleBaseUrl", "http://odsay/v1/api");
+
+        server.expect(requestTo(org.hamcrest.Matchers.containsString("/pointSearch")))
+                .andRespond(withSuccess("""
+                    {"result":{"station":[{"stationID":101,"stationClass":1,"stationName":"서울역",
+                    "x":127.1,"y":37.2}]}}
+                    """, MediaType.APPLICATION_JSON));
+        server.expect(requestTo(org.hamcrest.Matchers.containsString("/pointSearch")))
+                .andRespond(withSuccess("""
+                    {"result":{"station":[{"stationID":202,"stationClass":1,"stationName":"판교역",
+                    "x":127.2,"y":37.3}]}}
+                    """, MediaType.APPLICATION_JSON));
+        server.expect(requestTo(org.hamcrest.Matchers.containsString("/busStationInfo")))
+                .andRespond(withSuccess("""
+                    {"result":{"lane":[{"busID":555,"busNo":"3000","busStationIdx":12,
+                    "busFirstTime":"0530","busLastTime":"2340"}]}}
+                    """, MediaType.APPLICATION_JSON));
+        server.expect(requestTo(org.hamcrest.Matchers.containsString("/busStationInfo")))
+                .andRespond(withSuccess("""
+                    {"result":{"lane":[{"busID":555,"busNo":"3000","busStationIdx":19,
+                    "busFirstTime":"0550","busLastTime":"0005"}]}}
+                    """, MediaType.APPLICATION_JSON));
+
+        var route = metropolitanRoute();
+        assertThat(service.previewDepartureForServiceDate(route, NotificationScheduleType.LAST_TRANSIT,
+                DATE, new java.util.HashMap<>())).isEqualTo(DATE.atTime(23, 34));
+        server.verify();
+    }
+
+    @Test
+    void kakaoMetropolitanRejectsOppositeDirectionEvenWithSameBusNumber() {
+        RestTemplate rest = new RestTemplate();
+        MockRestServiceServer server = MockRestServiceServer.bindTo(rest).build();
+        var seoul = mock(SeoulBusScheduleService.class);
+        when(seoul.resolve(any(), eq(DATE))).thenThrow(new com.OnETA.common.exception.GlobalException(
+                com.OnETA.common.error.ErrorCode.TRANSIT_SCHEDULE_UNSUPPORTED));
+        var service = new TransitScheduleService(mock(TransitApiService.class),
+                mock(PublicDataTransitService.class), mock(ScheduleSnapshotRepository.class),
+                new ObjectMapper(), rest);
+        ReflectionTestUtils.setField(service, "seoulBusScheduleService", seoul);
+        ReflectionTestUtils.setField(service, "apiKey", "test");
+        ReflectionTestUtils.setField(service, "scheduleBaseUrl", "http://odsay/v1/api");
+
+        server.expect(requestTo(org.hamcrest.Matchers.containsString("/pointSearch")))
+                .andRespond(withSuccess("""
+                    {"result":{"station":[{"stationID":101,"stationClass":1,"stationName":"서울역",
+                    "x":127.1,"y":37.2}]}}
+                    """, MediaType.APPLICATION_JSON));
+        server.expect(requestTo(org.hamcrest.Matchers.containsString("/pointSearch")))
+                .andRespond(withSuccess("""
+                    {"result":{"station":[{"stationID":202,"stationClass":1,"stationName":"판교역",
+                    "x":127.2,"y":37.3}]}}
+                    """, MediaType.APPLICATION_JSON));
+        server.expect(requestTo(org.hamcrest.Matchers.containsString("/busStationInfo")))
+                .andRespond(withSuccess("""
+                    {"result":{"lane":[{"busID":555,"busNo":"3000","busStationIdx":12,
+                    "busFirstTime":"0530","busLastTime":"2340"}]}}
+                    """, MediaType.APPLICATION_JSON));
+        server.expect(requestTo(org.hamcrest.Matchers.containsString("/busStationInfo")))
+                .andRespond(withSuccess("""
+                    {"result":{"lane":[{"busID":555,"busNo":"3000","busStationIdx":5,
+                    "busFirstTime":"0500","busLastTime":"2300"}]}}
+                    """, MediaType.APPLICATION_JSON));
+
+        assertThatThrownBy(() -> service.previewDepartureForServiceDate(metropolitanRoute(),
+                NotificationScheduleType.LAST_TRANSIT, DATE, new java.util.HashMap<>()))
+                .isInstanceOf(com.OnETA.common.exception.GlobalException.class);
+        server.verify();
+    }
+
+    private TransitDto.RouteOptionResponse metropolitanRoute() {
+        return TransitDto.RouteOptionResponse.builder().provider("KAKAO").routeId("KAKAO_METRO_TEST")
+                .totalDurationMinutes(36).transferCount(0)
+                .segments(List.of(
+                        TransitDto.RouteSegment.builder().transitType("WALK").durationMinutes(6).build(),
+                        TransitDto.RouteSegment.builder().transitType("BUS")
+                                .transitName("3000").busType(com.OnETA.dto.BusType.METROPOLITAN)
+                                .durationMinutes(25).startStation("서울역").endStation("판교역")
+                                .startX(127.1).startY(37.2).endX(127.2).endY(37.3).build(),
+                        TransitDto.RouteSegment.builder().transitType("WALK").durationMinutes(5).build()))
+                .build();
+    }
+
+    @Test
     void kakaoSubwayOnlyLastPrefersVerifiedMetroTrainTimesOverAmbiguousTago() {
         TransitApiService transit = mock(TransitApiService.class);
         PublicDataTransitService publicData = mock(PublicDataTransitService.class);
