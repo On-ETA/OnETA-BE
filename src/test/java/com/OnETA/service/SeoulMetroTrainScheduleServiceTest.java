@@ -25,12 +25,12 @@ class SeoulMetroTrainScheduleServiceTest {
 
         server.expect(requestTo(org.hamcrest.Matchers.containsString("getTrainSch")))
                 .andRespond(withSuccess(response(items(
-                        row("100", "05:32:00", "05:31:00", "내선"),
-                        row("200", "23:55:00", "23:54:00", "내선"))), MediaType.APPLICATION_JSON));
+                        row("100", "05:32:00", "05:31:00", "내선", "신도림"),
+                        row("200", "23:55:00", "23:54:00", "내선", "신도림"))), MediaType.APPLICATION_JSON));
         server.expect(requestTo(org.hamcrest.Matchers.containsString("getTrainSch")))
                 .andRespond(withSuccess(response(items(
-                        row("100", "05:43:00", "05:42:00", "내선"),
-                        row("200", "00:06:00", "00:05:00", "내선"))), MediaType.APPLICATION_JSON));
+                        row("100", "05:43:00", "05:42:00", "내선", "합정"),
+                        row("200", "00:06:00", "00:05:00", "내선", "합정"))), MediaType.APPLICATION_JSON));
         server.expect(requestTo(org.hamcrest.Matchers.containsString("getTrainSch")))
                 .andRespond(withSuccess(response(""), MediaType.APPLICATION_JSON));
         server.expect(requestTo(org.hamcrest.Matchers.containsString("getTrainSch")))
@@ -74,16 +74,16 @@ class SeoulMetroTrainScheduleServiceTest {
 
         server.expect(requestTo(org.hamcrest.Matchers.containsString("getTrainSch")))
                 .andRespond(withSuccess(response(items(
-                        row("100", "05:32:00", "05:31:00", "내선"))), MediaType.APPLICATION_JSON));
+                        row("100", "05:32:00", "05:31:00", "내선", "신도림"))), MediaType.APPLICATION_JSON));
         server.expect(requestTo(org.hamcrest.Matchers.containsString("getTrainSch")))
                 .andRespond(withSuccess(response(items(
-                        row("100", "05:43:00", "05:42:00", "내선"))), MediaType.APPLICATION_JSON));
+                        row("100", "05:43:00", "05:42:00", "내선", "합정"))), MediaType.APPLICATION_JSON));
         server.expect(requestTo(org.hamcrest.Matchers.containsString("getTrainSch")))
                 .andRespond(withSuccess(response(items(
-                        row("900", "05:00:00", "04:59:00", "외선"))), MediaType.APPLICATION_JSON));
+                        row("900", "05:00:00", "04:59:00", "외선", "신도림"))), MediaType.APPLICATION_JSON));
         server.expect(requestTo(org.hamcrest.Matchers.containsString("getTrainSch")))
                 .andRespond(withSuccess(response(items(
-                        row("900", "06:10:00", "06:09:00", "외선"))), MediaType.APPLICATION_JSON));
+                        row("900", "06:10:00", "06:09:00", "외선", "합정"))), MediaType.APPLICATION_JSON));
 
         var schedule = service.resolve(segment(), LocalDate.of(2026, 10, 3));
         assertThat(schedule.first()).isEqualTo(LocalDate.of(2026, 10, 3).atTime(5, 32));
@@ -97,6 +97,46 @@ class SeoulMetroTrainScheduleServiceTest {
                 .isEqualTo(day.plusDays(1).atTime(0, 18));
         assertThat(SeoulMetroTrainScheduleService.scheduleTime("05:32:00", day))
                 .isEqualTo(day.atTime(5, 32));
+    }
+
+    @Test
+    void resolvesParenthesizedShinbundangStationWithoutMatchingNearbyStation() {
+        RestTemplate http = new RestTemplate();
+        MockRestServiceServer server = MockRestServiceServer.bindTo(http).build();
+        var service = new SeoulMetroTrainScheduleService(
+                new ObjectMapper(), http, "key", "https://metro.test/getTrainSch");
+        LocalDate date = LocalDate.of(2026, 10, 16);
+
+        server.expect(request -> {
+            String query = java.net.URLDecoder.decode(request.getURI().getRawQuery(),
+                    java.nio.charset.StandardCharsets.UTF_8);
+            assertThat(query).contains("stnNm=강남");
+        }).andRespond(withSuccess(response(items(
+                row("700", "15:00:00", "14:59:00", "상행", "강남"))), MediaType.APPLICATION_JSON));
+        server.expect(request -> {
+            String query = java.net.URLDecoder.decode(request.getURI().getRawQuery(),
+                    java.nio.charset.StandardCharsets.UTF_8);
+            assertThat(query).contains("stnNm=양재").doesNotContain("서초구청");
+        }).andRespond(withSuccess(response(items(
+                row("700", "15:05:00", "15:04:00", "상행", "양재"),
+                row("700", "15:13:00", "15:12:00", "상행", "양재시민의숲"))),
+                MediaType.APPLICATION_JSON));
+        server.expect(requestTo(org.hamcrest.Matchers.containsString("getTrainSch")))
+                .andRespond(withSuccess(response(""), MediaType.APPLICATION_JSON));
+        server.expect(requestTo(org.hamcrest.Matchers.containsString("getTrainSch")))
+                .andRespond(withSuccess(response(""), MediaType.APPLICATION_JSON));
+
+        var segment = TransitDto.RouteSegment.builder()
+                .transitType("SUBWAY").transitName("신분당선")
+                .startStation("강남").endStation("양재(서초구청)")
+                .durationMinutes(5).build();
+
+        var schedule = service.resolve(segment, date);
+        assertThat(schedule.first()).isEqualTo(date.atTime(15, 0));
+        assertThat(schedule.last()).isEqualTo(date.atTime(15, 0));
+        var trip = service.firstTripAtOrAfter(segment, date, date.atTime(14, 50)).orElseThrow();
+        assertThat(trip.arrival()).isEqualTo(date.atTime(15, 4));
+        server.verify();
     }
 
     private TransitDto.RouteSegment segment() {
@@ -125,8 +165,9 @@ class SeoulMetroTrainScheduleServiceTest {
         return "{\"item\":[" + String.join(",", rows) + "]}";
     }
 
-    private String row(String trainNo, String departure, String arrival, String direction) {
+    private String row(String trainNo, String departure, String arrival, String direction, String station) {
         return "{\"trainno\":\"" + trainNo + "\",\"trainDptreTm\":\"" + departure
-                + "\",\"trainArvlTm\":\"" + arrival + "\",\"upbdnbSe\":\"" + direction + "\"}";
+                + "\",\"trainArvlTm\":\"" + arrival + "\",\"upbdnbSe\":\"" + direction
+                + "\",\"stnNm\":\"" + station + "\"}";
     }
 }
