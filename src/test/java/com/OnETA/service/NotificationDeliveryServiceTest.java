@@ -44,7 +44,7 @@ class NotificationDeliveryServiceTest {
         ArrivalNotification notification = new ArrivalNotification(user, "경로", List.of(10), 0,
                 null, "{\"originAddress\":\"집\",\"destinationAddress\":\"학교\"}", type);
         NotificationDeliveryService service = new NotificationDeliveryService(deliveries,
-                mock(ArrivalNotificationRepository.class), tokens, mock(FcmPushService.class),
+                mock(ArrivalNotificationRepository.class), tokens, mock(FcmPushService.class), mock(AddressSearchService.class),
                 mock(PlatformTransactionManager.class), retryProperties(),
                 mock(ScheduledExecutorService.class), new Semaphore(4));
         LocalDateTime scheduled = LocalDateTime.of(2026, 9, 18, 9, 0);
@@ -72,7 +72,7 @@ class NotificationDeliveryServiceTest {
         when(notification.getName()).thenReturn("막차 알림");
 
         NotificationDeliveryService service = new NotificationDeliveryService(
-                deliveries, notifications, tokens, mock(FcmPushService.class),
+                deliveries, notifications, tokens, mock(FcmPushService.class), mock(AddressSearchService.class),
                 mock(PlatformTransactionManager.class), retryProperties(),
                 mock(ScheduledExecutorService.class), new Semaphore(4));
 
@@ -109,7 +109,7 @@ class NotificationDeliveryServiceTest {
         ScheduledExecutorService retryExecutor = mock(ScheduledExecutorService.class);
 
         NotificationDeliveryService service = new NotificationDeliveryService(
-                deliveries, notifications, tokens, fcm, transactionManager,
+                deliveries, notifications, tokens, fcm, mock(AddressSearchService.class), transactionManager,
                 retryProperties(), retryExecutor, new Semaphore(4));
         ReflectionTestUtils.setField(service, "clock",
                 Clock.fixed(Instant.parse("2026-08-10T09:00:00Z"), ZoneOffset.UTC));
@@ -267,7 +267,7 @@ class NotificationDeliveryServiceTest {
         when(tokens.findByUserId(1L)).thenReturn(Optional.of(token));
         NotificationDeliveryService service = new NotificationDeliveryService(
                 deliveries, mock(ArrivalNotificationRepository.class), tokens,
-                mock(FcmPushService.class), mock(PlatformTransactionManager.class),
+                mock(FcmPushService.class), mock(AddressSearchService.class), mock(PlatformTransactionManager.class),
                 retryProperties(), mock(ScheduledExecutorService.class), new Semaphore(4));
 
         LocalDateTime scheduledAt = LocalDateTime.of(2026, 8, 10, 8, 59, 58);
@@ -476,6 +476,52 @@ class NotificationDeliveryServiceTest {
         assertThat(fixture.delivery.getStatus()).isEqualTo(NotificationDeliveryStatus.SENT);
     }
 
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.NullAndEmptySource
+    @org.junit.jupiter.params.provider.ValueSource(strings = {
+            "{\"originAddress\":\"126.9, 37.5\",\"destinationAddress\":\"학교\"}",
+            "{\"originAddress\":\"집\",\"destinationAddress\":\"학교\"}"
+    })
+    void normalPushAlwaysUsesRouteName(String routeDetails) {
+        TestFixture fixture = fixture();
+        when(fixture.notification.getName()).thenReturn("학교 가는 길");
+        when(fixture.notification.getRouteDetails()).thenReturn(routeDetails);
+        assertThat(ReflectionTestUtils.invokeMethod(fixture.service, "notificationRoute", fixture.notification)
+                .toString()).isEqualTo("학교 가는 길");
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.EnumSource(value = com.OnETA.entity.NotificationScheduleType.class,
+            names = {"FIRST_TRANSIT", "LAST_TRANSIT"})
+    void transitPushResolvesCoordinateLabelsWithoutSavedAddresses(com.OnETA.entity.NotificationScheduleType type) {
+        TestFixture fixture = fixture();
+        when(fixture.notification.getScheduleType()).thenReturn(type);
+        when(fixture.notification.getRouteDetails()).thenReturn("""
+                {"route":{"originAddress":"(37.5, 126.9)","destinationAddress":"126.92, 37.55"}}
+                """);
+        AddressSearchService addresses = mock(AddressSearchService.class);
+        when(addresses.reverseGeocode(126.9, 37.5)).thenReturn("서울 구로구 공원로 6");
+        when(addresses.reverseGeocode(126.92, 37.55)).thenReturn("서울 마포구 와우산로 94");
+        ReflectionTestUtils.setField(fixture.service, "addressSearchService", addresses);
+        assertThat(ReflectionTestUtils.invokeMethod(fixture.service, "notificationRoute", fixture.notification)
+                .toString()).isEqualTo("서울 구로구 공원로 6 → 서울 마포구 와우산로 94");
+    }
+
+    @Test
+    void transitPushUsesEndpointPairAndKeepsKnownAddressWhenLookupFails() {
+        TestFixture fixture = fixture();
+        when(fixture.notification.getScheduleType()).thenReturn(com.OnETA.entity.NotificationScheduleType.LAST_TRANSIT);
+        when(fixture.notification.getRouteDetails()).thenReturn("""
+                {"originX":126.9,"originY":37.5,"route":{"originX":127.0,"destinationAddress":"학교"}}
+                """);
+        AddressSearchService addresses = mock(AddressSearchService.class);
+        ReflectionTestUtils.setField(fixture.service, "addressSearchService", addresses);
+        assertThat(ReflectionTestUtils.invokeMethod(fixture.service, "notificationRoute", fixture.notification)
+                .toString()).isEqualTo("출발지 → 학교");
+        verify(addresses).reverseGeocode(126.9, 37.5);
+        verifyNoMoreInteractions(addresses);
+    }
+
     private TestFixture fixture() {
         NotificationDeliveryRepository deliveries = mock(NotificationDeliveryRepository.class);
         ArrivalNotificationRepository notifications = mock(ArrivalNotificationRepository.class);
@@ -498,7 +544,7 @@ class NotificationDeliveryServiceTest {
         when(deliveries.findByIdForUpdate(1L)).thenReturn(Optional.of(delivery));
         when(deliveries.findById(1L)).thenReturn(Optional.of(delivery));
         NotificationDeliveryService service = new NotificationDeliveryService(
-                deliveries, notifications, tokens, fcm, transactionManager,
+                deliveries, notifications, tokens, fcm, mock(AddressSearchService.class), transactionManager,
                 retryProperties(), mock(ScheduledExecutorService.class), new Semaphore(4));
         ReflectionTestUtils.setField(service, "clock",
                 Clock.fixed(Instant.parse("2026-08-10T09:00:00Z"), ZoneOffset.UTC));

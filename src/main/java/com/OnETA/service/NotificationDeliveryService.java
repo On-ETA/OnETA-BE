@@ -47,6 +47,7 @@ public class NotificationDeliveryService {
     private final ArrivalNotificationRepository arrivalNotificationRepository;
     private final UserDeviceTokenRepository userDeviceTokenRepository;
     private final FcmPushService fcmPushService;
+    private final AddressSearchService addressSearchService;
     private final PlatformTransactionManager transactionManager;
     private final NotificationRetryProperties retryProperties;
     private final ScheduledExecutorService notificationRetryExecutor;
@@ -151,21 +152,66 @@ public class NotificationDeliveryService {
     }
 
     private String notificationRoute(ArrivalNotification notification) {
+        boolean transit = notification.getScheduleType() == com.OnETA.entity.NotificationScheduleType.FIRST_TRANSIT
+                || notification.getScheduleType() == com.OnETA.entity.NotificationScheduleType.LAST_TRANSIT;
+        if (!transit) {
+            String name = notification.getName();
+            return name == null || name.isBlank() ? "등록한 경로" : name.trim();
+        }
         String details = notification.getRouteDetails();
         if (details != null && !details.isBlank()) {
             try {
-                var route = ROUTE_MAPPER.readTree(details);
-                String origin = route.path("originAddress").asText("").trim();
-                String destination = route.path("destinationAddress").asText("").trim();
-                if (!origin.isBlank() && !destination.isBlank()) {
-                    return origin + " → " + destination;
-                }
+                var root = ROUTE_MAPPER.readTree(details);
+                var route = root.path("route").isObject() ? root.path("route") : root;
+                String origin = endpointLabel(route, root, true);
+                String destination = endpointLabel(route, root, false);
+                return origin + " → " + destination;
             } catch (RuntimeException e) {
                 log.debug("Cannot read notification route for push. notificationId={}", notification.getId());
             }
         }
-        String name = notification.getName();
-        return name == null || name.isBlank() ? "등록한 경로" : name;
+        return "출발지 → 도착지";
+    }
+
+    private String endpointLabel(tools.jackson.databind.JsonNode route,
+                                 tools.jackson.databind.JsonNode root, boolean origin) {
+        String key = origin ? "originAddress" : "destinationAddress";
+        String label = route.path(key).asText("").trim();
+        if (label.isBlank()) label = root.path(key).asText("").trim();
+        // Older clients used a numeric coordinate pair as the address label.
+        var numbers = java.util.regex.Pattern.compile("[-+]?\\d+(?:\\.\\d+)?")
+                .matcher(label);
+        java.util.List<Double> coordinates = new java.util.ArrayList<>();
+        while (numbers.find()) coordinates.add(Double.valueOf(numbers.group()));
+        boolean coordinateLabel = coordinates.size() == 2
+                && label.replaceAll("[-+]?\\d+(?:\\.\\d+)?", "")
+                        .matches("[\\s,;()/\\[\\]:]*");
+        if (!label.isBlank() && !coordinateLabel) return label;
+
+        String xKey = origin ? "originX" : "destX";
+        String yKey = origin ? "originY" : "destY";
+        Double x = null, y = null;
+        // Select a complete pair from one source, never mix axes.
+        for (var source : java.util.List.of(route, root)) {
+            if (source.path(xKey).isNumber() && source.path(yKey).isNumber()) {
+                x = source.path(xKey).asDouble();
+                y = source.path(yKey).asDouble();
+                break;
+            }
+            var endpoint = source.path(origin ? "origin" : "destination");
+            if (endpoint.path("x").isNumber() && endpoint.path("y").isNumber()) {
+                x = endpoint.path("x").asDouble();
+                y = endpoint.path("y").asDouble();
+                break;
+            }
+        }
+        if (x == null && coordinateLabel) {
+            double first = coordinates.get(0), second = coordinates.get(1);
+            x = first >= 124 && first <= 132 ? first : second;
+            y = first >= 124 && first <= 132 ? second : first;
+        }
+        String address = addressSearchService.reverseGeocode(x, y);
+        return address == null || address.isBlank() ? (origin ? "출발지" : "도착지") : address;
     }
 
     public void processPending() {
