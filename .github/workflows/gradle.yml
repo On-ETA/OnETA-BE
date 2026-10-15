@@ -42,6 +42,7 @@ jobs:
         run: |
           ./gradlew test \
             --tests 'com.OnETA.service.NormalOperatingHoursTest' \
+            --tests 'com.OnETA.service.TagoSubwayScheduleServiceTest' \
             --tests 'com.OnETA.service.TransitRouteClassifierTest' \
             --tests 'com.OnETA.service.KakaoTransitClientTest.marksKakaoNightBusByRouteName' \
             --tests 'com.OnETA.service.SeoulBusScheduleServiceTest.resolvesProviderNightLabelUsingCanonicalSeoulLine' \

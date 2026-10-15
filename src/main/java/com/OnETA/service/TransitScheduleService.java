@@ -189,17 +189,24 @@ public class TransitScheduleService {
         String key = "subway|" + index + "|" + day;
         if (windows.containsKey(key)) return windows.get(key);
         TransitOperatingWindow window;
-        if (SeoulBusScheduleService.usesSeoulBusSchedules(route)) {
-            var schedule = resolveKakaoSubwaySchedule(segment, day);
-            window = checkedNormalWindow(schedule.first(), schedule.last(), segment);
-        } else {
-            if (segment.getOdsayStartStationId() == null || segment.getOdsayEndStationId() == null) {
-                throw normalHoursUnverified(segment);
+        if (!SeoulBusScheduleService.usesSeoulBusSchedules(route)
+                && segment.getOdsayStartStationId() != null && segment.getOdsayEndStationId() != null) {
+            try {
+                window = checkedNormalWindow(
+                        serviceTimeCached(segment, NotificationScheduleType.FIRST_TRANSIT, day, scheduleCache),
+                        serviceTimeCached(segment, NotificationScheduleType.LAST_TRANSIT, day, scheduleCache), segment);
+                windows.put(key, window);
+                return window;
+            } catch (RuntimeException e) {
+                // A provider failure is not proof the line is closed. Resolve
+                // public station timetables before rejecting registration.
+                log.info("Normal subway timetable fallback: provider={}, line={}, start={}, end={}, day={}, failureType={}",
+                        route.getProvider(), segment.getTransitName(), segment.getStartStation(),
+                        segment.getEndStation(), day, e.getClass().getSimpleName());
             }
-            window = checkedNormalWindow(
-                    serviceTimeCached(segment, NotificationScheduleType.FIRST_TRANSIT, day, scheduleCache),
-                    serviceTimeCached(segment, NotificationScheduleType.LAST_TRANSIT, day, scheduleCache), segment);
         }
+        var schedule = resolveKakaoSubwaySchedule(segment, day);
+        window = checkedNormalWindow(schedule.first(), schedule.last(), segment);
         windows.put(key, window);
         return window;
     }

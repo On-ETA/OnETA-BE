@@ -2,6 +2,8 @@ package com.OnETA.service;
 
 import com.OnETA.dto.TransitDto;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.test.web.client.ExpectedCount;
@@ -14,6 +16,80 @@ import static org.springframework.test.web.client.response.MockRestResponseCreat
 
 class TagoSubwayScheduleServiceTest {
     private final LocalDate day = LocalDate.of(2026, 9, 18);
+
+    @ParameterizedTest
+    @CsvSource({
+            "신분당선,신분당선,강남,양재,127.02,37.49",
+            "수도권 수인·분당선,수인분당선,수원,수원시청,127.00,37.26",
+            "인천1호선,인천 1호선,인천터미널,부평,126.70,37.44",
+            "인천지하철1호선,인천1호선,인천터미널,부평,126.70,37.44",
+            "신분당선,신분당선,강남역,양재역,127.02,37.49"
+    })
+    void resolvesNamedLinesOutsideSeoulUsingExactStationLineIds(
+            String requestedLine, String providerLine, String start, String end, double x, double y) {
+        var http = new RestTemplate();
+        var server = MockRestServiceServer.bindTo(http).build();
+        server.expect(ExpectedCount.manyTimes(), request -> { }).andRespond(request -> {
+            String query = java.net.URLDecoder.decode(request.getURI().getRawQuery(),
+                    java.nio.charset.StandardCharsets.UTF_8);
+            String items;
+            if (request.getURI().getPath().contains("Kwrd")) {
+                boolean startQuery = java.util.Arrays.stream(query.split("&"))
+                        .anyMatch(part -> part.equals("subwayStationName=" + start));
+                String name = startQuery ? start : end;
+                String id = name.equals(start) ? "START" : "END";
+                name = name.replaceFirst("역$", "");
+                // The same station name on another line must never be selected.
+                items = "[{\"subwayStationName\":\"" + name + "\",\"subwayRouteName\":\"2호선\","
+                        + "\"subwayStationId\":\"WRONG_LINE\"},{\"subwayStationName\":\"" + name
+                        + "\",\"subwayRouteName\":\"" + providerLine + "\",\"subwayStationId\":\"" + id + "\"}]";
+            } else {
+                assertThat(query).doesNotContain("WRONG_LINE");
+                if (query.contains("upDownTypeCode=U")) items = "[]";
+                else {
+                    boolean atStart = query.contains("subwayStationId=START");
+                    items = "[" + row(atStart ? "060000" : "060500") + ","
+                            + row(atStart ? "233000" : "233500") + "]";
+                }
+            }
+            return withSuccess(response(items), MediaType.APPLICATION_JSON).createResponse(request);
+        });
+        var segment = TransitDto.RouteSegment.builder().transitType("SUBWAY").transitName(requestedLine)
+                .startStation(start).endStation(end).durationMinutes(5)
+                .startX(x).startY(y).endX(x + 0.01).endY(y + 0.01)
+                .stations(List.of(station(start), station(end))).build();
+        var service = new TagoSubwayScheduleService(new ObjectMapper(), "key", "https://test", http);
+
+        var schedule = service.resolve(segment, day);
+
+        assertThat(schedule.first()).isEqualTo(day.atTime(6, 0));
+        assertThat(schedule.last()).isEqualTo(day.atTime(23, 30));
+        server.verify();
+    }
+
+    @Test void rejectsDifferentLineInsteadOfAcceptingAnUnverifiedNamedLine() {
+        var http = new RestTemplate();
+        var server = MockRestServiceServer.bindTo(http).build();
+        server.expect(ExpectedCount.once(), request -> { }).andRespond(withSuccess(response(
+                "[{\"subwayStationName\":\"강남\",\"subwayRouteName\":\"2호선\",\"subwayStationId\":\"WRONG\"}]"),
+                MediaType.APPLICATION_JSON));
+        var segment = TransitDto.RouteSegment.builder().transitType("SUBWAY").transitName("신분당선")
+                .startStation("강남").endStation("양재").durationMinutes(5)
+                .stations(List.of(station("강남"), station("양재"))).build();
+        var service = new TagoSubwayScheduleService(new ObjectMapper(), "key", "https://test", http);
+
+        assertThatThrownBy(() -> service.resolve(segment, day))
+                .isInstanceOfSatisfying(com.OnETA.common.exception.GlobalException.class,
+                        e -> assertThat(e.getErrorCode()).isEqualTo(
+                                com.OnETA.common.error.ErrorCode.TRANSIT_SCHEDULE_UNSUPPORTED));
+        server.verify();
+    }
+
+    private String response(String items) {
+        int count = new ObjectMapper().readTree(items).size();
+        return "{\"response\":{\"header\":{\"resultCode\":\"00\"},\"body\":{\"totalCount\":"
+                + count + ",\"items\":{\"item\":" + items + "}}}}";
+    }
     @Test void resolvesLineAndDirectionAndRollsMidnightIntoServiceDay() {
         var http = new RestTemplate();
         var server = MockRestServiceServer.bindTo(http).build();

@@ -49,9 +49,12 @@ public class TagoSubwayScheduleService {
                 segment.getTransitName(), segment.getStartStation(), segment.getEndStation(), day);
         if (segment.getStations() == null || segment.getStations().size() < 2
                 || segment.getDurationMinutes() == null || segment.getDurationMinutes() <= 0) throw unsupported();
-        checkSeoul(segment.getStartX(), segment.getStartY()); checkSeoul(segment.getEndX(), segment.getEndY());
+        checkCoordinates(segment.getStartX(), segment.getStartY());
+        checkCoordinates(segment.getEndX(), segment.getEndY());
         String line = normalizeLine(segment.getTransitName());
-        if (!line.matches("[1-9]호선")) throw unsupported();
+        // TAGO station IDs and exact line matching establish coverage. Do not
+        // reject named lines or stations outside Seoul before querying TAGO.
+        if (line.isBlank()) throw unsupported();
         String start = station(segment.getStartStation(), line);
         String end = station(segment.getEndStation(), line);
         String next = station(segment.getStations().get(1).getName(), line);
@@ -130,7 +133,7 @@ public class TagoSubwayScheduleService {
         });
     }
     private String station(String name, String line) {
-        var rows = request("/GetKwrdFndSubwaySttnList", Map.of("subwayStationName", normalizeName(name)));
+        var rows = request("/GetKwrdFndSubwaySttnList", Map.of("subwayStationName", stationSearchName(name)));
         var matches = rows.stream().filter(r -> normalizeName(field(r, "subwayStationName")).equals(normalizeName(name))
                 && normalizeLine(field(r, "subwayRouteName")).equals(line)).toList();
         if (matches.size() != 1 || field(matches.get(0), "subwayStationId").isBlank()) {
@@ -192,14 +195,27 @@ public class TagoSubwayScheduleService {
         return row.path(name).asText(row.path(name.toLowerCase(Locale.ROOT)).asText(""));
     }
     private static String normalizeName(String name) {
+        return stationSearchName(name).replaceFirst("역$", "");
+    }
+    private static String stationSearchName(String name) {
         return name == null ? "" : name.replaceAll("\\([^)]*\\)", "").replaceAll("\\s", "");
     }
     private static String normalizeLine(String line) {
-        return line == null ? "" : line.replace("수도권", "").replace("서울", "").replaceAll("\\s", "");
+        String normalized = line == null ? "" : line.replaceAll("\\s", "")
+                .replaceFirst("^(수도권|서울)(지하철|전철)?", "");
+        return switch (normalized) {
+            case "수인·분당선", "수인ㆍ분당선" -> "수인분당선";
+            case "인천지하철1호선", "인천도시철도1호선" -> "인천1호선";
+            case "인천지하철2호선", "인천도시철도2호선" -> "인천2호선";
+            default -> normalized;
+        };
     }
-    private static void checkSeoul(Double x, Double y) {
+    private static void checkCoordinates(Double x, Double y) {
+        // Legacy paths can lack coordinates; unique station+line IDs are still
+        // mandatory below. Supplied coordinates must form a valid domestic pair.
+        if (x == null && y == null) return;
         if (x == null || y == null || !Double.isFinite(x) || !Double.isFinite(y)
-                || x < 126.7 || x > 127.3 || y < 37.4 || y > 37.75) throw unsupported();
+                || x < 124 || x > 132 || y < 33 || y > 39) throw unsupported();
     }
     private static GlobalException unsupported() { return new GlobalException(ErrorCode.TRANSIT_SCHEDULE_UNSUPPORTED); }
     private static GlobalException unavailable() { return new GlobalException(ErrorCode.TRANSIT_SCHEDULE_UNAVAILABLE); }
