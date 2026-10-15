@@ -437,14 +437,17 @@ public class TransitScheduleService {
                     prefix += Math.max(0, segment.getDurationMinutes() == null ? 0 : segment.getDurationMinutes());
                 }
                 var plan = TransitScheduleCalculator.conservative(route.getSegments(), bounds, type);
+                boolean odsayStopTimes = times.stream().anyMatch(this::isOdsayMetropolitanBinding);
                 return new RouteSchedulePlan(plan.departure(), plan.durationMinutes(),
-                        "SEOUL_BUS_TRANSFER", objectMapper.writeValueAsString(times), Math.max(60, prefix));
+                        odsayStopTimes ? "ODSAY" : "SEOUL_BUS_TRANSFER",
+                        odsayStopTimes ? null : objectMapper.writeValueAsString(times), Math.max(60, prefix));
             }
 
             var times = resolveKakaoBusSchedule(route, date);
             LocalDateTime boarding = type == NotificationScheduleType.FIRST_TRANSIT ? times.first() : times.last();
             var plan = TransitScheduleCalculator.calculate(route.getSegments(), List.of(boarding), type);
-            return new RouteSchedulePlan(plan.departure(), plan.durationMinutes(), "SEOUL_BUS", null, 0);
+            return new RouteSchedulePlan(plan.departure(), plan.durationMinutes(),
+                    isOdsayMetropolitanBinding(times) ? "ODSAY" : "SEOUL_BUS", null, 0);
         }
 
         List<TransitDto.RouteSegment> segments = route.getSegments();
@@ -650,8 +653,10 @@ public class TransitScheduleService {
         int duration = Math.toIntExact((seconds + 59) / 60);
         if (kakao) {
             String details = objectMapper.writeValueAsString(providerSchedules);
+            boolean odsayStopTimes = providerSchedules.stream().anyMatch(this::isOdsayMetropolitanBinding);
             return new RouteSchedulePlan(departure, duration,
-                    "SEOUL_BUS_TRANSFER", details, Math.max(60, duration));
+                    odsayStopTimes ? "ODSAY" : "SEOUL_BUS_TRANSFER",
+                    odsayStopTimes ? null : details, Math.max(60, duration));
         }
         int lead = Math.max(15, Math.min(60, duration));
         return new RouteSchedulePlan(departure, duration, "ODSAY", null, lead);
@@ -905,6 +910,11 @@ public class TransitScheduleService {
         return !a.isBlank() && a.equalsIgnoreCase(b);
     }
 
+    private boolean isOdsayMetropolitanBinding(SeoulBusScheduleService.Schedule schedule) {
+        return schedule != null && schedule.routeId() != null
+                && schedule.routeId().startsWith("ODSAY_METRO:");
+    }
+
     /** Latest estimated connected departure in an operating interval already in progress. */
     public LocalDateTime previewCurrentLastDeparture(TransitDto.RouteOptionResponse route,
                                                     LocalDateTime now,
@@ -1094,9 +1104,11 @@ public class TransitScheduleService {
             }
             prefix += segment.getDurationMinutes();
         }
-        String source = seoul ? (singleBus ? "SEOUL_BUS" : "SEOUL_BUS_TRANSFER") : "ODSAY";
+        boolean odsayStopTimes = bindings.stream().anyMatch(this::isOdsayMetropolitanBinding);
+        String source = seoul && !odsayStopTimes
+                ? (singleBus ? "SEOUL_BUS" : "SEOUL_BUS_TRANSFER") : "ODSAY";
         return new RouteSchedulePlan(plan.departure(), plan.durationMinutes(), source,
-                seoul && !singleBus ? objectMapper.writeValueAsString(bindings) : null,
+                seoul && !singleBus && !odsayStopTimes ? objectMapper.writeValueAsString(bindings) : null,
                 !singleBus ? Math.max(60, prefix) : 0);
     }
 
