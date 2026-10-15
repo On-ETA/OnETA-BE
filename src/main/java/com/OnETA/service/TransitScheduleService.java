@@ -397,6 +397,19 @@ public class TransitScheduleService {
             return calculateConnectedFirstPlan(route, date, scheduleCache);
         }
 
+        if (type == NotificationScheduleType.LAST_TRANSIT
+                && SeoulBusScheduleService.isKakao(route) && pureSubwayTransfer(route)) {
+            try {
+                return calculateVerifiedKakaoSubwayLastPlan(route, date);
+            } catch (com.OnETA.common.exception.GlobalException e) {
+                if (e.getErrorCode() == com.OnETA.common.error.ErrorCode.TRANSIT_CONNECTION_UNVERIFIED) {
+                    throw e; // Verified train trips cannot form the requested transfer.
+                }
+                log.info("Verified Kakao LAST trips unavailable; using prior conservative fallback: routeId={}, date={}, code={}",
+                        route.getRouteId(), date, e.getErrorCode().getCode());
+            }
+        }
+
         // The LAST of each line is not necessarily the latest usable connected train.
         // Prefer ODsay's whole-journey LAST itinerary when its exact legs match.
         if (type == NotificationScheduleType.LAST_TRANSIT
@@ -461,6 +474,84 @@ public class TransitScheduleService {
         int lead = Math.max(15, Math.min(60, plan.durationMinutes()));
         return new RouteSchedulePlan(plan.departure(), plan.durationMinutes(), "ODSAY", null, lead);
     }
+
+    /**
+     * Backward-match actual same-train station schedules instead of assuming a
+     * five-minute wait plus ten minutes for every subway interchange.
+     * Each upstream trip must reach the next boarding with walk time and a
+     * verified 1..45 minute waiting window.
+     */
+    private RouteSchedulePlan calculateVerifiedKakaoSubwayLastPlan(
+            TransitDto.RouteOptionResponse route, LocalDate serviceDate) {
+        if (seoulMetroTrainScheduleService == null || !pureSubwayTransfer(route)) {
+            throw connectionUnverified();
+        }
+        List<TransitDto.RouteSegment> segments = route.getSegments();
+        List<Integer> rideIndices = new ArrayList<>();
+        for (int i = 0; i < segments.size(); i++) {
+            var segment = segments.get(i);
+            if (segment == null || segment.getDurationMinutes() == null
+                    || segment.getDurationMinutes() < 0) throw connectionUnverified();
+            if ("SUBWAY".equals(segment.getTransitType())) rideIndices.add(i);
+            else if (!"WALK".equals(segment.getTransitType())) throw connectionUnverified();
+        }
+
+        int lastIndex = rideIndices.get(rideIndices.size() - 1);
+        List<ConnectedLastTrip> suffixes = new ArrayList<>();
+        for (var trip : seoulMetroTrainScheduleService.tripsForServiceDate(
+                segments.get(lastIndex), serviceDate)) {
+            suffixes.add(new ConnectedLastTrip(trip.departure(), trip.arrival()));
+        }
+        if (suffixes.isEmpty()) throw connectionUnverified();
+
+        for (int ride = rideIndices.size() - 2; ride >= 0; ride--) {
+            int index = rideIndices.get(ride);
+            int nextIndex = rideIndices.get(ride + 1);
+            int walk = 0;
+            for (int i = index + 1; i < nextIndex; i++) {
+                walk = Math.addExact(walk, segments.get(i).getDurationMinutes());
+            }
+            List<ConnectedLastTrip> connected = new ArrayList<>();
+            for (var trip : seoulMetroTrainScheduleService.tripsForServiceDate(
+                    segments.get(index), serviceDate)) {
+                LocalDateTime ready = trip.arrival().plusMinutes(walk);
+                for (ConnectedLastTrip suffix : suffixes) {
+                    long waiting = Duration.between(ready, suffix.departure()).toMinutes();
+                    if (waiting >= FIRST_TRANSFER_BUFFER_MINUTES
+                            && waiting <= MAX_FIRST_TRANSFER_WAIT_MINUTES) {
+                        connected.add(new ConnectedLastTrip(trip.departure(), suffix.finalArrival()));
+                        break;
+                    }
+                }
+            }
+            if (connected.isEmpty()) throw connectionUnverified();
+            suffixes = connected;
+        }
+
+        ConnectedLastTrip latest = suffixes.stream()
+                .max(Comparator.comparing(ConnectedLastTrip::departure))
+                .orElseThrow(this::connectionUnverified);
+        int access = 5; // Keep the existing Kakao access safety margin.
+        for (int i = 0; i < rideIndices.get(0); i++) {
+            access = Math.addExact(access, segments.get(i).getDurationMinutes());
+        }
+        int egress = 0;
+        for (int i = lastIndex + 1; i < segments.size(); i++) {
+            egress = Math.addExact(egress, segments.get(i).getDurationMinutes());
+        }
+        LocalDateTime departure = latest.departure().minusMinutes(access);
+        LocalDateTime arrival = latest.finalArrival().plusMinutes(egress);
+        long seconds = Duration.between(departure, arrival).getSeconds();
+        if (seconds <= 0 || seconds > 1440 * 60L) throw connectionUnverified();
+        int duration = Math.toIntExact((seconds + 59) / 60);
+        var bindings = resolveKakaoRouteSchedules(route, serviceDate, true);
+        log.info("Verified Kakao connected LAST: routeId={}, serviceDate={}, departure={}, rides={}",
+                route.getRouteId(), serviceDate, departure, rideIndices.size());
+        return new RouteSchedulePlan(departure, duration, "SEOUL_BUS_TRANSFER",
+                objectMapper.writeValueAsString(bindings), Math.max(60, duration));
+    }
+
+    private record ConnectedLastTrip(LocalDateTime departure, LocalDateTime finalArrival) {}
 
     private RouteSchedulePlan calculateConnectedFirstPlan(
             TransitDto.RouteOptionResponse route,
@@ -721,6 +812,21 @@ public class TransitScheduleService {
             }
         }
         boolean seoul = SeoulBusScheduleService.usesSeoulBusSchedules(route);
+        if (SeoulBusScheduleService.isKakao(route) && pureSubwayTransfer(route)
+                && seoulMetroTrainScheduleService != null) {
+            LocalDate serviceDay = now.toLocalTime().isBefore(LocalTime.of(6, 0))
+                    ? now.toLocalDate().minusDays(1) : now.toLocalDate();
+            try {
+                var exact = calculateVerifiedKakaoSubwayLastPlan(route, serviceDay);
+                return exact.departure().isAfter(now) ? exact : null;
+            } catch (com.OnETA.common.exception.GlobalException e) {
+                if (e.getErrorCode() == com.OnETA.common.error.ErrorCode.TRANSIT_CONNECTION_UNVERIFIED) {
+                    throw e;
+                }
+                log.info("Verified current LAST unavailable, retaining conservative path: routeId={}, date={}, code={}",
+                        route.getRouteId(), serviceDay, e.getErrorCode().getCode());
+            }
+        }
         boolean nightOnly = TransitRouteClassifier.isNightOnlyRoute(route);
         boolean verifiedSubwayTransfer = seoul && pureSubwayTransfer(route);
         boolean singleBus = route.getSegments().stream()

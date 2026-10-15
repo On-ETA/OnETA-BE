@@ -23,6 +23,14 @@ public final class TransitRouteClassifier {
         return matcher.matches() ? matcher.group(1) : null;
     }
 
+    /** Include only explicitly typed metropolitan bus legs, not guessed route numbers. */
+    public static boolean containsMetropolitanBus(TransitDto.RouteOptionResponse route) {
+        if (route == null || route.getSegments() == null) return false;
+        return route.getSegments().stream().anyMatch(segment -> segment != null
+                && "BUS".equals(segment.getTransitType())
+                && segment.getBusType() == com.OnETA.dto.BusType.METROPOLITAN);
+    }
+
     public static boolean containsNightBus(TransitDto.RouteOptionResponse route) {
         if (route == null || route.getSegments() == null) return false;
         return route.getSegments().stream().anyMatch(segment -> segment != null

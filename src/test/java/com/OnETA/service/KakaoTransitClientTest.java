@@ -145,6 +145,44 @@ class KakaoTransitClientTest {
     }
 
     @Test
+    void supplementsOdsayFirstLastCandidatesWithKakaoMetropolitanRoutes() {
+        configure();
+        String odsay = """
+                {"result":{"path":[{"info":{"totalTime":25,"payment":1400,"transitCount":0},
+                "subPath":[{"trafficType":3,"sectionTime":5},
+                {"trafficType":2,"sectionTime":15,"startName":"신도림","endName":"홍대입구",
+                "lane":[{"busNo":"5712","busID":55,"type":12}]},
+                {"trafficType":3,"sectionTime":5}]}]}}
+                """;
+        String metropolitan = """
+                {"status":"OK","routes":[{"properties":{"totalTime":2400,"transfers":0},
+                "steps":[
+                  {"properties":{"type":"WALKING","time":180}},
+                  {"properties":{"type":"BUS","time":2040,
+                    "stops":[{"name":"서울역"},{"name":"판교역"}],
+                    "vehicles":[{"name":"M1234","type":"광역"}]},
+                    "path":{"points":[[126.97,37.55],[127.12,37.39]]}},
+                  {"properties":{"type":"WALKING","time":180}}
+                ]}]}
+                """;
+        server.expect(queryParam("SX", "126.89"))
+                .andRespond(withSuccess(odsay, MediaType.APPLICATION_JSON));
+        server.expect(queryParam("start_x", "126.89"))
+                .andRespond(withSuccess(metropolitan, MediaType.APPLICATION_JSON));
+
+        var routes = service.searchScheduleCandidates(126.89, 37.51, 127.12, 37.39, 10);
+
+        assertThat(routes).hasSize(2);
+        assertThat(routes.get(0).getProvider()).isEqualTo("ODSAY");
+        assertThat(routes.get(1).getProvider()).isEqualTo("KAKAO");
+        assertThat(routes.get(1).getSegments()).anySatisfy(segment -> {
+            assertThat(segment.getBusType()).isEqualTo(BusType.METROPOLITAN);
+            assertThat(segment.getTransitName()).isEqualTo("M1234");
+        });
+        server.verify();
+    }
+
+    @Test
     void keepsOdsayScheduleCandidatesWhenKakaoNightSupplementFails() {
         configure();
 

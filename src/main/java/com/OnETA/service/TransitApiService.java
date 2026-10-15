@@ -319,25 +319,27 @@ public class TransitApiService {
 
         List<TransitDto.RouteOptionResponse> combined = new ArrayList<>(primary);
 
-        // Route planners may omit night buses during daytime searches. Try Kakao as a
-        // secondary planner first, with full endpoint walking legs restored.
+        // ODsay ranks routes by its own search criteria; it may omit metropolitan
+        // buses and night services even when Kakao includes them. The secondary
+        // search reuses fully restored endpoint walks and timetable validation.
         if (!primaryFromKakao
                 && kakaoTransitClient != null
                 && kakaoTransitClient.isConfigured()) {
             try {
-                List<TransitDto.RouteOptionResponse> kakaoNightRoutes =
+                List<TransitDto.RouteOptionResponse> kakaoSupplementalRoutes =
                         kakaoTransitClient.searchScheduleCandidates(
                                         originX, originY, destX, destY, limit)
                                 .stream()
-                                .filter(TransitRouteClassifier::containsNightBus)
+                                .filter(route -> TransitRouteClassifier.containsNightBus(route)
+                                        || TransitRouteClassifier.containsMetropolitanBus(route))
                                 .toList();
-                if (!kakaoNightRoutes.isEmpty()) {
-                    combined.addAll(kakaoNightRoutes);
-                    log.info("Supplemented FIRST/LAST candidates with {} night-bus Kakao route(s)",
-                            kakaoNightRoutes.size());
+                if (!kakaoSupplementalRoutes.isEmpty()) {
+                    combined.addAll(kakaoSupplementalRoutes);
+                    log.info("Supplemented FIRST/LAST candidates with {} Kakao night/metropolitan route(s)",
+                            kakaoSupplementalRoutes.size());
                 }
             } catch (GlobalException e) {
-                log.info("Kakao night-bus supplement unavailable ({}); trying Seoul bus graph",
+                log.info("Kakao night/metropolitan supplement unavailable ({}); trying Seoul bus graph",
                         e.getErrorCode().getCode());
             }
         }
