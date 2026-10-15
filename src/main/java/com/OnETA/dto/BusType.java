@@ -26,7 +26,7 @@ public enum BusType {
             case "BLUE", "간선" -> TRUNK;
             case "GREEN", "지선" -> BRANCH;
             case "YELLOW", "순환" -> CIRCULAR;
-            case "RED", "광역", "SEAT", "DIRECT", "직행", "직행좌석" -> METROPOLITAN;
+            case "RED", "광역", "광역급행", "SEAT", "좌석", "DIRECT", "직행", "직행좌석" -> METROPOLITAN;
             case "MAUL", "마을" -> VILLAGE;
             default -> OTHER;
         };
