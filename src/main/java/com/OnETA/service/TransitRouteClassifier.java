@@ -31,6 +31,18 @@ public final class TransitRouteClassifier {
                 && segment.getBusType() == com.OnETA.dto.BusType.METROPOLITAN);
     }
 
+    /**
+     * Provider bus types are sometimes missing/OTHER even for Gyeonggi
+     * metropolitan lines. Admit those candidates for verified timetable lookup.
+     */
+    public static boolean containsUnclassifiedBus(TransitDto.RouteOptionResponse route) {
+        if (route == null || route.getSegments() == null) return false;
+        return route.getSegments().stream().anyMatch(segment -> segment != null
+                && "BUS".equals(segment.getTransitType())
+                && (segment.getBusType() == null
+                    || segment.getBusType() == com.OnETA.dto.BusType.OTHER));
+    }
+
     public static boolean containsNightBus(TransitDto.RouteOptionResponse route) {
         if (route == null || route.getSegments() == null) return false;
         return route.getSegments().stream().anyMatch(segment -> segment != null
