@@ -135,6 +135,59 @@ class TransitScheduleServiceTest {
     }
 
     @Test
+    void kakaoMetropolitanMatchesSeventhNearbyStopInsteadOfDroppingItBeforeRouteValidation() {
+        RestTemplate rest = new RestTemplate();
+        MockRestServiceServer server = MockRestServiceServer.bindTo(rest).build();
+        var seoul = mock(SeoulBusScheduleService.class);
+        when(seoul.resolve(any(), eq(DATE))).thenThrow(new com.OnETA.common.exception.GlobalException(
+                com.OnETA.common.error.ErrorCode.TRANSIT_SCHEDULE_UNSUPPORTED));
+        var service = new TransitScheduleService(mock(TransitApiService.class),
+                mock(PublicDataTransitService.class), mock(ScheduleSnapshotRepository.class),
+                new ObjectMapper(), rest);
+        ReflectionTestUtils.setField(service, "seoulBusScheduleService", seoul);
+        ReflectionTestUtils.setField(service, "apiKey", "test");
+        ReflectionTestUtils.setField(service, "scheduleBaseUrl", "http://odsay/v1/api");
+
+        // Six nearby stops do not serve bus 3000. The seventh is the real stop.
+        StringBuilder origins = new StringBuilder("{\"result\":{\"station\":[");
+        for (int i = 0; i < 7; i++) {
+            if (i > 0) origins.append(',');
+            origins.append("{\"stationID\":").append(100 + i)
+                    .append(",\"stationClass\":1,\"stationName\":\"서울역\",\"x\":127.1,\"y\":37.2}");
+        }
+        origins.append("]}}");
+        server.expect(requestTo(org.hamcrest.Matchers.containsString("/pointSearch")))
+                .andRespond(withSuccess(origins.toString(), MediaType.APPLICATION_JSON));
+        server.expect(requestTo(org.hamcrest.Matchers.containsString("/pointSearch")))
+                .andRespond(withSuccess("""
+                    {"result":{"station":[{"stationID":888,"stationClass":1,"stationName":"판교역",
+                    "x":127.2,"y":37.3}]}}
+                    """, MediaType.APPLICATION_JSON));
+        for (int i = 0; i < 6; i++) {
+            server.expect(requestTo(org.hamcrest.Matchers.containsString("/busStationInfo")))
+                    .andExpect(queryParam("stationID", Integer.toString(100 + i)))
+                    .andRespond(withSuccess("{\"result\":{\"lane\":[]}}", MediaType.APPLICATION_JSON));
+        }
+        server.expect(requestTo(org.hamcrest.Matchers.containsString("/busStationInfo")))
+                .andExpect(queryParam("stationID", "106"))
+                .andRespond(withSuccess("""
+                    {"result":{"lane":[{"busID":555,"busNo":"3000","busStationIdx":12,
+                    "busFirstTime":"0530","busLastTime":"2340"}]}}
+                    """, MediaType.APPLICATION_JSON));
+        server.expect(requestTo(org.hamcrest.Matchers.containsString("/busStationInfo")))
+                .andExpect(queryParam("stationID", "888"))
+                .andRespond(withSuccess("""
+                    {"result":{"lane":[{"busID":555,"busNo":"3000","busStationIdx":19,
+                    "busFirstTime":"0550","busLastTime":"0005"}]}}
+                    """, MediaType.APPLICATION_JSON));
+
+        assertThat(service.previewDepartureForServiceDate(metropolitanRoute(),
+                NotificationScheduleType.LAST_TRANSIT, DATE, new java.util.HashMap<>()))
+                .isEqualTo(DATE.atTime(23, 34));
+        server.verify();
+    }
+
+    @Test
     void kakaoMetropolitanRejectsOppositeDirectionEvenWithSameBusNumber() {
         RestTemplate rest = new RestTemplate();
         MockRestServiceServer server = MockRestServiceServer.bindTo(rest).build();
