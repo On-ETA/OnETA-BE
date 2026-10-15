@@ -83,7 +83,9 @@ class KakaoTransitClientTest {
             "직행, METROPOLITAN",
             "MAUL, VILLAGE",
             "간선, TRUNK",
-            "광역, METROPOLITAN"
+            "광역, METROPOLITAN",
+            "좌석, METROPOLITAN",
+            "직행좌석, METROPOLITAN"
     })
     void normalizesKakaoBusType(String providerType, BusType expected) {
         String body = BODY.replace("\"type\":\"시외\"", "\"type\":\"" + providerType + "\"");
