@@ -134,6 +134,40 @@ class TransitScheduleServiceTest {
         server.verify();
     }
 
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"DAILY_QUOTA", "HTTP_429"})
+    void kakaoMetropolitanQuotaExhaustionIsT006AndFurtherRequestsAreSuppressed(String mode) {
+        RestTemplate rest = new RestTemplate();
+        MockRestServiceServer server = MockRestServiceServer.bindTo(rest).build();
+        var seoul = mock(SeoulBusScheduleService.class);
+        when(seoul.resolve(any(), eq(DATE))).thenThrow(new com.OnETA.common.exception.GlobalException(
+                com.OnETA.common.error.ErrorCode.TRANSIT_SCHEDULE_UNSUPPORTED));
+        var service = new TransitScheduleService(mock(TransitApiService.class),
+                mock(PublicDataTransitService.class), mock(ScheduleSnapshotRepository.class),
+                new ObjectMapper(), rest);
+        ReflectionTestUtils.setField(service, "seoulBusScheduleService", seoul);
+        ReflectionTestUtils.setField(service, "apiKey", "test");
+        ReflectionTestUtils.setField(service, "scheduleBaseUrl", "http://odsay/v1/api");
+
+        var quotaResponse = "DAILY_QUOTA".equals(mode)
+                ? withSuccess("{\"error\":[{\"code\":\"429\",\"message\":\"Daily quota exceeded\"}]}",
+                        MediaType.APPLICATION_JSON)
+                : withStatus(org.springframework.http.HttpStatus.TOO_MANY_REQUESTS);
+        server.expect(requestTo(org.hamcrest.Matchers.containsString("/pointSearch")))
+                .andRespond(quotaResponse);
+
+        for (int retry = 0; retry < 2; retry++) {
+            assertThatThrownBy(() -> service.previewDepartureForServiceDate(
+                    metropolitanRoute(), NotificationScheduleType.LAST_TRANSIT,
+                    DATE, new java.util.HashMap<>()))
+                    .isInstanceOf(com.OnETA.common.exception.GlobalException.class)
+                    .satisfies(error -> assertThat(((com.OnETA.common.exception.GlobalException) error)
+                            .getErrorCode()).isEqualTo(com.OnETA.common.error.ErrorCode.TRANSIT_SCHEDULE_UNAVAILABLE));
+        }
+        // A second route evaluation must not hit ODsay again during quota backoff.
+        server.verify();
+    }
+
     @Test
     void kakaoMetropolitanMatchesSeventhNearbyStopInsteadOfDroppingItBeforeRouteValidation() {
         RestTemplate rest = new RestTemplate();
