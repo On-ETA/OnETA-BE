@@ -39,6 +39,11 @@ public class TransitRouteOptimizationService {
 
         List<TransitDto.RouteOptionResponse> routes = transitApiService.searchScheduleCandidates(
                 email, originX, originY, originAddress, destX, destY, destAddress, Integer.MAX_VALUE);
+        log.info("FIRST_LAST_BUS_CANDIDATES: type={}, totalRoutes={}, metropolitanOrUnknown={}",
+                scheduleType, routes.size(),
+                routes.stream().filter(this::needsMetropolitanDiagnostics)
+                        .map(route -> route.getProvider() + ":" + route.getRouteId()
+                                + ":" + transitBusNames(route)).limit(20).toList());
         // An N-only path is informational in both FIRST and LAST, regardless of
         // whether a timetable would let us estimate a vehicle's departure.
         List<TransitDto.RouteOptionResponse> nightOnlyRoutes = routes.stream()
@@ -98,8 +103,17 @@ public class TransitRouteOptimizationService {
                         departure, NotificationScheduleType.LAST_TRANSIT);
                 if (future && currentInterval && searchWindow) {
                     active.add(new Candidate(route, departure));
+                } else if (needsMetropolitanDiagnostics(route)) {
+                    log.info("FIRST_LAST_BUS_FILTERED: mode=CURRENT_LAST, provider={}, routeId={}, busNames={}, departure={}, future={}, currentInterval={}, searchWindow={}",
+                            route.getProvider(), route.getRouteId(), transitBusNames(route),
+                            departure, future, currentInterval, searchWindow);
                 }
             } catch (GlobalException e) {
+                if (needsMetropolitanDiagnostics(route)) {
+                    log.info("FIRST_LAST_BUS_REJECTED: mode=CURRENT_LAST, provider={}, routeId={}, busNames={}, error={}",
+                            route.getProvider(), route.getRouteId(), transitBusNames(route),
+                            e.getErrorCode().getCode());
+                }
                 recordFailure(failures, e);
             } catch (RuntimeException e) {
                 failures.unavailable = true;
@@ -182,6 +196,10 @@ public class TransitRouteOptimizationService {
                 }
                 if (timeWindow && inFuture) {
                     candidates.add(new Candidate(route, departure));
+                } else if (needsMetropolitanDiagnostics(route)) {
+                    log.info("FIRST_LAST_BUS_FILTERED: mode={}, provider={}, routeId={}, busNames={}, serviceDate={}, departure={}, searchWindow={}, future={}",
+                            scheduleType, route.getProvider(), route.getRouteId(),
+                            transitBusNames(route), serviceDate, departure, timeWindow, inFuture);
                 }
             } catch (GlobalException e) {
                 if (scheduleType == NotificationScheduleType.LAST_TRANSIT
@@ -197,6 +215,11 @@ public class TransitRouteOptimizationService {
                 } else {
                     throw e;
                 }
+                if (needsMetropolitanDiagnostics(route)) {
+                    log.info("FIRST_LAST_BUS_REJECTED: mode={}, provider={}, routeId={}, busNames={}, serviceDate={}, error={}",
+                            scheduleType, route.getProvider(), route.getRouteId(),
+                            transitBusNames(route), serviceDate, e.getErrorCode().getCode());
+                }
                 log.debug("Skipping FIRST/LAST route candidate: routeId={}, provider={}, serviceDate={}, error={}",
                         route.getRouteId(), route.getProvider(), serviceDate, e.getErrorCode().getCode());
             } catch (RuntimeException e) {
@@ -206,6 +229,19 @@ public class TransitRouteOptimizationService {
             }
         }
         return candidates;
+    }
+
+    private boolean needsMetropolitanDiagnostics(TransitDto.RouteOptionResponse route) {
+        return TransitRouteClassifier.containsMetropolitanBus(route)
+                || TransitRouteClassifier.containsUnclassifiedBus(route);
+    }
+
+    private List<String> transitBusNames(TransitDto.RouteOptionResponse route) {
+        if (route == null || route.getSegments() == null) return List.of();
+        return route.getSegments().stream()
+                .filter(segment -> segment != null && "BUS".equals(segment.getTransitType()))
+                .map(segment -> segment.getTransitName() + "(" + segment.getBusType() + ")")
+                .toList();
     }
 
     private List<TransitDto.FirstLastRouteOptionResponse> rank(
