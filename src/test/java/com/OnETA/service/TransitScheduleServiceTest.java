@@ -926,6 +926,23 @@ class TransitScheduleServiceTest {
     }
 
     @Test
+    void odsaySingleObjectLaneIsAcceptedForUnclassifiedBusFirstLast() {
+        TransitScheduleService service = serviceWithResponse(
+                "{\"result\":{\"lane\":{\"busID\":1168,\"busLocalBlID\":\"100100088\","
+                        + "\"busNo\":\"3000\",\"busFirstTime\":\"05:30\",\"busLastTime\":\"23:30\"}}}");
+        var route = TransitDto.RouteOptionResponse.builder().provider("ODSAY")
+                .totalDurationMinutes(20)
+                .segments(List.of(TransitDto.RouteSegment.builder().transitType("WALK")
+                        .durationMinutes(10).build(),
+                        TransitDto.RouteSegment.builder().transitType("BUS").durationMinutes(10)
+                                .odsayStartStationId("193778").odsayRouteId("1168")
+                                .localRouteId("100100088").transitName("3000")
+                                .busType(com.OnETA.dto.BusType.OTHER).build())).build();
+        assertThat(service.previewDepartureForServiceDate(route, NotificationScheduleType.LAST_TRANSIT,
+                DATE, new java.util.HashMap<>())).isEqualTo(DATE.atTime(23, 20));
+    }
+
+    @Test
     void usesBusLastTimeForLastTransit() {
         TransitScheduleService service = serviceWithResponse(
                 "{\"result\":{\"lane\":[{\"busID\":1168,\"busLocalBlID\":\"100100088\",\"busNo\":\"603\",\"busFirstTime\":\"05:30\",\"busLastTime\":\"23:30\"}]}}");
