@@ -100,18 +100,22 @@ public class SeoulMetroTrainScheduleService {
         String lineName = normalizeLine(segment.getTransitName());
         List<String> directions = directions(lineName);
         List<Trip> validTrips = new ArrayList<>();
+        List<String> directionDiagnostics = new ArrayList<>();
 
         for (String direction : directions) {
             List<Row> starts = fetch(lineName, segment.getStartStation(),
                     direction, weekday, serviceDate);
             List<Row> ends = fetch(lineName, segment.getEndStation(),
                     direction, weekday, serviceDate);
-            validTrips.addAll(matchTrips(starts, ends, segment, serviceDate));
+            List<Trip> matched = matchTrips(starts, ends, segment, serviceDate);
+            directionDiagnostics.add(direction + ": start=" + starts.size()
+                    + ", end=" + ends.size() + ", matched=" + matched.size());
+            validTrips.addAll(matched);
         }
 
         if (validTrips.isEmpty()) {
-            log.info("Seoul Metro schedule had no connectable train: line={}, start={}, end={}, serviceDate={}",
-                    lineName, segment.getStartStation(), segment.getEndStation(), serviceDate);
+            log.info("Seoul Metro schedule had no connectable train: line={}, start={}, end={}, serviceDate={}, diagnostics={}",
+                    lineName, segment.getStartStation(), segment.getEndStation(), serviceDate, directionDiagnostics);
             throw unsupported();
         }
 
@@ -132,7 +136,7 @@ public class SeoulMetroTrainScheduleService {
                     .queryParam("upbdnbSe", direction)
                     .queryParam("wkndSe", weekday)
                     .queryParam("lineNm", lineName)
-                    .queryParam("stnNm", stationName)
+                    .queryParam("stnNm", normalize(stationName))
                     .queryParam("searchDt", serviceDate + "T00:00:00")
                     .queryParam("pageNo", "1")
                     .queryParam("numOfRows", "1000");
@@ -153,9 +157,9 @@ public class SeoulMetroTrainScheduleService {
 
             List<Row> rows = new ArrayList<>();
             if (items.isArray()) {
-                for (JsonNode item : items) parseRow(item, direction).ifPresent(rows::add);
+                for (JsonNode item : items) parseRow(item, direction, stationName).ifPresent(rows::add);
             } else if (items.isObject()) {
-                parseRow(items, direction).ifPresent(rows::add);
+                parseRow(items, direction, stationName).ifPresent(rows::add);
             }
             return rows;
         } catch (GlobalException e) {
@@ -167,11 +171,15 @@ public class SeoulMetroTrainScheduleService {
         }
     }
 
-    private Optional<Row> parseRow(JsonNode item, String direction) {
+    private Optional<Row> parseRow(JsonNode item, String direction, String requestedStation) {
         String trainNo = text(item, "trainno", "trainNo");
         String departure = text(item, "trainDptreTm", "dptreTm");
         String arrival = text(item, "trainArvlTm", "arvlTm");
         String rowDirection = text(item, "upbdnbSe");
+        String returnedStation = text(item, "stnNm");
+        // The API searches stnNm by substring. "양재" also returns
+        // "양재시민의숲", so accept only the requested exact station.
+        if (!normalize(returnedStation).equals(normalize(requestedStation))) return Optional.empty();
         if (trainNo.isBlank() || (departure.isBlank() && arrival.isBlank())) return Optional.empty();
         if (!rowDirection.isBlank() && !normalize(rowDirection).equals(normalize(direction))) {
             return Optional.empty();
