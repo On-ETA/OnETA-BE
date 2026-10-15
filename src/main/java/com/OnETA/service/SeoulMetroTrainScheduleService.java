@@ -86,6 +86,14 @@ public class SeoulMetroTrainScheduleService {
                 .map(trip -> new TripWindow(trip.departure(), trip.arrival()));
     }
 
+    /** Verified same-train journeys for an entire service day, including after midnight. */
+    public synchronized List<TripWindow> tripsForServiceDate(
+            TransitDto.RouteSegment segment, LocalDate serviceDate) {
+        return loadTrips(segment, serviceDate).stream()
+                .map(trip -> new TripWindow(trip.departure(), trip.arrival()))
+                .toList();
+    }
+
     private List<Trip> loadTrips(TransitDto.RouteSegment segment, LocalDate serviceDate) {
         validate(segment, serviceDate);
         String cacheKey = serviceDate + "|" + normalizeLine(segment.getTransitName()) + "|"
