@@ -117,6 +117,66 @@ class NormalOperatingHoursTest {
         check("13:00", false, ErrorCode.TRANSIT_NORMAL_HOURS_UNVERIFIED);
     }
 
+    @ParameterizedTest
+    @CsvSource({"신분당선", "수인분당선", "인천1호선"})
+    void odsayRouteWithoutProviderIdsCanUseVerifiedPublicTimetable(String line) {
+        route("ODSAY", leg("SUBWAY", line, 5));
+        when(subway.resolve(any(), any())).thenAnswer(invocation -> {
+            LocalDate date = invocation.getArgument(1);
+            return schedule(date.atTime(5, 30), date.atTime(23, 30));
+        });
+
+        check("15:00", true, ErrorCode.TRANSIT_NORMAL_OUTSIDE_HOURS);
+        check("03:00", false, ErrorCode.TRANSIT_NORMAL_OUTSIDE_HOURS);
+    }
+
+    @Test
+    void odsayLookupFailureFallsBackToPublicTimetable() {
+        route("ODSAY", leg("SUBWAY", "신분당선", 5).toBuilder()
+                .odsayStartStationId("100").odsayEndStationId("200").build());
+        ReflectionTestUtils.setField(service, "apiKey", "test");
+        ReflectionTestUtils.setField(service, "scheduleBaseUrl", "https://example.test");
+        var server = MockRestServiceServer.bindTo(http).build();
+        server.expect(requestTo(org.hamcrest.Matchers.containsString("/subwayPathSchedule")))
+                .andRespond(withSuccess("{\"error\":{\"code\":\"500\",\"message\":\"unavailable\"}}",
+                        MediaType.APPLICATION_JSON));
+        when(subway.resolve(any(), eq(day))).thenReturn(
+                schedule(day.atTime(5, 30), day.atTime(23, 30)));
+
+        check("15:00", true, ErrorCode.TRANSIT_NORMAL_OUTSIDE_HOURS);
+        verify(subway).resolve(any(), eq(day));
+        server.verify();
+    }
+
+    @Test
+    void successfulOdsayHoursDoNotNeedPublicFallback() {
+        route("ODSAY", leg("SUBWAY", "수인분당선", 5).toBuilder()
+                .odsayStartStationId("100").odsayEndStationId("200").build());
+        ReflectionTestUtils.setField(service, "apiKey", "test");
+        ReflectionTestUtils.setField(service, "scheduleBaseUrl", "https://example.test");
+        var server = MockRestServiceServer.bindTo(http).build();
+        for (String departure : List.of("0530", "2330")) {
+            server.expect(requestTo(org.hamcrest.Matchers.containsString("/subwayPathSchedule")))
+                    .andRespond(withSuccess("{\"result\":{\"path\":[{\"info\":{\"departureTime\":\""
+                            + departure + "\"}}]}}", MediaType.APPLICATION_JSON));
+        }
+
+        check("15:00", true, ErrorCode.TRANSIT_NORMAL_OUTSIDE_HOURS);
+        verifyNoInteractions(subway);
+        server.verify();
+    }
+
+    @Test
+    void missingPublicTimetableStillRejectsRegistration() {
+        route("ODSAY", leg("SUBWAY", "신분당선", 5));
+        when(subway.resolve(any(), any())).thenThrow(new GlobalException(ErrorCode.TRANSIT_SCHEDULE_UNSUPPORTED));
+        var metro = mock(SeoulMetroTrainScheduleService.class);
+        service.setSeoulMetroTrainScheduleService(metro);
+        when(metro.resolve(any(), any())).thenThrow(new GlobalException(ErrorCode.TRANSIT_SCHEDULE_UNSUPPORTED));
+
+        check("15:00", false, ErrorCode.TRANSIT_NORMAL_HOURS_UNVERIFIED);
+    }
+
     private void route(String provider, TransitDto.RouteSegment... legs) {
         when(transit.readSavedRoute("details")).thenReturn(TransitDto.RouteOptionResponse.builder()
                 .provider(provider).segments(List.of(legs)).build());
