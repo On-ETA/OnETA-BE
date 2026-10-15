@@ -152,7 +152,8 @@ class TransitScheduleServiceTest {
         var quotaResponse = "DAILY_QUOTA".equals(mode)
                 ? withSuccess("{\"error\":[{\"code\":\"429\",\"message\":\"Daily quota exceeded\"}]}",
                         MediaType.APPLICATION_JSON)
-                : withStatus(org.springframework.http.HttpStatus.TOO_MANY_REQUESTS);
+                : org.springframework.test.web.client.response.MockRestResponseCreators.withStatus(
+                        org.springframework.http.HttpStatus.TOO_MANY_REQUESTS);
         server.expect(requestTo(org.hamcrest.Matchers.containsString("/pointSearch")))
                 .andRespond(quotaResponse);
 
