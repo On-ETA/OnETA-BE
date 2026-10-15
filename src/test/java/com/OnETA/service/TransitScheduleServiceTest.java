@@ -114,14 +114,52 @@ class TransitScheduleServiceTest {
                 DATE.atTime(23, 50), 0, "합정", 0));
         when(metro.resolve(eq(two), eq(DATE))).thenReturn(new SeoulBusScheduleService.Schedule(
                 "합정", "", "SEOUL_METRO:2호선", DATE.atTime(5, 30),
-                DATE.atTime(23, 53), 0, "신도림", 0));
+                DATE.atTime(23, 55), 0, "신도림", 0));
+        when(metro.tripsForServiceDate(eq(six), eq(DATE))).thenReturn(List.of(
+                new SeoulMetroTrainScheduleService.TripWindow(DATE.atTime(23, 33), DATE.atTime(23, 35)),
+                new SeoulMetroTrainScheduleService.TripWindow(DATE.atTime(23, 50), DATE.atTime(23, 52))));
+        when(metro.tripsForServiceDate(eq(two), eq(DATE))).thenReturn(List.of(
+                new SeoulMetroTrainScheduleService.TripWindow(DATE.atTime(23, 40), DATE.atTime(23, 49)),
+                new SeoulMetroTrainScheduleService.TripWindow(DATE.atTime(23, 55), DATE.plusDays(1).atTime(0, 4))));
 
+        // Walking to the first train takes 9 minutes + 5 minutes of safety.
+        // The actual 23:50 -> 23:55 transfer is still reachable after the 2-minute walk.
         assertThat(service.previewCurrentLastDeparture(route,
                 DATE.atTime(22, 47), new java.util.HashMap<>()))
-                .isEqualTo(DATE.atTime(23, 22));
+                .isEqualTo(DATE.atTime(23, 36));
         verify(metro).resolve(eq(six), eq(DATE));
         verify(metro).resolve(eq(two), eq(DATE));
         verifyNoInteractions(tago);
+    }
+
+    @Test
+    void verifiedSubwayLastDoesNotFabricateAConnectionBetweenTwoIncompatibleTrains() {
+        var service = new TransitScheduleService(mock(TransitApiService.class),
+                mock(PublicDataTransitService.class), mock(ScheduleSnapshotRepository.class),
+                new ObjectMapper(), new RestTemplate());
+        var metro = mock(SeoulMetroTrainScheduleService.class);
+        service.setSeoulMetroTrainScheduleService(metro);
+        var six = TransitDto.RouteSegment.builder().transitType("SUBWAY").transitName("6호선")
+                .startStation("상수").endStation("합정").durationMinutes(3).build();
+        var two = TransitDto.RouteSegment.builder().transitType("SUBWAY").transitName("2호선")
+                .startStation("합정").endStation("신도림").durationMinutes(9).build();
+        var route = TransitDto.RouteOptionResponse.builder().provider("KAKAO")
+                .routeId("KAKAO_NO_CONNECTION").totalDurationMinutes(30).transferCount(1)
+                .segments(List.of(six,
+                        TransitDto.RouteSegment.builder().transitType("WALK").durationMinutes(2).build(),
+                        two)).build();
+
+        when(metro.tripsForServiceDate(eq(six), eq(DATE))).thenReturn(List.of(
+                new SeoulMetroTrainScheduleService.TripWindow(DATE.atTime(23, 52), DATE.atTime(23, 55))));
+        when(metro.tripsForServiceDate(eq(two), eq(DATE))).thenReturn(List.of(
+                new SeoulMetroTrainScheduleService.TripWindow(DATE.atTime(23, 56), DATE.plusDays(1).atTime(0, 8))));
+
+        assertThatThrownBy(() -> service.previewDepartureForServiceDate(
+                route, NotificationScheduleType.LAST_TRANSIT, DATE, new java.util.HashMap<>()))
+                .isInstanceOfSatisfying(com.OnETA.common.exception.GlobalException.class,
+                        ex -> assertThat(ex.getErrorCode()).isEqualTo(
+                                com.OnETA.common.error.ErrorCode.TRANSIT_CONNECTION_UNVERIFIED));
+        verify(metro, never()).resolve(any(), any());
     }
 
     @Test
