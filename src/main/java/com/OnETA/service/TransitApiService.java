@@ -331,15 +331,16 @@ public class TransitApiService {
                                         originX, originY, destX, destY, limit)
                                 .stream()
                                 .filter(route -> TransitRouteClassifier.containsNightBus(route)
-                                        || TransitRouteClassifier.containsMetropolitanBus(route))
+                                        || TransitRouteClassifier.containsMetropolitanBus(route)
+                                        || TransitRouteClassifier.containsUnclassifiedBus(route))
                                 .toList();
                 if (!kakaoSupplementalRoutes.isEmpty()) {
                     combined.addAll(kakaoSupplementalRoutes);
-                    log.info("Supplemented FIRST/LAST candidates with {} Kakao night/metropolitan route(s)",
+                    log.info("Supplemented FIRST/LAST candidates with {} Kakao night/metropolitan/unclassified route(s)",
                             kakaoSupplementalRoutes.size());
                 }
             } catch (GlobalException e) {
-                log.info("Kakao night/metropolitan supplement unavailable ({}); trying Seoul bus graph",
+                log.info("Kakao special-bus supplement unavailable ({}); trying Seoul bus graph",
                         e.getErrorCode().getCode());
             }
         }

@@ -787,8 +787,10 @@ public class TransitScheduleService {
             var rides = route.getSegments().stream()
                     .filter(segment -> segment != null && "BUS".equals(segment.getTransitType()))
                     .toList();
-            if (!SeoulBusScheduleService.isKakao(route) || rides.size() != 1
-                    || rides.get(0).getBusType() != com.OnETA.dto.BusType.METROPOLITAN) {
+            // Do not depend on Kakao's busType enum: regional/metropolitan
+            // services may arrive as OTHER or with no type. The ODsay check
+            // below still verifies both real stops, same route ID and direction.
+            if (!SeoulBusScheduleService.isKakao(route) || rides.size() != 1) {
                 throw seoulFailure;
             }
             try {
@@ -882,15 +884,30 @@ public class TransitScheduleService {
         List<JsonNode> matches = new ArrayList<>();
         for (JsonNode stop : odsayRows(root.path("result").path("station"))) {
             if (stop.path("stationClass").asInt(-1) != 1
-                    || !sameBusName(stop.path("stationName").asText(""), name)
                     || stop.path("stationID").asText("").isBlank()) continue;
             double sx = stop.path("x").asDouble(Double.NaN);
             double sy = stop.path("y").asDouble(Double.NaN);
-            if (!Double.isFinite(sx) || !Double.isFinite(sy)
-                    || Math.abs(sx - x) > 0.002 || Math.abs(sy - y) > 0.002) continue;
+            if (!Double.isFinite(sx) || !Double.isFinite(sy)) continue;
+            double meters = distanceMeters(x, y, sx, sy);
+            if (meters > 120) continue;
+            // Kakao and ODsay sometimes label the same stop differently.
+            // A physically coincident stop is allowed through, but the final
+            // bus ID + ordered stop-pair must still be unique.
+            if (!sameBusName(stop.path("stationName").asText(""), name) && meters > 40) continue;
             matches.add(stop);
         }
-        return matches.stream().limit(5).toList();
+        // Do not discard a valid boarding/alighting stop before the exact
+        // bus ID and ordered stop pair have been checked.
+        return matches;
+    }
+
+    private static double distanceMeters(double x1, double y1, double x2, double y2) {
+        double latitude = Math.toRadians(y2 - y1);
+        double longitude = Math.toRadians(x2 - x1);
+        double a = Math.pow(Math.sin(latitude / 2), 2)
+                + Math.cos(Math.toRadians(y1)) * Math.cos(Math.toRadians(y2))
+                * Math.pow(Math.sin(longitude / 2), 2);
+        return 6371000 * 2 * Math.asin(Math.sqrt(Math.min(1, a)));
     }
 
     private static List<JsonNode> odsayRows(JsonNode value) {
@@ -1508,10 +1525,11 @@ public class TransitScheduleService {
             ensureNoOdsayError(response);
             JsonNode result = response.path("result");
             JsonNode lanes = result.path("lane");
-            int laneCount = lanes.isArray() ? lanes.size() : 0;
+            List<JsonNode> laneRows = odsayRows(lanes);
+            int laneCount = laneRows.size();
             boolean matched = false;
             LocalDateTime serviceTime = null;
-            if (lanes.isArray()) for (JsonNode lane : lanes) {
+            for (JsonNode lane : laneRows) {
                 if (same(lane.path("busID"), s.getOdsayRouteId())
                         || same(lane.path("busLocalBlID"), s.getLocalRouteId())) {
                     matched = true;
@@ -1535,6 +1553,11 @@ public class TransitScheduleService {
                     }
                     break;
                 }
+            }
+            if (s.getBusType() == com.OnETA.dto.BusType.METROPOLITAN
+                    || s.getBusType() == com.OnETA.dto.BusType.OTHER) {
+                log.info("FIRST_LAST_ODsay_BUS_RESULT: line={}, busType={}, scheduleType={}, date={}, laneCount={}, matched={}, timeFound={}",
+                        s.getTransitName(), s.getBusType(), type, serviceDate, laneCount, matched, serviceTime != null);
             }
             log.debug("BUS schedule lookup: scheduleType={}, stationId={}, odsayRouteId={}, localRouteId={}, laneCount={}, routeMatched={}, serviceTimePresent={}",
                     type, s.getOdsayStartStationId(), s.getOdsayRouteId(), s.getLocalRouteId(), laneCount, matched, serviceTime != null);
