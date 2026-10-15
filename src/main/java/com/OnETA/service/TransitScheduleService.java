@@ -896,7 +896,9 @@ public class TransitScheduleService {
             if (!sameBusName(stop.path("stationName").asText(""), name) && meters > 40) continue;
             matches.add(stop);
         }
-        return matches.stream().limit(5).toList();
+        // Do not discard a valid boarding/alighting stop before the exact
+        // bus ID and ordered stop pair have been checked.
+        return matches;
     }
 
     private static double distanceMeters(double x1, double y1, double x2, double y2) {
