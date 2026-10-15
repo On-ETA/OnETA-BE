@@ -146,8 +146,9 @@ class KakaoTransitClientTest {
         server.verify();
     }
 
-    @Test
-    void supplementsOdsayFirstLastCandidatesWithKakaoMetropolitanRoutes() {
+    @ParameterizedTest
+    @ValueSource(strings = {"광역", "경기버스"})
+    void supplementsOdsayFirstLastCandidatesWithKakaoMetropolitanRoutes(String providerType) {
         configure();
         String odsay = """
                 {"result":{"path":[{"info":{"totalTime":25,"payment":1400,"transitCount":0},
@@ -167,6 +168,7 @@ class KakaoTransitClientTest {
                   {"properties":{"type":"WALKING","time":180}}
                 ]}]}
                 """;
+        metropolitan = metropolitan.replace("\"type\":\"광역\"", "\"type\":\"" + providerType + "\"");
         server.expect(queryParam("SX", "126.89"))
                 .andRespond(withSuccess(odsay, MediaType.APPLICATION_JSON));
         server.expect(queryParam("start_x", "126.89"))
@@ -178,7 +180,8 @@ class KakaoTransitClientTest {
         assertThat(routes.get(0).getProvider()).isEqualTo("ODSAY");
         assertThat(routes.get(1).getProvider()).isEqualTo("KAKAO");
         assertThat(routes.get(1).getSegments()).anySatisfy(segment -> {
-            assertThat(segment.getBusType()).isEqualTo(BusType.METROPOLITAN);
+            assertThat(segment.getBusType()).isEqualTo(
+                    "광역".equals(providerType) ? BusType.METROPOLITAN : BusType.OTHER);
             assertThat(segment.getTransitName()).isEqualTo("M1234");
         });
         server.verify();
