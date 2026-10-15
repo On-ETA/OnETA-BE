@@ -29,6 +29,8 @@ public class TransitScheduleService {
     private static final int FIRST_TRANSFER_BUFFER_MINUTES = 1;
     private static final int MAX_FIRST_TRANSFER_WAIT_MINUTES = 45;
     private Clock clock = Clock.systemUTC();
+    // Suppress futile timetable API calls after a provider quota error.
+    private volatile Instant odsayScheduleBackoffUntil = Instant.EPOCH;
 
     private final TransitApiService transitApiService;
     private final PublicDataTransitService publicDataTransitService;
@@ -796,6 +798,11 @@ public class TransitScheduleService {
             try {
                 return resolveOdsayMetropolitanStopSchedule(rides.get(0), serviceDate);
             } catch (RuntimeException odsayFailure) {
+                if (odsayFailure instanceof OdsayQuotaExceededException) {
+                    // Provider availability is not an unsupported bus route (T005).
+                    throw new com.OnETA.common.exception.GlobalException(
+                            com.OnETA.common.error.ErrorCode.TRANSIT_SCHEDULE_UNAVAILABLE, odsayFailure);
+                }
                 log.info("Kakao metropolitan timetable fallback rejected: routeId={}, line={}, date={}, errorType={}",
                         route.getRouteId(), rides.get(0).getTransitName(), serviceDate,
                         odsayFailure.getClass().getSimpleName());
@@ -1657,8 +1664,10 @@ public class TransitScheduleService {
         String detail = "ODsay schedule API error: code="
                 + (code == null ? "unknown" : code)
                 + ", message=" + (message == null ? "unknown" : message);
-        if ("429".equals(code) || (message != null
-                && message.toLowerCase(Locale.ROOT).contains("daily quota exceeded"))) {
+        boolean dailyQuota = message != null
+                && message.toLowerCase(Locale.ROOT).contains("daily quota exceeded");
+        if ("429".equals(code) || dailyQuota) {
+            backOffOdsaySchedule(dailyQuota);
             throw new OdsayQuotaExceededException(detail, null);
         }
         throw new IllegalStateException(detail);
@@ -1669,6 +1678,9 @@ public class TransitScheduleService {
     }
 
     private JsonNode request(String path, Map<String,String> params) {
+        if (clock.instant().isBefore(odsayScheduleBackoffUntil)) {
+            throw new OdsayQuotaExceededException("ODsay schedule quota backoff is active", null);
+        }
         log.debug("odsayApiKeyConfigured={}", isApiKeyConfigured());
         log.debug("odsayApiKeyValuesMatch={}", transitApiService.hasSameOdsayApiKey(apiKey));
         String normalizedApiKey = apiKey == null ? "" : apiKey.trim();
@@ -1687,10 +1699,24 @@ public class TransitScheduleService {
             return objectMapper.readTree(response.getBody());
         } catch (org.springframework.web.client.HttpStatusCodeException e) {
             if (e.getStatusCode().value() == 429) {
+                backOffOdsaySchedule(false);
                 throw new OdsayQuotaExceededException("ODsay schedule API HTTP 429", e);
             }
             throw new IllegalStateException("운행정보 조회 실패", e);
         } catch (Exception e) { throw new IllegalStateException("운행정보 조회 실패", e); }
+    }
+
+    private void backOffOdsaySchedule(boolean dailyQuota) {
+        Instant now = clock.instant();
+        Instant until = dailyQuota
+                ? LocalDate.ofInstant(now, ZoneId.of("Asia/Seoul")).plusDays(1)
+                        .atStartOfDay(ZoneId.of("Asia/Seoul")).toInstant()
+                : now.plus(Duration.ofMinutes(5));
+        if (until.isAfter(odsayScheduleBackoffUntil)) {
+            odsayScheduleBackoffUntil = until;
+            log.warn("ODsay schedule quota reached; pause further timetable queries until={}, dailyQuota={}",
+                    until, dailyQuota);
+        }
     }
 
     private static final class OdsayQuotaExceededException extends IllegalStateException {
