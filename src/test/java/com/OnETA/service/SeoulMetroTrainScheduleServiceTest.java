@@ -118,8 +118,8 @@ class SeoulMetroTrainScheduleServiceTest {
                     java.nio.charset.StandardCharsets.UTF_8);
             assertThat(query).contains("stnNm=양재").doesNotContain("서초구청");
         }).andRespond(withSuccess(response(items(
-                row("700", "15:05:00", "15:04:00", "상행", "양재"),
-                row("700", "15:13:00", "15:12:00", "상행", "양재시민의숲"))),
+                row("700", "15:13:00", "15:12:00", "상행", "양재시민의숲"),
+                row("700", "15:05:00", "15:04:00", "상행", "양재"))),
                 MediaType.APPLICATION_JSON));
         server.expect(requestTo(org.hamcrest.Matchers.containsString("getTrainSch")))
                 .andRespond(withSuccess(response(""), MediaType.APPLICATION_JSON));
