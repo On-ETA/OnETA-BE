@@ -84,8 +84,11 @@ class TransitScheduleServiceTest {
         verify(snapshotRepo(service), never()).save(any());
     }
 
-    @Test
-    void kakaoGyeonggiMetropolitanUsesVerifiedOdsayStopTimeWhenSeoulHasNoRoute() {
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.EnumSource(
+            value = NotificationScheduleType.class, names = {"FIRST_TRANSIT", "LAST_TRANSIT"})
+    void kakaoGyeonggiMetropolitanUsesVerifiedOdsayStopTimeWhenSeoulHasNoRoute(
+            NotificationScheduleType type) {
         RestTemplate rest = new RestTemplate();
         MockRestServiceServer server = MockRestServiceServer.bindTo(rest).build();
         var seoul = mock(SeoulBusScheduleService.class);
@@ -125,10 +128,9 @@ class TransitScheduleServiceTest {
         var unknownType = original.toBuilder().busType(com.OnETA.dto.BusType.OTHER).build();
         route = route.toBuilder().segments(List.of(route.getSegments().get(0),
                 unknownType, route.getSegments().get(2))).build();
-        assertThat(service.previewDepartureForServiceDate(route, NotificationScheduleType.FIRST_TRANSIT,
-                DATE, new java.util.HashMap<>())).isEqualTo(DATE.atTime(5, 24));
-        assertThat(service.previewDepartureForServiceDate(route, NotificationScheduleType.LAST_TRANSIT,
-                DATE, new java.util.HashMap<>())).isEqualTo(DATE.atTime(23, 34));
+        assertThat(service.previewDepartureForServiceDate(route, type,
+                DATE, new java.util.HashMap<>())).isEqualTo(
+                type == NotificationScheduleType.FIRST_TRANSIT ? DATE.atTime(5, 24) : DATE.atTime(23, 34));
         server.verify();
     }
 
