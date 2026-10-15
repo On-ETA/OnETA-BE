@@ -815,6 +815,13 @@ public class TransitScheduleService {
         List<JsonNode> ends = findOdsayBusStops(
                 segment.getEndX(), segment.getEndY(), segment.getEndStation());
         List<SeoulBusScheduleService.Schedule> matched = new ArrayList<>();
+        Map<String, List<JsonNode>> downstreamLanes = new HashMap<>();
+        for (JsonNode end : ends) {
+            String endId = end.path("stationID").asText("");
+            JsonNode details = request("/busStationInfo", Map.of("stationID", endId));
+            ensureNoOdsayError(details);
+            downstreamLanes.put(endId, odsayRows(details.path("result").path("lane")));
+        }
         // A route at the boarding stop must also appear later along that SAME
         // route ID at the alighting stop. An identical bus number is not enough.
         for (JsonNode start : starts) {
@@ -829,9 +836,7 @@ public class TransitScheduleService {
 
                 for (JsonNode end : ends) {
                     String endId = end.path("stationID").asText("");
-                    JsonNode endDetails = request("/busStationInfo", Map.of("stationID", endId));
-                    ensureNoOdsayError(endDetails);
-                    for (JsonNode endLane : odsayRows(endDetails.path("result").path("lane"))) {
+                    for (JsonNode endLane : downstreamLanes.getOrDefault(endId, List.of())) {
                         if (!busId.equals(endLane.path("busID").asText(""))
                                 || !sameBusName(endLane.path("busNo").asText(""), segment.getTransitName())
                                 || endLane.path("busStationIdx").asInt(-1) <= startOrder) continue;
