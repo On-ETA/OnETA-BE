@@ -257,10 +257,9 @@ public class NotificationService {
         userRepository.findForNotificationByEmail(email)
                 .orElseThrow(() -> new com.OnETA.common.exception.GlobalException(com.OnETA.common.error.ErrorCode.USER_NOT_FOUND));
         ArrivalNotification notification = getArrivalNotificationByEmailAndId(email, id);
-        if (Boolean.TRUE.equals(request.getIsActive())) {
-            validateNormalOperatingHours(notification.getScheduleType(), notification.getRouteDetails(),
-                    notification.getTargetArrivalTime(), notification.getRepeatDays());
-        }
+        // The route and arrival time are validated when created or updated.
+        // A status-only change must not fail just because an external timetable
+        // API is temporarily unavailable (e.g. ODsay quota exhaustion).
         notification.toggleActive(request.getIsActive());
     }
 

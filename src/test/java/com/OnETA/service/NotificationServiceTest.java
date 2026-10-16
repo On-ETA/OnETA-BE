@@ -60,22 +60,25 @@ class NotificationServiceTest {
     }
 
     @Test
-    void reactivationFailureLeavesNotificationInactive() {
+    void reactivationDoesNotFailWhenBusTimetableApiIsUnavailable() {
         when(user.getId()).thenReturn(1L);
         when(users.findByEmail("test@example.com")).thenReturn(Optional.of(user));
         var notification = new ArrivalNotification(user, "경로", List.of(10), 0,
                 LocalTime.of(1, 0), "{}", NotificationScheduleType.NORMAL);
         notification.toggleActive(false);
         when(arrivals.findById(1L)).thenReturn(Optional.of(notification));
+        // Previously T012 stopped existing schedules from being switched on.
         doThrow(new GlobalException(com.OnETA.common.error.ErrorCode.TRANSIT_NORMAL_HOURS_UNVERIFIED))
                 .when(schedules).validateNormalOperatingTime("{}", LocalTime.of(1, 0), 0);
         var request = new NotificationDto.ToggleStatusRequest();
         request.setIsActive(true);
-        assertThatThrownBy(() -> service.toggleStatus("test@example.com", 1L, request))
-                .isInstanceOf(GlobalException.class);
-        assertThat(notification.getIsActive()).isFalse();
+        assertThatCode(() -> service.toggleStatus("test@example.com", 1L, request))
+                .doesNotThrowAnyException();
+        assertThat(notification.getIsActive()).isTrue();
+        verify(schedules, never()).validateNormalOperatingTime(anyString(), any(), any());
         request.setIsActive(false);
         service.toggleStatus("test@example.com", 1L, request);
+        assertThat(notification.getIsActive()).isFalse();
     }
 
     @Test
