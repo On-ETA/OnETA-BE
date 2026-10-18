@@ -86,6 +86,10 @@ public class TransitDto {
         private String localCityCode;
         private String localStationId;
         private String localRouteId;
+        // Exact Seoul stop orders selected during direct NIGHT_ONLY discovery.
+        // Preserve them for registration when a line visits the same stops more than once.
+        private Integer seoulStartStopOrder;
+        private Integer seoulEndStopOrder;
         private String arsId;
         private String odsayEndStationId;
         private String busProviderCode;
