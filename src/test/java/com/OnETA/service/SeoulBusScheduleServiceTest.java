@@ -94,11 +94,41 @@ class SeoulBusScheduleServiceTest {
                                 + "<lastBusTm>20260919040000</lastBusTm></itemList>"),
                         MediaType.APPLICATION_XML));
         var original = route();
-        var bus = original.getSegments().get(1).toBuilder().transitName("N51").nightBus(true).build();
+        var bus = original.getSegments().get(1).toBuilder().transitName("N51(심야)").nightBus(true).build();
         var route = original.toBuilder().segments(List.of(
                 original.getSegments().get(0), bus, original.getSegments().get(2))).build();
 
         assertThat(service.verifyConditionalNightBoarding(route, DAY.atTime(2, 17))).isTrue();
+        server.verify();
+    }
+
+    @Test
+    void liveConditionalVerificationAcceptsLabelledNightLine() {
+        nearby();
+        server.expect(queryParam("strSrch", "N51"))
+                .andRespond(withSuccess(xml("<itemList><busRouteId>100100088</busRouteId>"
+                        + "<busRouteNm>N51</busRouteNm><busRouteType>3</busRouteType></itemList>"),
+                        MediaType.APPLICATION_XML));
+        server.expect(queryParam("busRouteId", "100100088"))
+                .andRespond(withSuccess(xml(
+                        "<itemList><seq>1</seq><station>100000001</station><stationNm>출발역</stationNm></itemList>"
+                                + "<itemList><seq>2</seq><station>100000002</station><stationNm>도착역</stationNm></itemList>"),
+                        MediaType.APPLICATION_XML));
+        server.expect(queryParam("busRouteId", "100100088"))
+                .andRespond(withSuccess(xml(
+                        "<itemList><stId>100000001</stId><staOrd>1</staOrd>"
+                                + "<mkTm>2026-09-18 12:00:00.0</mkTm>"
+                                + "<vehId1>111</vehId1><exps1>600</exps1></itemList>"),
+                        MediaType.APPLICATION_XML));
+
+        var original = route();
+        var bus = original.getSegments().get(1).toBuilder()
+                .transitName("N51(심야)").nightBus(true).build();
+        var kakao = original.toBuilder().segments(List.of(
+                original.getSegments().get(0), bus, original.getSegments().get(2))).build();
+
+        assertThat(service.confirmsLiveConditionalBus(kakao, DAY.atTime(12, 10),
+                DAY.atTime(12, 0))).isTrue();
         server.verify();
     }
 
