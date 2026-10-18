@@ -134,7 +134,12 @@ public class TransitScheduleService {
                     if (SeoulBusScheduleService.usesSeoulBusSchedules(route)
                             || segment.isNightBus() || TransitRouteClassifier.isNightBusName(segment.getTransitName())) {
                         if (seoulBusScheduleService == null) throw normalHoursUnverified(segment);
-                        var leg = route.toBuilder().provider("SEOUL_NIGHT").transferCount(0)
+                        // Preserve the actual source: Kakao segments do not carry Seoul
+                        // stop orders/IDs. Pretending they are direct SEOUL_NIGHT
+                        // routes masks missing data and prevents safe disambiguation.
+                        String sourceProvider = SeoulBusScheduleService.usesSeoulBusSchedules(route)
+                                ? route.getProvider() : "SEOUL_NIGHT";
+                        var leg = route.toBuilder().provider(sourceProvider).transferCount(0)
                                 .totalDurationMinutes(Math.max(1, segment.getDurationMinutes()))
                                 .segments(List.of(segment)).build();
                         var schedule = seoulBusScheduleService.resolve(leg, seoulBusScheduleService.today());

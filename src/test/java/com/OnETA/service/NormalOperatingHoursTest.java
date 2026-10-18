@@ -57,6 +57,19 @@ class NormalOperatingHoursTest {
     }
 
     @Test
+    void keepsKakaoProviderWhenCheckingNightBusHours() {
+        route("KAKAO", leg("BUS", "N51", 20));
+        when(buses.resolve(any(), any())).thenReturn(
+                schedule(day.atTime(23, 0), day.plusDays(1).atTime(5, 0)));
+
+        check("00:25", true, ErrorCode.TRANSIT_NIGHT_BUS_OUTSIDE_HOURS);
+
+        var captor = org.mockito.ArgumentCaptor.forClass(TransitDto.RouteOptionResponse.class);
+        verify(buses).resolve(captor.capture(), eq(day));
+        assertThat(captor.getValue().getProvider()).isEqualTo("KAKAO");
+    }
+
+    @Test
     void rejectsClosedSubwayTransferEvenWhenNightBusIsRunning() {
         route("KAKAO", leg("BUS", "N51", 20), leg("WALK", "", 5), leg("SUBWAY", "2호선", 20));
         when(buses.resolve(any(), any())).thenReturn(schedule(day.atTime(23, 0), day.plusDays(1).atTime(5, 0)));

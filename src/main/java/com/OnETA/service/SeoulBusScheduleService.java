@@ -239,10 +239,17 @@ public class SeoulBusScheduleService {
         String nightBusName = TransitRouteClassifier.canonicalNightBusName(originalBus.getTransitName());
         var bus = nightBusName == null ? originalBus : originalBus.toBuilder().transitName(nightBusName).build();
         if (!today().equals(day)) throw unsupported(); // API has no service-date parameter.
-        String cacheKey = day + ":" + bus.getTransitName() + ":" + bus.getStartStation() + ":"
-                + bus.getEndStation() + ":" + bus.getStartX() + ":" + bus.getStartY() + ":"
+        // Different stop orders / ARS codes on the same line must never reuse
+        // each other's resolved timetable from the 30-minute cache.
+        String cacheKey = day + ":" + route.getProvider() + ":" + bus.getTransitName() + ":"
+                + bus.getStartStation() + ":" + bus.getEndStation() + ":"
+                + bus.getStartX() + ":" + bus.getStartY() + ":"
                 + bus.getEndX() + ":" + bus.getEndY() + ":"
-                + bus.getStations().stream().map(TransitDto.RouteStation::getName).toList();
+                + bus.getArsId() + ":" + bus.getLocalRouteId() + ":"
+                + bus.getSeoulStartStopOrder() + ":" + bus.getSeoulEndStopOrder() + ":"
+                + bus.getStations().stream()
+                        .map(s -> s.getName() + ":" + s.getStationId() + ":" + s.getArsId())
+                        .toList();
         Cached cached = cache.get(cacheKey);
         if (cached != null && cached.expires().isAfter(clock.instant())) return cached.schedule();
         if (key.isBlank()) {
@@ -309,6 +316,39 @@ public class SeoulBusScheduleService {
         // mistake duplicate identical bindings for a route-direction ambiguity.
         List<Binding> matches = (exactMatches.isEmpty() ? endpointMatches : exactMatches)
                 .stream().distinct().toList();
+        if (matches.size() > 1) {
+            // Existing direct routes may predate stored absolute stop orders.
+            // Their ARS ID still identifies the boarding stop precisely.
+            String savedArs = Objects.toString(bus.getArsId(), "");
+            String savedFirstArs = Objects.toString(bus.getStations().get(0).getArsId(), "");
+            if (directNightRoute && !savedArs.isBlank() && !savedFirstArs.isBlank()
+                    && !savedArs.equals(savedFirstArs)) {
+                throw unsupported();
+            }
+            String knownArs = !savedArs.isBlank() ? savedArs : savedFirstArs;
+            if (directNightRoute && !knownArs.isBlank()) {
+                List<Binding> arsMatches = matches.stream()
+                        .filter(b -> knownArs.equals(b.arsId())).toList();
+                if (arsMatches.size() == 1) {
+                    matches = arsMatches;
+                    log.info("Seoul bus binding resolved from stored ARS: line={}, routeId={}",
+                            bus.getTransitName(), matches.get(0).routeId());
+                }
+            }
+        }
+        if (matches.size() > 1 && "KAKAO".equals(route.getProvider())) {
+            // Kakao returns stop names rather than Seoul stop IDs. Resolve only
+            // when the selected stop sequence is sufficiently complete and
+            // identifies exactly one physical segment of the Seoul route.
+            List<Binding> verified = matches.stream()
+                    .filter(b -> matchesKakaoStopSequence(bus, b))
+                    .toList();
+            if (verified.size() == 1) {
+                matches = verified;
+                log.info("Seoul bus binding resolved from Kakao stops: line={}, routeId={}, order={}",
+                        bus.getTransitName(), matches.get(0).routeId(), matches.get(0).order());
+            }
+        }
         if (matches.size() != 1) {
             log.info("Seoul bus stop binding unavailable: line={}, provider={}, start={}, end={}, exact={}, endpoints={}, selectedOrders={}/{}, candidates={}",
                     bus.getTransitName(), route.getProvider(), bus.getStartStation(), bus.getEndStation(),
@@ -638,6 +678,36 @@ public class SeoulBusScheduleService {
         } catch (RuntimeException e) {
             return null;
         }
+    }
+
+    private boolean matchesKakaoStopSequence(TransitDto.RouteSegment bus, Binding binding) {
+        List<TransitDto.RouteStation> supplied = bus.getStations();
+        if (supplied == null || supplied.size() < 4) return false;
+        List<Element> officialStops = routeStops(binding.routeId(), "route-stations");
+        List<Element> segmentStops = officialStops.stream()
+                .filter(s -> sequence(s) >= binding.order() && sequence(s) <= binding.endOrder())
+                .toList();
+        int actualCount = segmentStops.size();
+        if (actualCount != binding.endOrder() - binding.order() + 1) return false;
+        int expectedCount = supplied.size();
+        // This excludes an implausible full-loop match such as N51 29->145
+        // for a Kakao trip displaying the final 13 stops (133->145).
+        if (Math.abs(actualCount - expectedCount) > Math.max(2, expectedCount / 3)) return false;
+        int matchedInterior = 0;
+        int searchFrom = 1;
+        for (int i = 1; i < supplied.size() - 1; i++) {
+            String expectedName = normalize(supplied.get(i).getName());
+            if (expectedName.isBlank()) continue;
+            for (int j = searchFrom; j < segmentStops.size() - 1; j++) {
+                if (expectedName.equals(normalize(stationNameOf(segmentStops.get(j))))) {
+                    matchedInterior++;
+                    searchFrom = j + 1;
+                    break;
+                }
+            }
+        }
+        int interiorCount = expectedCount - 2;
+        return matchedInterior >= 2 && matchedInterior * 2 >= interiorCount;
     }
 
     private boolean sameStopSequence(TransitDto.RouteSegment bus, List<Element> stops, int first, int last) {
