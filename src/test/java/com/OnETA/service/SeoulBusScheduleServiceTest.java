@@ -110,6 +110,8 @@ class SeoulBusScheduleServiceTest {
         var bus = route.getSegments().get(1);
         assertThat(bus.getTransitName()).isEqualTo("N51");
         assertThat(bus.isNightBus()).isTrue();
+        assertThat(bus.getSeoulStartStopOrder()).isEqualTo(1);
+        assertThat(bus.getSeoulEndStopOrder()).isEqualTo(3);
         assertThat(bus.getStartStation()).isEqualTo("거리공원");
         assertThat(bus.getEndStation()).isEqualTo("홍대입구역");
         assertThat(bus.getStations()).extracting(TransitDto.RouteStation::getName)
@@ -488,6 +490,80 @@ class SeoulBusScheduleServiceTest {
         times("05:30", "23:30");
 
         assertThat(service.resolve(route(), DAY).routeId()).isEqualTo("100100088");
+        server.verify();
+    }
+
+    @Test
+    void selectedNightStopOrdersResolveAmbiguousRepeatedStopIds() {
+        nearby();
+        server.expect(queryParam("strSrch", "N51"))
+                .andRespond(withSuccess(xml("<itemList><busRouteId>117000002</busRouteId>"
+                        + "<busRouteNm>N51</busRouteNm><busRouteType>3</busRouteType></itemList>"),
+                        MediaType.APPLICATION_XML));
+        server.expect(queryParam("busRouteId", "117000002"))
+                .andRespond(withSuccess(xml(
+                        "<itemList><seq>1</seq><station>100000001</station><stationNm>출발역</stationNm>"
+                                + "<arsId>01001</arsId></itemList>"
+                                + "<itemList><seq>2</seq><station>100000003</station><stationNm>중간A</stationNm></itemList>"
+                                + "<itemList><seq>3</seq><station>100000002</station><stationNm>도착역</stationNm></itemList>"
+                                + "<itemList><seq>4</seq><station>100000004</station><stationNm>회차</stationNm></itemList>"
+                                + "<itemList><seq>5</seq><station>100000001</station><stationNm>출발역</stationNm>"
+                                + "<arsId>01001</arsId></itemList>"
+                                + "<itemList><seq>6</seq><station>100000005</station><stationNm>중간B</stationNm></itemList>"
+                                + "<itemList><seq>7</seq><station>100000002</station><stationNm>도착역</stationNm></itemList>"),
+                        MediaType.APPLICATION_XML));
+        server.expect(queryParam("arsId", "01001"))
+                .andExpect(queryParam("busRouteId", "117000002"))
+                .andRespond(withSuccess(xml("<itemList><arsId>01001</arsId><busRouteId>117000002</busRouteId>"
+                        + "<firstBusTm>23:00</firstBusTm><lastBusTm>05:00</lastBusTm></itemList>"),
+                        MediaType.APPLICATION_XML));
+        var original = route();
+        var bus = original.getSegments().get(1).toBuilder()
+                .transitName("N51").nightBus(true).localRouteId("117000002")
+                .seoulStartStopOrder(5).seoulEndStopOrder(7)
+                .stations(List.of(
+                        TransitDto.RouteStation.builder().name("출발역").stationId("100000001").build(),
+                        TransitDto.RouteStation.builder().name("도착역").stationId("100000002").build()))
+                .build();
+        var selected = original.toBuilder().provider("SEOUL_NIGHT")
+                .segments(List.of(original.getSegments().get(0), bus, original.getSegments().get(2)))
+                .build();
+
+        var schedule = service.resolve(selected, DAY);
+
+        assertThat(schedule.order()).isEqualTo(5);
+        assertThat(schedule.endOrder()).isEqualTo(7);
+        server.verify();
+    }
+
+    @Test
+    void rejectsRepeatedStopsWithoutSavedOrdersInsteadOfGuessingDirection() {
+        nearby();
+        server.expect(queryParam("strSrch", "N51"))
+                .andRespond(withSuccess(xml("<itemList><busRouteId>117000002</busRouteId>"
+                        + "<busRouteNm>N51</busRouteNm><busRouteType>3</busRouteType></itemList>"),
+                        MediaType.APPLICATION_XML));
+        server.expect(queryParam("busRouteId", "117000002"))
+                .andRespond(withSuccess(xml(
+                        "<itemList><seq>1</seq><station>100000001</station><stationNm>출발역</stationNm></itemList>"
+                                + "<itemList><seq>2</seq><station>100000003</station><stationNm>중간A</stationNm></itemList>"
+                                + "<itemList><seq>3</seq><station>100000002</station><stationNm>도착역</stationNm></itemList>"
+                                + "<itemList><seq>4</seq><station>100000001</station><stationNm>출발역</stationNm></itemList>"
+                                + "<itemList><seq>5</seq><station>100000004</station><stationNm>중간B</stationNm></itemList>"
+                                + "<itemList><seq>6</seq><station>100000002</station><stationNm>도착역</stationNm></itemList>"),
+                        MediaType.APPLICATION_XML));
+        var original = route();
+        var bus = original.getSegments().get(1).toBuilder()
+                .transitName("N51").nightBus(true).localRouteId("117000002")
+                .stations(List.of(
+                        TransitDto.RouteStation.builder().name("출발역").stationId("100000001").build(),
+                        TransitDto.RouteStation.builder().name("도착역").stationId("100000002").build()))
+                .build();
+        var unresolved = original.toBuilder().provider("SEOUL_NIGHT")
+                .segments(List.of(original.getSegments().get(0), bus, original.getSegments().get(2)))
+                .build();
+
+        assertUnsupported(() -> service.resolve(unresolved, DAY));
         server.verify();
     }
 
