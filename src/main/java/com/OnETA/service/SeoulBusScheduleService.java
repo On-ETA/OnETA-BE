@@ -330,9 +330,12 @@ public class SeoulBusScheduleService {
      */
     public synchronized boolean verifyConditionalNightBoarding(
             TransitDto.RouteOptionResponse route, LocalDateTime boarding) {
-        TransitDto.RouteSegment bus = singleBus(route);
-        if (TransitRouteClassifier.canonicalNightBusName(bus.getTransitName()) == null
-                || !today().equals(LocalDate.now(clock))) throw unsupported();
+        TransitDto.RouteSegment originalBus = singleBus(route);
+        String nightBusName = TransitRouteClassifier.canonicalNightBusName(originalBus.getTransitName());
+        if (nightBusName == null || !today().equals(LocalDate.now(clock))) throw unsupported();
+        // Keep labelled Kakao names (e.g. N51(심야)) consistent with the
+        // canonical Seoul bus route name when binding stops and route info.
+        TransitDto.RouteSegment bus = originalBus.toBuilder().transitName(nightBusName).build();
         Binding binding = verifiedBinding(route, bus);
         // Only missing fields permit conditional registration. A valid timetable
         // that failed some other validation must not enter this fallback.
@@ -387,7 +390,10 @@ public class SeoulBusScheduleService {
     public synchronized boolean confirmsLiveConditionalBus(
             TransitDto.RouteOptionResponse route, LocalDateTime expectedBoarding,
             LocalDateTime now) {
-        TransitDto.RouteSegment bus = singleBus(route);
+        TransitDto.RouteSegment originalBus = singleBus(route);
+        String nightBusName = TransitRouteClassifier.canonicalNightBusName(originalBus.getTransitName());
+        TransitDto.RouteSegment bus = nightBusName == null
+                ? originalBus : originalBus.toBuilder().transitName(nightBusName).build();
         Binding binding = verifiedBinding(route, bus);
         Schedule stop = new Schedule(binding.stationId(), binding.arsId(),
                 binding.routeId(), null, null, binding.order(),
