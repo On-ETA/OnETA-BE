@@ -397,6 +397,113 @@ public class SeoulBusScheduleService {
                         && Math.abs(Duration.between(expectedBoarding, vehicle.boarding()).toMinutes()) <= 10);
     }
 
+    /** Identifies the exact physical boarding stop and direction. */
+    private Binding verifiedBinding(TransitDto.RouteOptionResponse route,
+                                    TransitDto.RouteSegment bus) {
+        // Direct NIGHT_ONLY routes were built from Seoul API stop IDs. Prefer those
+        // IDs over display names, which can differ across the two Seoul endpoints.
+        boolean directNightRoute = "SEOUL_NIGHT".equals(route.getProvider());
+        String startId = directNightRoute ? bus.getStations().get(0).getStationId() : null;
+        String endId = directNightRoute ? bus.getStations().get(bus.getStations().size() - 1).getStationId() : null;
+        List<Element> starts = nearby(bus.getStartStation(), bus.getStartX(), bus.getStartY(), startId);
+        List<Element> ends = nearby(bus.getEndStation(), bus.getEndX(), bus.getEndY(), endId);
+        String knownRouteId = directNightRoute ? bus.getLocalRouteId() : null;
+        Integer chosenStartOrder = directNightRoute ? bus.getSeoulStartStopOrder() : null;
+        Integer chosenEndOrder = directNightRoute ? bus.getSeoulEndStopOrder() : null;
+        // Partial stop-order metadata cannot identify a unique direction.
+        if ((chosenStartOrder == null) != (chosenEndOrder == null)) throw unsupported();
+        List<RouteSeed> routes = routeCandidates(bus.getTransitName()).stream()
+                .filter(candidate -> normalize(candidate.routeName()).equals(normalize(bus.getTransitName())))
+                .filter(candidate -> candidate.routeType().isBlank()
+                        || Set.of("2", "3", "4", "5", "6").contains(candidate.routeType()))
+                .filter(candidate -> knownRouteId == null || knownRouteId.isBlank()
+                        || knownRouteId.equals(candidate.routeId()))
+                .toList();
+
+        List<Binding> exactMatches = new ArrayList<>();
+        List<Binding> endpointMatches = new ArrayList<>();
+        for (Element start : starts) {
+            String ars = text(start, "arsId");
+            for (RouteSeed candidate : routes) {
+                String routeId = candidate.routeId();
+                List<Element> stops = routeStops(routeId, "route-stations");
+                for (int i = 0; i < stops.size(); i++) {
+                    if (!stationIdOf(stops.get(i)).equals(stationIdOf(start))) continue;
+                    if (chosenStartOrder != null && sequence(stops.get(i)) != chosenStartOrder) continue;
+                    // The route-stop ARS code identifies the physical boarding point.
+                    // Prefer it over an alternate code returned by nearby-stop lookup.
+                    String routeStopArs = text(stops.get(i), "arsId");
+                    if (directNightRoute && !routeStopArs.isBlank() && !routeStopArs.equals(ars)) continue;
+                    for (int last = i + 1; last < stops.size(); last++) {
+                        if (sequence(stops.get(last)) != sequence(stops.get(last - 1)) + 1) break;
+                        if (chosenEndOrder != null && sequence(stops.get(last)) != chosenEndOrder) continue;
+                        for (Element end : ends) {
+                            if (!stationIdOf(stops.get(last)).equals(stationIdOf(end))) continue;
+                            Binding binding = new Binding(stationIdOf(start), ars, routeId,
+                                    sequence(stops.get(i)), stationIdOf(end), sequence(stops.get(last)));
+                            endpointMatches.add(binding);
+                            if (sameStopSequence(bus, stops, i, last)) exactMatches.add(binding);
+                        }
+                    }
+                }
+            }
+        }
+        // Keep the complete stop sequence when available. If the provider used
+        // different intermediate stop labels/counts, accept ONLY one uniquely
+        // verified forward trip on the same Seoul line between both real stops.
+        // Nearby-stop responses can repeat the same physical stop. Do not
+        // mistake duplicate identical bindings for a route-direction ambiguity.
+        List<Binding> matches = (exactMatches.isEmpty() ? endpointMatches : exactMatches)
+                .stream().distinct().toList();
+        if (matches.size() > 1) {
+            // Existing direct routes may predate stored absolute stop orders.
+            // Their ARS ID still identifies the boarding stop precisely.
+            String savedArs = Objects.toString(bus.getArsId(), "");
+            String savedFirstArs = Objects.toString(bus.getStations().get(0).getArsId(), "");
+            if (directNightRoute && !savedArs.isBlank() && !savedFirstArs.isBlank()
+                    && !savedArs.equals(savedFirstArs)) {
+                throw unsupported();
+            }
+            String knownArs = !savedArs.isBlank() ? savedArs : savedFirstArs;
+            if (directNightRoute && !knownArs.isBlank()) {
+                List<Binding> arsMatches = matches.stream()
+                        .filter(b -> knownArs.equals(b.arsId())).toList();
+                if (arsMatches.size() == 1) {
+                    matches = arsMatches;
+                    log.info("Seoul bus binding resolved from stored ARS: line={}, routeId={}",
+                            bus.getTransitName(), matches.get(0).routeId());
+                }
+            }
+        }
+        if (matches.size() > 1 && "KAKAO".equals(route.getProvider())) {
+            // Kakao returns stop names rather than Seoul stop IDs. Resolve only
+            // when the selected stop sequence is sufficiently complete and
+            // identifies exactly one physical segment of the Seoul route.
+            List<Binding> verified = matches.stream()
+                    .filter(b -> matchesKakaoStopSequence(bus, b))
+                    .toList();
+            if (verified.size() == 1) {
+                matches = verified;
+                log.info("Seoul bus binding resolved from Kakao stops: line={}, routeId={}, order={}",
+                        bus.getTransitName(), matches.get(0).routeId(), matches.get(0).order());
+            }
+        }
+        if (matches.size() != 1) {
+            log.info("Seoul bus stop binding unavailable: line={}, provider={}, start={}, end={}, exact={}, endpoints={}, selectedOrders={}/{}, candidates={}",
+                    bus.getTransitName(), route.getProvider(), bus.getStartStation(), bus.getEndStation(),
+                    exactMatches.size(), endpointMatches.size(), chosenStartOrder, chosenEndOrder,
+                    matches.stream().limit(8)
+                            .map(b -> b.routeId() + ":" + b.order() + "-" + b.endOrder() + ":" + b.arsId())
+                            .toList());
+            throw unsupported();
+        }
+        if (exactMatches.isEmpty()) {
+            log.info("Seoul bus stop binding used verified endpoints: line={}, provider={}, routeId={}",
+                    bus.getTransitName(), route.getProvider(), matches.get(0).routeId());
+        }
+        return matches.get(0);
+    }
+
     /** Route-wide arrivals include vehicle IDs, current sections and predictions at both stops. */
     public synchronized List<LiveBus> arrivals(Schedule schedule, LocalDateTime now) {
         if (schedule.order() <= 0) return List.of();
