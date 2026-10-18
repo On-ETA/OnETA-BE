@@ -74,7 +74,7 @@ public class TransitScheduleService {
     }
 
     /** Registration validation only: search results and first/last scheduling remain unchanged. */
-    public void validateNormalOperatingTime(String details, LocalTime arrivalTime, Integer repeatDays) {
+    public boolean validateNormalOperatingTime(String details, LocalTime arrivalTime, Integer repeatDays) {
         var route = transitApiService.readSavedRoute(details);
         if (arrivalTime == null || route.getSegments() == null || route.getSegments().isEmpty()) {
             throw normalHoursUnverified(null);
@@ -105,6 +105,7 @@ public class TransitScheduleService {
         Map<String, TransitOperatingWindow> windows = new HashMap<>();
         Map<String, LocalDateTime> scheduleCache = new HashMap<>();
         boolean oneTime = repeatDays == null || repeatDays == 0;
+        boolean conditionalNightBus = false;
         for (int d = 0; d < (oneTime ? 1 : 7); d++) {
             LocalDate date = firstDate.plusDays(d);
             if (!oneTime && (repeatDays & (1 << (date.getDayOfWeek().getValue() - 1))) == 0) continue;
@@ -114,15 +115,16 @@ public class TransitScheduleService {
                 var segment = segments.get(i);
                 boarding = boarding.minusMinutes(segment.getDurationMinutes());
                 if (!"WALK".equals(segment.getTransitType())) {
-                    validateNormalBoarding(route, segment, i, boarding, windows, scheduleCache);
+                    conditionalNightBus |= validateNormalBoarding(route, segment, i, boarding, windows, scheduleCache);
                     boarding = boarding.minusMinutes(segment.getScheduledWaitMinutes() == null
                             ? 0 : segment.getScheduledWaitMinutes());
                 }
             }
         }
+        return conditionalNightBus;
     }
 
-    private void validateNormalBoarding(TransitDto.RouteOptionResponse route, TransitDto.RouteSegment segment,
+    private boolean validateNormalBoarding(TransitDto.RouteOptionResponse route, TransitDto.RouteSegment segment,
                                         int index, LocalDateTime boarding,
                                         Map<String, TransitOperatingWindow> windows,
                                         Map<String, LocalDateTime> scheduleCache) {
@@ -142,8 +144,21 @@ public class TransitScheduleService {
                         var leg = route.toBuilder().provider(sourceProvider).transferCount(0)
                                 .totalDurationMinutes(Math.max(1, segment.getDurationMinutes()))
                                 .segments(List.of(segment)).build();
-                        var schedule = seoulBusScheduleService.resolve(leg, seoulBusScheduleService.today());
-                        window = checkedNormalWindow(schedule.first(), schedule.last(), segment);
+                        try {
+                            var schedule = seoulBusScheduleService.resolve(leg, seoulBusScheduleService.today());
+                            window = checkedNormalWindow(schedule.first(), schedule.last(), segment);
+                        } catch (com.OnETA.common.exception.GlobalException e) {
+                            // Only an explicitly missing N-bus stop timetable can
+                            // use the official route-hours conditional policy.
+                            if (e.getErrorCode() != com.OnETA.common.error.ErrorCode.TRANSIT_SCHEDULE_UNSUPPORTED
+                                    || !TransitRouteClassifier.isNightBusName(segment.getTransitName())) {
+                                throw e;
+                            }
+                            if (!seoulBusScheduleService.verifyConditionalNightBoarding(leg, boarding)) {
+                                throw normalOutsideHours(segment);
+                            }
+                            return true;
+                        }
                     } else {
                         if (segment.getOdsayStartStationId() == null
                                 || (segment.getOdsayRouteId() == null && segment.getLocalRouteId() == null)) {
@@ -163,16 +178,16 @@ public class TransitScheduleService {
                         ? !at.isBefore(first) || !at.isAfter(last)
                         : !at.isBefore(first) && !at.isAfter(last);
                 if (!within) throw normalOutsideHours(segment);
-                return;
+                return false;
             }
             // A post-midnight train may still belong to the preceding service day's timetable.
             LocalDate day = boarding.toLocalDate();
             TransitOperatingWindow current = normalSubwayWindow(route, segment, index, day, windows, scheduleCache);
-            if (!boarding.isBefore(current.first()) && !boarding.isAfter(current.last())) return;
+            if (!boarding.isBefore(current.first()) && !boarding.isAfter(current.last())) return false;
             if (boarding.isBefore(current.first())) {
                 TransitOperatingWindow previous = normalSubwayWindow(route, segment, index,
                         day.minusDays(1), windows, scheduleCache);
-                if (!boarding.isBefore(previous.first()) && !boarding.isAfter(previous.last())) return;
+                if (!boarding.isBefore(previous.first()) && !boarding.isAfter(previous.last())) return false;
             }
             throw normalOutsideHours(segment);
         } catch (com.OnETA.common.exception.GlobalException e) {
@@ -185,6 +200,43 @@ public class TransitScheduleService {
             log.warn("Normal route timetable verification failed: line={}, exception={}",
                     segment.getTransitName(), e.getClass().getSimpleName());
             throw normalHoursUnverified(segment);
+        }
+    }
+
+    /**
+     * Before delivering a conditional N-bus reminder, require a fresh matching
+     * live vehicle at the exact selected stop; fail closed on API errors.
+     * Departure is the user's origin departure, before the first walking leg.
+     */
+    public boolean confirmConditionalNightBusLive(String details, LocalDateTime departureUtc) {
+        if (seoulBusScheduleService == null || departureUtc == null) return false;
+        try {
+            var route = transitApiService.readSavedRoute(details);
+            LocalDateTime now = LocalDateTime.ofInstant(clock.instant(), ZoneId.of("Asia/Seoul"));
+            LocalDateTime expected = departureUtc.atZone(ZoneOffset.UTC)
+                    .withZoneSameInstant(ZoneId.of("Asia/Seoul")).toLocalDateTime();
+            int verified = 0;
+            for (var segment : route.getSegments()) {
+                if (segment == null || segment.getDurationMinutes() == null) return false;
+                if ("BUS".equals(segment.getTransitType())
+                        && TransitRouteClassifier.isNightBusName(segment.getTransitName())) {
+                    var leg = route.toBuilder()
+                            .transferCount(0)
+                            .totalDurationMinutes(Math.max(1, segment.getDurationMinutes()))
+                            .segments(List.of(segment)).build();
+                    if (!seoulBusScheduleService.confirmsLiveConditionalBus(leg, expected, now)) {
+                        return false;
+                    }
+                    verified++;
+                }
+                expected = expected.plusMinutes(segment.getDurationMinutes()
+                        + (segment.getScheduledWaitMinutes() == null ? 0 : segment.getScheduledWaitMinutes()));
+            }
+            return verified > 0;
+        } catch (RuntimeException e) {
+            log.info("Conditional N-bus live verification unavailable: reason={}",
+                    e.getClass().getSimpleName());
+            return false;
         }
     }
 
