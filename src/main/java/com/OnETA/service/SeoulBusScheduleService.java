@@ -261,108 +261,7 @@ public class SeoulBusScheduleService {
             throw unavailable();
         }
 
-        // Direct NIGHT_ONLY routes were built from Seoul API stop IDs. Prefer those
-        // IDs over display names, which can differ across the two Seoul endpoints.
-        boolean directNightRoute = "SEOUL_NIGHT".equals(route.getProvider());
-        String startId = directNightRoute ? bus.getStations().get(0).getStationId() : null;
-        String endId = directNightRoute ? bus.getStations().get(bus.getStations().size() - 1).getStationId() : null;
-        List<Element> starts = nearby(bus.getStartStation(), bus.getStartX(), bus.getStartY(), startId);
-        List<Element> ends = nearby(bus.getEndStation(), bus.getEndX(), bus.getEndY(), endId);
-        String knownRouteId = directNightRoute ? bus.getLocalRouteId() : null;
-        Integer chosenStartOrder = directNightRoute ? bus.getSeoulStartStopOrder() : null;
-        Integer chosenEndOrder = directNightRoute ? bus.getSeoulEndStopOrder() : null;
-        // Partial stop-order metadata cannot identify a unique direction.
-        if ((chosenStartOrder == null) != (chosenEndOrder == null)) throw unsupported();
-        List<RouteSeed> routes = routeCandidates(bus.getTransitName()).stream()
-                .filter(candidate -> normalize(candidate.routeName()).equals(normalize(bus.getTransitName())))
-                .filter(candidate -> candidate.routeType().isBlank()
-                        || Set.of("2", "3", "4", "5", "6").contains(candidate.routeType()))
-                .filter(candidate -> knownRouteId == null || knownRouteId.isBlank()
-                        || knownRouteId.equals(candidate.routeId()))
-                .toList();
-
-        List<Binding> exactMatches = new ArrayList<>();
-        List<Binding> endpointMatches = new ArrayList<>();
-        for (Element start : starts) {
-            String ars = text(start, "arsId");
-            for (RouteSeed candidate : routes) {
-                String routeId = candidate.routeId();
-                List<Element> stops = routeStops(routeId, "route-stations");
-                for (int i = 0; i < stops.size(); i++) {
-                    if (!stationIdOf(stops.get(i)).equals(stationIdOf(start))) continue;
-                    if (chosenStartOrder != null && sequence(stops.get(i)) != chosenStartOrder) continue;
-                    // The route-stop ARS code identifies the physical boarding point.
-                    // Prefer it over an alternate code returned by nearby-stop lookup.
-                    String routeStopArs = text(stops.get(i), "arsId");
-                    if (directNightRoute && !routeStopArs.isBlank() && !routeStopArs.equals(ars)) continue;
-                    for (int last = i + 1; last < stops.size(); last++) {
-                        if (sequence(stops.get(last)) != sequence(stops.get(last - 1)) + 1) break;
-                        if (chosenEndOrder != null && sequence(stops.get(last)) != chosenEndOrder) continue;
-                        for (Element end : ends) {
-                            if (!stationIdOf(stops.get(last)).equals(stationIdOf(end))) continue;
-                            Binding binding = new Binding(stationIdOf(start), ars, routeId,
-                                    sequence(stops.get(i)), stationIdOf(end), sequence(stops.get(last)));
-                            endpointMatches.add(binding);
-                            if (sameStopSequence(bus, stops, i, last)) exactMatches.add(binding);
-                        }
-                    }
-                }
-            }
-        }
-        // Keep the complete stop sequence when available. If the provider used
-        // different intermediate stop labels/counts, accept ONLY one uniquely
-        // verified forward trip on the same Seoul line between both real stops.
-        // Nearby-stop responses can repeat the same physical stop. Do not
-        // mistake duplicate identical bindings for a route-direction ambiguity.
-        List<Binding> matches = (exactMatches.isEmpty() ? endpointMatches : exactMatches)
-                .stream().distinct().toList();
-        if (matches.size() > 1) {
-            // Existing direct routes may predate stored absolute stop orders.
-            // Their ARS ID still identifies the boarding stop precisely.
-            String savedArs = Objects.toString(bus.getArsId(), "");
-            String savedFirstArs = Objects.toString(bus.getStations().get(0).getArsId(), "");
-            if (directNightRoute && !savedArs.isBlank() && !savedFirstArs.isBlank()
-                    && !savedArs.equals(savedFirstArs)) {
-                throw unsupported();
-            }
-            String knownArs = !savedArs.isBlank() ? savedArs : savedFirstArs;
-            if (directNightRoute && !knownArs.isBlank()) {
-                List<Binding> arsMatches = matches.stream()
-                        .filter(b -> knownArs.equals(b.arsId())).toList();
-                if (arsMatches.size() == 1) {
-                    matches = arsMatches;
-                    log.info("Seoul bus binding resolved from stored ARS: line={}, routeId={}",
-                            bus.getTransitName(), matches.get(0).routeId());
-                }
-            }
-        }
-        if (matches.size() > 1 && "KAKAO".equals(route.getProvider())) {
-            // Kakao returns stop names rather than Seoul stop IDs. Resolve only
-            // when the selected stop sequence is sufficiently complete and
-            // identifies exactly one physical segment of the Seoul route.
-            List<Binding> verified = matches.stream()
-                    .filter(b -> matchesKakaoStopSequence(bus, b))
-                    .toList();
-            if (verified.size() == 1) {
-                matches = verified;
-                log.info("Seoul bus binding resolved from Kakao stops: line={}, routeId={}, order={}",
-                        bus.getTransitName(), matches.get(0).routeId(), matches.get(0).order());
-            }
-        }
-        if (matches.size() != 1) {
-            log.info("Seoul bus stop binding unavailable: line={}, provider={}, start={}, end={}, exact={}, endpoints={}, selectedOrders={}/{}, candidates={}",
-                    bus.getTransitName(), route.getProvider(), bus.getStartStation(), bus.getEndStation(),
-                    exactMatches.size(), endpointMatches.size(), chosenStartOrder, chosenEndOrder,
-                    matches.stream().limit(8)
-                            .map(b -> b.routeId() + ":" + b.order() + "-" + b.endOrder() + ":" + b.arsId())
-                            .toList());
-            throw unsupported();
-        }
-        if (exactMatches.isEmpty()) {
-            log.info("Seoul bus stop binding used verified endpoints: line={}, provider={}, routeId={}",
-                    bus.getTransitName(), route.getProvider(), matches.get(0).routeId());
-        }
-        Binding binding = matches.get(0);
+        Binding binding = verifiedBinding(route, bus);
         List<Element> times = request("/stationinfo/getBustimeByStation",
                 Map.of("arsId", binding.arsId(), "busRouteId", binding.routeId()), "stations").stream()
                 .filter(e -> binding.arsId().equals(text(e, "arsId"))
@@ -419,6 +318,83 @@ public class SeoulBusScheduleService {
         if (cache.size() >= 1000) cache.clear();
         cache.put(cacheKey, new Cached(schedule, clock.instant().plus(Duration.ofMinutes(30))));
         return schedule;
+    }
+
+
+    /**
+     * Registration-only fallback for Seoul N routes with explicitly absent
+     * stop-level timetable. Route-level depot hours are *not* substituted for
+     * the stop's times: this grants conditional registration only.
+     * Caller still rejects clearly daytime boarding and requires live evidence
+     * before sending a push.
+     */
+    public synchronized boolean verifyConditionalNightBoarding(
+            TransitDto.RouteOptionResponse route, LocalDateTime boarding) {
+        TransitDto.RouteSegment bus = singleBus(route);
+        if (TransitRouteClassifier.canonicalNightBusName(bus.getTransitName()) == null
+                || !today().equals(LocalDate.now(clock))) throw unsupported();
+        Binding binding = verifiedBinding(route, bus);
+        // Only missing fields permit conditional registration. A valid timetable
+        // that failed some other validation must not enter this fallback.
+        List<Element> stationTimes = request("/stationinfo/getBustimeByStation",
+                Map.of("arsId", binding.arsId(), "busRouteId", binding.routeId()), "stations").stream()
+                .filter(e -> binding.arsId().equals(text(e, "arsId"))
+                        && binding.routeId().equals(text(e, "busRouteId"))).toList();
+        if (!stationTimes.isEmpty()) {
+            if (stationTimes.size() != 1
+                    || !isAbsentClock(text(stationTimes.get(0), "firstBusTm"))
+                    || !isAbsentClock(text(stationTimes.get(0), "lastBusTm"))) throw unsupported();
+        }
+        List<Element> routeStop = routeStops(binding.routeId(), "route-stations").stream()
+                .filter(e -> sequence(e) == binding.order()
+                        && binding.stationId().equals(stationIdOf(e))).toList();
+        if (routeStop.size() != 1
+                || !isAbsentClock(text(routeStop.get(0), "beginTm"))
+                || !isAbsentClock(text(routeStop.get(0), "lastTm"))) throw unsupported();
+
+        List<Element> routeInfo = request("/busRouteInfo/getRouteInfo",
+                Map.of("busRouteId", binding.routeId()), "route-info").stream()
+                .filter(e -> binding.routeId().equals(text(e, "busRouteId"))
+                        && normalize(bus.getTransitName()).equals(normalize(text(e, "busRouteNm"))))
+                .toList();
+        if (routeInfo.size() != 1) throw unsupported();
+        LocalDateTime first = parseTime(text(routeInfo.get(0), "firstBusTm"), today());
+        LocalDateTime last = parseTime(text(routeInfo.get(0), "lastBusTm"), today());
+        // A route-wide timetable merely establishes that this is a scheduled
+        // nighttime service. It cannot prove a particular stop-level departure.
+        if (!isNightClock(first.toLocalTime()) && !isNightClock(last.toLocalTime()))
+            throw unsupported();
+
+        LocalTime at = boarding.toLocalTime();
+        boolean nightWindow = !at.isBefore(LocalTime.of(21, 0))
+                || at.isBefore(LocalTime.of(7, 0));
+        if (nightWindow) {
+            log.info("Seoul night route conditionally registered: line={}, routeId={}, order={}, boardTime={}",
+                    bus.getTransitName(), binding.routeId(), binding.order(), at);
+        }
+        return nightWindow;
+    }
+
+    private static boolean isAbsentClock(String value) {
+        return value == null || value.isBlank() || value.matches("[:\\\\s]+");
+    }
+
+    private static boolean isNightClock(LocalTime time) {
+        return !time.isBefore(LocalTime.of(20, 0)) || time.isBefore(LocalTime.of(8, 0));
+    }
+
+    /** Fail closed without a fresh vehicle predicted at the selected stop. */
+    public synchronized boolean confirmsLiveConditionalBus(
+            TransitDto.RouteOptionResponse route, LocalDateTime expectedBoarding,
+            LocalDateTime now) {
+        TransitDto.RouteSegment bus = singleBus(route);
+        Binding binding = verifiedBinding(route, bus);
+        Schedule stop = new Schedule(binding.stationId(), binding.arsId(),
+                binding.routeId(), null, null, binding.order(),
+                binding.endStationId(), binding.endOrder());
+        return arrivals(stop, now).stream()
+                .anyMatch(vehicle -> vehicle.boarding().isAfter(now)
+                        && Math.abs(Duration.between(expectedBoarding, vehicle.boarding()).toMinutes()) <= 10);
     }
 
     /** Route-wide arrivals include vehicle IDs, current sections and predictions at both stops. */
