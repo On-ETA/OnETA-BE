@@ -412,6 +412,86 @@ class SeoulBusScheduleServiceTest {
     }
 
     @Test
+    void usesVerifiedRouteStopTimesWhenStationTimeApiHasNoMatchingRows() {
+        nearby();
+        server.expect(queryParam("strSrch", "N51"))
+                .andRespond(withSuccess(xml("<itemList><busRouteId>117000002</busRouteId>"
+                        + "<busRouteNm>N51</busRouteNm><busRouteType>3</busRouteType></itemList>"),
+                        MediaType.APPLICATION_XML));
+        server.expect(queryParam("busRouteId", "117000002"))
+                .andRespond(withSuccess(xml(
+                        "<itemList><seq>1</seq><station>100000001</station><stationNm>출발역</stationNm>"
+                                + "<arsId>01001</arsId><busRouteId>117000002</busRouteId>"
+                                + "<beginTm>23:40</beginTm><lastTm>03:35</lastTm></itemList>"
+                                + "<itemList><seq>2</seq><station>100000002</station><stationNm>도착역</stationNm>"
+                                + "<arsId>01002</arsId><busRouteId>117000002</busRouteId>"
+                                + "<beginTm>00:05</beginTm><lastTm>04:00</lastTm></itemList>"),
+                        MediaType.APPLICATION_XML));
+        server.expect(queryParam("arsId", "01001"))
+                .andExpect(queryParam("busRouteId", "117000002"))
+                .andRespond(withSuccess(xml(""), MediaType.APPLICATION_XML));
+
+        var original = route();
+        var bus = original.getSegments().get(1).toBuilder().transitName("N51").nightBus(true).build();
+        var n51 = original.toBuilder().segments(List.of(original.getSegments().get(0), bus,
+                original.getSegments().get(2))).build();
+
+        var result = service.resolve(n51, DAY);
+
+        assertThat(result.first()).isEqualTo(DAY.atTime(23, 40));
+        assertThat(result.last()).isEqualTo(DAY.plusDays(1).atTime(3, 35));
+        assertThat(result.routeId()).isEqualTo("117000002");
+        server.verify();
+    }
+
+    @Test
+    void refusesUnverifiedTimetableWhenBothApisLackStopTimes() {
+        nearby();
+        server.expect(queryParam("strSrch", "N51"))
+                .andRespond(withSuccess(xml("<itemList><busRouteId>117000002</busRouteId>"
+                        + "<busRouteNm>N51</busRouteNm><busRouteType>3</busRouteType></itemList>"),
+                        MediaType.APPLICATION_XML));
+        server.expect(queryParam("busRouteId", "117000002"))
+                .andRespond(withSuccess(xml(
+                        "<itemList><seq>1</seq><station>100000001</station><stationNm>출발역</stationNm></itemList>"
+                                + "<itemList><seq>2</seq><station>100000002</station><stationNm>도착역</stationNm></itemList>"),
+                        MediaType.APPLICATION_XML));
+        server.expect(queryParam("arsId", "01001"))
+                .andExpect(queryParam("busRouteId", "117000002"))
+                .andRespond(withSuccess(xml(""), MediaType.APPLICATION_XML));
+        var original = route();
+        var bus = original.getSegments().get(1).toBuilder().transitName("N51").nightBus(true).build();
+
+        assertUnsupported(() -> service.resolve(original.toBuilder()
+                .segments(List.of(original.getSegments().get(0), bus, original.getSegments().get(2)))
+                .build(), DAY));
+        server.verify();
+    }
+
+    @Test
+    void repeatedSameStationRecordDoesNotProduceFalseAmbiguity() {
+        String duplicate = station("100000001", "01001", "출발역", "126.95", "37.55");
+        server.expect(queryParam("tmX", "126.95")).andExpect(queryParam("radius", "100"))
+                .andRespond(withSuccess(xml(duplicate + duplicate), MediaType.APPLICATION_XML));
+        server.expect(queryParam("tmX", "126.96"))
+                .andRespond(withSuccess(xml(station("100000002", "01002", "도착역",
+                        "126.96", "37.56")), MediaType.APPLICATION_XML));
+        server.expect(queryParam("strSrch", "603"))
+                .andRespond(withSuccess(xml("<itemList><busRouteId>100100088</busRouteId>"
+                        + "<busRouteNm>603</busRouteNm><busRouteType>3</busRouteType></itemList>"),
+                        MediaType.APPLICATION_XML));
+        server.expect(queryParam("busRouteId", "100100088"))
+                .andRespond(withSuccess(xml(
+                        "<itemList><seq>1</seq><station>100000001</station><stationNm>출발역</stationNm></itemList>"
+                                + "<itemList><seq>2</seq><station>100000002</station><stationNm>도착역</stationNm></itemList>"),
+                        MediaType.APPLICATION_XML));
+        times("05:30", "23:30");
+
+        assertThat(service.resolve(route(), DAY).routeId()).isEqualTo("100100088");
+        server.verify();
+    }
+
+    @Test
     void resolvesExactDirectionAndCachesCurrentDaySchedule() {
         mapping(false, "3"); times("20260918053000", "20260919003000");
         var schedule = service.resolve(route(), DAY);
