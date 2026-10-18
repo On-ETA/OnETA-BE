@@ -376,7 +376,7 @@ public class SeoulBusScheduleService {
     }
 
     private static boolean isAbsentClock(String value) {
-        return value == null || value.isBlank() || value.matches("[:\\\\s]+");
+        return value == null || value.isBlank() || value.replace(":", "").isBlank();
     }
 
     private static boolean isNightClock(LocalTime time) {
