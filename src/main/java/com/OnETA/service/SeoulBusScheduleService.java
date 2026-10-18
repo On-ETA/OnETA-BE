@@ -262,6 +262,10 @@ public class SeoulBusScheduleService {
         List<Element> starts = nearby(bus.getStartStation(), bus.getStartX(), bus.getStartY(), startId);
         List<Element> ends = nearby(bus.getEndStation(), bus.getEndX(), bus.getEndY(), endId);
         String knownRouteId = directNightRoute ? bus.getLocalRouteId() : null;
+        Integer chosenStartOrder = directNightRoute ? bus.getSeoulStartStopOrder() : null;
+        Integer chosenEndOrder = directNightRoute ? bus.getSeoulEndStopOrder() : null;
+        // Partial stop-order metadata cannot identify a unique direction.
+        if ((chosenStartOrder == null) != (chosenEndOrder == null)) throw unsupported();
         List<RouteSeed> routes = routeCandidates(bus.getTransitName()).stream()
                 .filter(candidate -> normalize(candidate.routeName()).equals(normalize(bus.getTransitName())))
                 .filter(candidate -> candidate.routeType().isBlank()
@@ -279,8 +283,14 @@ public class SeoulBusScheduleService {
                 List<Element> stops = routeStops(routeId, "route-stations");
                 for (int i = 0; i < stops.size(); i++) {
                     if (!stationIdOf(stops.get(i)).equals(stationIdOf(start))) continue;
+                    if (chosenStartOrder != null && sequence(stops.get(i)) != chosenStartOrder) continue;
+                    // The route-stop ARS code identifies the physical boarding point.
+                    // Prefer it over an alternate code returned by nearby-stop lookup.
+                    String routeStopArs = text(stops.get(i), "arsId");
+                    if (directNightRoute && !routeStopArs.isBlank() && !routeStopArs.equals(ars)) continue;
                     for (int last = i + 1; last < stops.size(); last++) {
                         if (sequence(stops.get(last)) != sequence(stops.get(last - 1)) + 1) break;
+                        if (chosenEndOrder != null && sequence(stops.get(last)) != chosenEndOrder) continue;
                         for (Element end : ends) {
                             if (!stationIdOf(stops.get(last)).equals(stationIdOf(end))) continue;
                             Binding binding = new Binding(stationIdOf(start), ars, routeId,
@@ -300,9 +310,12 @@ public class SeoulBusScheduleService {
         List<Binding> matches = (exactMatches.isEmpty() ? endpointMatches : exactMatches)
                 .stream().distinct().toList();
         if (matches.size() != 1) {
-            log.info("Seoul bus stop binding unavailable: line={}, provider={}, start={}, end={}, exact={}, endpoints={}",
+            log.info("Seoul bus stop binding unavailable: line={}, provider={}, start={}, end={}, exact={}, endpoints={}, selectedOrders={}/{}, candidates={}",
                     bus.getTransitName(), route.getProvider(), bus.getStartStation(), bus.getEndStation(),
-                    exactMatches.size(), endpointMatches.size());
+                    exactMatches.size(), endpointMatches.size(), chosenStartOrder, chosenEndOrder,
+                    matches.stream().limit(8)
+                            .map(b -> b.routeId() + ":" + b.order() + "-" + b.endOrder() + ":" + b.arsId())
+                            .toList());
             throw unsupported();
         }
         if (exactMatches.isEmpty()) {
@@ -473,6 +486,8 @@ public class SeoulBusScheduleService {
                 .localCityCode("1000")
                 .localStationId(stationIdOf(startRouteStop))
                 .localRouteId(candidate.routeId())
+                .seoulStartStopOrder(sequence(startRouteStop))
+                .seoulEndStopOrder(sequence(endRouteStop))
                 .arsId(text(candidate.originStop(), "arsId"))
                 .build();
 
