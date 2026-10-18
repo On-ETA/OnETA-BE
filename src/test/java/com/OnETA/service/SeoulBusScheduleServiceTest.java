@@ -323,6 +323,95 @@ class SeoulBusScheduleServiceTest {
     }
 
     @Test
+    void resolvesForwardBusWhenProviderOmitsIntermediateStop() {
+        nearby();
+        server.expect(queryParam("strSrch", "603"))
+                .andRespond(withSuccess(xml("<itemList><busRouteId>100100088</busRouteId>"
+                        + "<busRouteNm>603</busRouteNm><busRouteType>3</busRouteType></itemList>"),
+                        MediaType.APPLICATION_XML));
+        server.expect(queryParam("busRouteId", "100100088"))
+                .andRespond(withSuccess(xml(
+                        "<itemList><seq>1</seq><station>100000001</station><stationNm>출발역</stationNm></itemList>"
+                                + "<itemList><seq>2</seq><station>100000003</station><stationNm>중간정류장</stationNm></itemList>"
+                                + "<itemList><seq>3</seq><station>100000002</station><stationNm>도착역</stationNm></itemList>"),
+                        MediaType.APPLICATION_XML));
+        times("23:00", "05:00");
+
+        var schedule = service.resolve(route(), DAY);
+
+        assertThat(schedule.order()).isEqualTo(1);
+        assertThat(schedule.endOrder()).isEqualTo(3);
+        assertThat(schedule.last()).isEqualTo(DAY.plusDays(1).atTime(5, 0));
+        server.verify();
+    }
+
+    @Test
+    void directNightRouteUsesSeoulStopIdsDespiteDifferentDisplayNames() {
+        var original = route();
+        var originalBus = original.getSegments().get(1);
+        var bus = originalBus.toBuilder()
+                .transitName("N51")
+                .startStation("저장된 출발역").endStation("저장된 도착역")
+                .localRouteId("100100051")
+                .stations(List.of(
+                        TransitDto.RouteStation.builder().name("저장된 출발역").stationId("100000001").build(),
+                        TransitDto.RouteStation.builder().name("저장된 도착역").stationId("100000002").build()))
+                .build();
+        var direct = original.toBuilder().provider("SEOUL_NIGHT")
+                .segments(List.of(original.getSegments().get(0), bus, original.getSegments().get(2)))
+                .build();
+
+        server.expect(queryParam("tmX", "126.95"))
+                .andRespond(withSuccess(xml(station("100000001", "01001", "서울 출발정류장",
+                        "126.95", "37.55")), MediaType.APPLICATION_XML));
+        server.expect(queryParam("tmX", "126.96"))
+                .andRespond(withSuccess(xml(station("100000002", "01002", "서울 도착정류장",
+                        "126.96", "37.56")), MediaType.APPLICATION_XML));
+        server.expect(queryParam("strSrch", "N51"))
+                .andRespond(withSuccess(xml("<itemList><busRouteId>100100051</busRouteId>"
+                        + "<busRouteNm>N51</busRouteNm><busRouteType>3</busRouteType></itemList>"),
+                        MediaType.APPLICATION_XML));
+        server.expect(queryParam("busRouteId", "100100051"))
+                .andRespond(withSuccess(xml(
+                        "<itemList><seq>1</seq><station>100000001</station><stationNm>서울 출발정류장</stationNm></itemList>"
+                                + "<itemList><seq>2</seq><station>100000003</station><stationNm>중간정류장</stationNm></itemList>"
+                                + "<itemList><seq>3</seq><station>100000002</station><stationNm>서울 도착정류장</stationNm></itemList>"),
+                        MediaType.APPLICATION_XML));
+        server.expect(queryParam("arsId", "01001")).andExpect(queryParam("busRouteId", "100100051"))
+                .andRespond(withSuccess(xml(
+                        "<itemList><arsId>01001</arsId><busRouteId>100100051</busRouteId>"
+                                + "<firstBusTm>23:00</firstBusTm><lastBusTm>05:00</lastBusTm></itemList>"),
+                        MediaType.APPLICATION_XML));
+
+        var schedule = service.resolve(direct, DAY);
+
+        assertThat(schedule.routeId()).isEqualTo("100100051");
+        assertThat(schedule.first()).isEqualTo(DAY.atTime(23, 0));
+        assertThat(schedule.last()).isEqualTo(DAY.plusDays(1).atTime(5, 0));
+        server.verify();
+    }
+
+    @Test
+    void stillRejectsAmbiguousForwardStopBindings() {
+        nearby();
+        server.expect(queryParam("strSrch", "603"))
+                .andRespond(withSuccess(xml(
+                        "<itemList><busRouteId>100100088</busRouteId><busRouteNm>603</busRouteNm><busRouteType>3</busRouteType></itemList>"
+                                + "<itemList><busRouteId>100100089</busRouteId><busRouteNm>603</busRouteNm><busRouteType>3</busRouteType></itemList>"),
+                        MediaType.APPLICATION_XML));
+        for (String id : List.of("100100088", "100100089")) {
+            server.expect(queryParam("busRouteId", id))
+                    .andRespond(withSuccess(xml(
+                            "<itemList><seq>1</seq><station>100000001</station><stationNm>출발역</stationNm></itemList>"
+                                    + "<itemList><seq>2</seq><station>100000002</station><stationNm>도착역</stationNm></itemList>"),
+                            MediaType.APPLICATION_XML));
+        }
+
+        assertUnsupported(() -> service.resolve(route(), DAY));
+        server.verify();
+    }
+
+    @Test
     void resolvesExactDirectionAndCachesCurrentDaySchedule() {
         mapping(false, "3"); times("20260918053000", "20260919003000");
         var schedule = service.resolve(route(), DAY);
