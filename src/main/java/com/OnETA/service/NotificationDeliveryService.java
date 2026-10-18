@@ -60,6 +60,14 @@ public class NotificationDeliveryService {
     private static final DateTimeFormatter TIME_FORMAT = DateTimeFormatter.ofPattern("HH:mm");
 
     private Clock clock = Clock.systemUTC();
+
+    // Setter injection preserves existing direct-construction test fixtures.
+    private TransitScheduleService transitScheduleService;
+
+    @org.springframework.beans.factory.annotation.Autowired
+    void setTransitScheduleService(TransitScheduleService transitScheduleService) {
+        this.transitScheduleService = transitScheduleService;
+    }
     private final ConcurrentMap<Long, ScheduledFuture<?>> retryTasks = new ConcurrentHashMap<>();
 
     /** The outbox record is committed before FCM is called. */
@@ -239,6 +247,14 @@ public class NotificationDeliveryService {
             PushPayload payload = new TransactionTemplate(transactionManager)
                     .execute(status -> loadPushPayload(deliveryId));
             if (payload == null) return;
+            if (payload.conditionalNightBus()
+                    && (transitScheduleService == null
+                    || !transitScheduleService.confirmConditionalNightBusLive(
+                            payload.routeDetails(), payload.hardDeadlineAt()))) {
+                new TransactionTemplate(transactionManager)
+                        .executeWithoutResult(status -> expireUnverifiedNightBus(deliveryId));
+                return;
+            }
             fcmPushService.sendPushMessage(
                     payload.deviceToken(), payload.title(), payload.body(),
                     payload.hardDeadlineAt(), Map.of("type", payload.type()));
@@ -265,11 +281,23 @@ public class NotificationDeliveryService {
                 || notification.getScheduleType() == com.OnETA.entity.NotificationScheduleType.LAST_TRANSIT
                 ? "firstandlast" : "normal";
         return new PushPayload(delivery.getDeviceToken(), delivery.getTitle(), delivery.getBody(),
-                delivery.getHardDeadlineAt(), type);
+                delivery.getHardDeadlineAt(), type, notification.isConditionalNightBus(),
+                notification.isConditionalNightBus() ? notification.getRouteDetails() : null);
     }
 
     private record PushPayload(String deviceToken, String title, String body,
-                               LocalDateTime hardDeadlineAt, String type) {
+                               LocalDateTime hardDeadlineAt, String type,
+                               boolean conditionalNightBus, String routeDetails) {
+    }
+
+    private void expireUnverifiedNightBus(Long deliveryId) {
+        NotificationDelivery delivery = deliveryRepository.findByIdForUpdate(deliveryId).orElse(null);
+        if (delivery == null || delivery.getStatus() != NotificationDeliveryStatus.SENDING) return;
+        delivery.markExpired("NIGHT_BUS_LIVE_UNVERIFIED",
+                "선택한 정류장에서 실제 운행 차량을 확인하지 못해 조건부 알림을 발송하지 않았습니다.");
+        completeOneTimeIfNecessary(delivery);
+        deliveryRepository.save(delivery);
+        log.info("Conditional night bus push suppressed: deliveryId={}", deliveryId);
     }
 
     protected boolean claim(Long deliveryId) {
