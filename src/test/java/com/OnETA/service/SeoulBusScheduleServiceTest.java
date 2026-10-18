@@ -568,6 +568,100 @@ class SeoulBusScheduleServiceTest {
     }
 
     @Test
+    void kakaoNightBusChoosesShortVerifiedStopSequenceNotFullLoop() {
+        // Production-style N51 ambiguity: 29->145 and 133->145 share a stop
+        // name but represent completely different journeys.
+        server.expect(queryParam("tmX", "126.95"))
+                .andRespond(withSuccess(xml(
+                        station("100000001", "14013", "서교동", "126.9500", "37.55")
+                                + station("100000004", "14014", "서교동", "126.9501", "37.55")),
+                        MediaType.APPLICATION_XML));
+        server.expect(queryParam("tmX", "126.96"))
+                .andRespond(withSuccess(xml(station("100000002", "14099", "거리공원",
+                        "126.96", "37.56")), MediaType.APPLICATION_XML));
+        server.expect(queryParam("strSrch", "N51"))
+                .andRespond(withSuccess(xml("<itemList><busRouteId>117000002</busRouteId>"
+                        + "<busRouteNm>N51</busRouteNm><busRouteType>3</busRouteType></itemList>"),
+                        MediaType.APPLICATION_XML));
+        StringBuilder official = new StringBuilder();
+        for (int i = 1; i <= 145; i++) {
+            String stationId = i == 29 ? "100000001" : i == 133 ? "100000004"
+                    : i == 145 ? "100000002" : String.format("%09d", 200000000 + i);
+            String name = i == 29 || i == 133 ? "서교동" : i == 145 ? "거리공원"
+                    : "중간" + i;
+            official.append("<itemList><seq>").append(i)
+                    .append("</seq><station>").append(stationId)
+                    .append("</station><stationNm>").append(name)
+                    .append("</stationNm></itemList>");
+        }
+        server.expect(queryParam("busRouteId", "117000002"))
+                .andRespond(withSuccess(xml(official.toString()), MediaType.APPLICATION_XML));
+        server.expect(queryParam("arsId", "14014"))
+                .andExpect(queryParam("busRouteId", "117000002"))
+                .andRespond(withSuccess(xml("<itemList><arsId>14014</arsId><busRouteId>117000002</busRouteId>"
+                        + "<firstBusTm>23:00</firstBusTm><lastBusTm>05:00</lastBusTm></itemList>"),
+                        MediaType.APPLICATION_XML));
+
+        var original = route();
+        var names = new java.util.ArrayList<TransitDto.RouteStation>();
+        names.add(TransitDto.RouteStation.builder().name("서교동").build());
+        for (int i = 134; i <= 144; i++) {
+            names.add(TransitDto.RouteStation.builder().name(i == 137 ? "표기가 다른 정류장" : "중간" + i).build());
+        }
+        names.add(TransitDto.RouteStation.builder().name("거리공원").build());
+        var kakaoBus = original.getSegments().get(1).toBuilder()
+                .transitName("N51").startStation("서교동").endStation("거리공원")
+                .stations(names).build();
+        var kakao = original.toBuilder().segments(List.of(
+                original.getSegments().get(0), kakaoBus, original.getSegments().get(2))).build();
+
+        var result = service.resolve(kakao, DAY);
+
+        assertThat(result.order()).isEqualTo(133);
+        assertThat(result.endOrder()).isEqualTo(145);
+        assertThat(result.arsId()).isEqualTo("14014");
+        server.verify();
+    }
+
+    @Test
+    void storedDirectNightArsDisambiguatesLegacyRouteWithoutOrders() {
+        server.expect(queryParam("tmX", "126.95"))
+                .andRespond(withSuccess(xml(
+                        station("100000001", "14013", "출발역", "126.95", "37.55")
+                                + station("100000004", "14014", "출발역", "126.9501", "37.55")),
+                        MediaType.APPLICATION_XML));
+        server.expect(queryParam("tmX", "126.96"))
+                .andRespond(withSuccess(xml(station("100000002", "14099", "도착역",
+                        "126.96", "37.56")), MediaType.APPLICATION_XML));
+        server.expect(queryParam("strSrch", "N51"))
+                .andRespond(withSuccess(xml("<itemList><busRouteId>117000002</busRouteId>"
+                        + "<busRouteNm>N51</busRouteNm><busRouteType>3</busRouteType></itemList>"),
+                        MediaType.APPLICATION_XML));
+        server.expect(queryParam("busRouteId", "117000002"))
+                .andRespond(withSuccess(xml(
+                        "<itemList><seq>1</seq><station>100000001</station><stationNm>출발역</stationNm></itemList>"
+                                + "<itemList><seq>2</seq><station>100000003</station><stationNm>중간A</stationNm></itemList>"
+                                + "<itemList><seq>3</seq><station>100000002</station><stationNm>도착역</stationNm></itemList>"
+                                + "<itemList><seq>4</seq><station>100000004</station><stationNm>출발역</stationNm></itemList>"
+                                + "<itemList><seq>5</seq><station>100000005</station><stationNm>중간B</stationNm></itemList>"
+                                + "<itemList><seq>6</seq><station>100000002</station><stationNm>도착역</stationNm></itemList>"),
+                        MediaType.APPLICATION_XML));
+        server.expect(queryParam("arsId", "14014"))
+                .andExpect(queryParam("busRouteId", "117000002"))
+                .andRespond(withSuccess(xml("<itemList><arsId>14014</arsId><busRouteId>117000002</busRouteId>"
+                        + "<firstBusTm>23:00</firstBusTm><lastBusTm>05:00</lastBusTm></itemList>"),
+                        MediaType.APPLICATION_XML));
+        var original = route();
+        var bus = original.getSegments().get(1).toBuilder().transitName("N51")
+                .arsId("14014").localRouteId("117000002").build();
+        var direct = original.toBuilder().provider("SEOUL_NIGHT").segments(List.of(
+                original.getSegments().get(0), bus, original.getSegments().get(2))).build();
+
+        assertThat(service.resolve(direct, DAY).order()).isEqualTo(4);
+        server.verify();
+    }
+
+    @Test
     void resolvesExactDirectionAndCachesCurrentDaySchedule() {
         mapping(false, "3"); times("20260918053000", "20260919003000");
         var schedule = service.resolve(route(), DAY);
