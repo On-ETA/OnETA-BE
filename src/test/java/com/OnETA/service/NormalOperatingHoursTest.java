@@ -69,6 +69,32 @@ class NormalOperatingHoursTest {
         assertThat(captor.getValue().getProvider()).isEqualTo("KAKAO");
     }
 
+
+    @Test
+    void missingStopTimetableUsesVerifiedRouteOnlyForConditionalRegistration() {
+        route("KAKAO", leg("BUS", "N51", 20), leg("WALK", "", 5));
+        when(buses.resolve(any(), any())).thenThrow(
+                new GlobalException(ErrorCode.TRANSIT_SCHEDULE_UNSUPPORTED));
+        when(buses.verifyConditionalNightBoarding(any(), any())).thenReturn(true);
+
+        assertThat(service.validateNormalOperatingTime("details", LocalTime.of(0, 25), 0))
+                .isTrue();
+        verify(buses).verifyConditionalNightBoarding(any(), any());
+    }
+
+    @Test
+    void daytimeStillBlockedWhenOfficialRouteExistsWithoutStopHours() {
+        route("KAKAO", leg("BUS", "N51", 20), leg("WALK", "", 5));
+        when(buses.resolve(any(), any())).thenThrow(
+                new GlobalException(ErrorCode.TRANSIT_SCHEDULE_UNSUPPORTED));
+        when(buses.verifyConditionalNightBoarding(any(), any())).thenReturn(false);
+
+        assertThatThrownBy(() -> service.validateNormalOperatingTime("details",
+                LocalTime.of(13, 0), 0))
+                .isInstanceOfSatisfying(GlobalException.class, e ->
+                        assertThat(e.getErrorCode()).isEqualTo(ErrorCode.TRANSIT_NIGHT_BUS_OUTSIDE_HOURS));
+    }
+
     @Test
     void rejectsClosedSubwayTransferEvenWhenNightBusIsRunning() {
         route("KAKAO", leg("BUS", "N51", 20), leg("WALK", "", 5), leg("SUBWAY", "2호선", 20));

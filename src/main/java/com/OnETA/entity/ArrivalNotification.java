@@ -40,6 +40,15 @@ public class ArrivalNotification extends com.OnETA.entity.Notification {
     @Column(name = "transit_archived", nullable = false)
     private boolean transitArchived;
 
+    // Registered with route-level N-bus hours because stop times were absent.
+    // A push must be revalidated against live arrival data before delivery.
+    @Column(name = "conditional_night_bus", nullable = false)
+    private boolean conditionalNightBus;
+
+    public void setConditionalNightBus(boolean conditionalNightBus) {
+        this.conditionalNightBus = conditionalNightBus;
+    }
+
     public void archiveTransit() {
         if (scheduleType == NotificationScheduleType.NORMAL) {
             throw new IllegalStateException("일반 일정은 첫차·막차 보관 처리할 수 없습니다.");

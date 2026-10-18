@@ -386,6 +386,40 @@ class NotificationDeliveryServiceTest {
         verify(finalReminder.notification).completeOneTimeNotification();
     }
 
+
+    @Test
+    void conditionalNightBusWithoutLiveVehicleExpiresInsteadOfSendingPush() {
+        TestFixture fixture = fixture();
+        TransitScheduleService transit = mock(TransitScheduleService.class);
+        fixture.service.setTransitScheduleService(transit);
+        when(fixture.notification.isConditionalNightBus()).thenReturn(true);
+        when(fixture.notification.getRouteDetails()).thenReturn("conditional-route");
+        when(transit.confirmConditionalNightBusLive("conditional-route",
+                LocalDateTime.of(2026, 8, 10, 9, 10))).thenReturn(false);
+
+        fixture.service.processPending();
+
+        assertThat(fixture.delivery.getStatus()).isEqualTo(NotificationDeliveryStatus.EXPIRED);
+        assertThat(fixture.delivery.getLastErrorCode()).isEqualTo("NIGHT_BUS_LIVE_UNVERIFIED");
+        verifyNoInteractions(fixture.fcm);
+    }
+
+    @Test
+    void conditionalNightBusWithMatchingLiveVehicleSendsNormally() {
+        TestFixture fixture = fixture();
+        TransitScheduleService transit = mock(TransitScheduleService.class);
+        fixture.service.setTransitScheduleService(transit);
+        when(fixture.notification.isConditionalNightBus()).thenReturn(true);
+        when(fixture.notification.getRouteDetails()).thenReturn("conditional-route");
+        when(transit.confirmConditionalNightBusLive("conditional-route",
+                LocalDateTime.of(2026, 8, 10, 9, 10))).thenReturn(true);
+
+        fixture.service.processPending();
+
+        assertThat(fixture.delivery.getStatus()).isEqualTo(NotificationDeliveryStatus.SENT);
+        verify(fixture.fcm).sendPushMessage(any(), any(), any(), any(), any());
+    }
+
     @Test
     void inactiveNotificationExpiresPendingDeliveryWithoutFcmCall() {
         TestFixture fixture = fixture();
