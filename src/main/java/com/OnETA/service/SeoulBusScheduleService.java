@@ -254,15 +254,24 @@ public class SeoulBusScheduleService {
             throw unavailable();
         }
 
-        List<Element> starts = nearby(bus.getStartStation(), bus.getStartX(), bus.getStartY());
-        List<Element> ends = nearby(bus.getEndStation(), bus.getEndX(), bus.getEndY());
+        // Direct NIGHT_ONLY routes were built from Seoul API stop IDs. Prefer those
+        // IDs over display names, which can differ across the two Seoul endpoints.
+        boolean directNightRoute = "SEOUL_NIGHT".equals(route.getProvider());
+        String startId = directNightRoute ? bus.getStations().get(0).getStationId() : null;
+        String endId = directNightRoute ? bus.getStations().get(bus.getStations().size() - 1).getStationId() : null;
+        List<Element> starts = nearby(bus.getStartStation(), bus.getStartX(), bus.getStartY(), startId);
+        List<Element> ends = nearby(bus.getEndStation(), bus.getEndX(), bus.getEndY(), endId);
+        String knownRouteId = directNightRoute ? bus.getLocalRouteId() : null;
         List<RouteSeed> routes = routeCandidates(bus.getTransitName()).stream()
                 .filter(candidate -> normalize(candidate.routeName()).equals(normalize(bus.getTransitName())))
                 .filter(candidate -> candidate.routeType().isBlank()
                         || Set.of("2", "3", "4", "5", "6").contains(candidate.routeType()))
+                .filter(candidate -> knownRouteId == null || knownRouteId.isBlank()
+                        || knownRouteId.equals(candidate.routeId()))
                 .toList();
 
-        List<Binding> matches = new ArrayList<>();
+        List<Binding> exactMatches = new ArrayList<>();
+        List<Binding> endpointMatches = new ArrayList<>();
         for (Element start : starts) {
             String ars = text(start, "arsId");
             for (RouteSeed candidate : routes) {
@@ -270,29 +279,43 @@ public class SeoulBusScheduleService {
                 List<Element> stops = routeStops(routeId, "route-stations");
                 for (int i = 0; i < stops.size(); i++) {
                     if (!stationIdOf(stops.get(i)).equals(stationIdOf(start))) continue;
-                    for (Element end : ends) {
-                        int last = i + bus.getStations().size() - 1;
-                        if (last >= stops.size() || !stationIdOf(stops.get(last)).equals(stationIdOf(end))) continue;
-                        boolean same = true;
-                        for (int j = i; j <= last; j++) {
-                            if (!normalize(text(stops.get(j), "stationNm"))
-                                    .equals(normalize(bus.getStations().get(j - i).getName()))
-                                    || (j > i && sequence(stops.get(j)) != sequence(stops.get(j - 1)) + 1)
-                                    || (j > i && j < last && "Y".equals(text(stops.get(j), "transYn")))) same = false;
+                    for (int last = i + 1; last < stops.size(); last++) {
+                        if (sequence(stops.get(last)) != sequence(stops.get(last - 1)) + 1) break;
+                        for (Element end : ends) {
+                            if (!stationIdOf(stops.get(last)).equals(stationIdOf(end))) continue;
+                            Binding binding = new Binding(stationIdOf(start), ars, routeId,
+                                    sequence(stops.get(i)), stationIdOf(end), sequence(stops.get(last)));
+                            endpointMatches.add(binding);
+                            if (sameStopSequence(bus, stops, i, last)) exactMatches.add(binding);
                         }
-                        if (same) matches.add(new Binding(stationIdOf(start), ars, routeId,
-                                sequence(stops.get(i)), stationIdOf(end), sequence(stops.get(last))));
                     }
                 }
             }
         }
-        if (matches.size() != 1) throw unsupported();
+        // Keep the complete stop sequence when available. If the provider used
+        // different intermediate stop labels/counts, accept ONLY one uniquely
+        // verified forward trip on the same Seoul line between both real stops.
+        List<Binding> matches = exactMatches.isEmpty() ? endpointMatches : exactMatches;
+        if (matches.size() != 1) {
+            log.info("Seoul bus stop binding unavailable: line={}, provider={}, start={}, end={}, exact={}, endpoints={}",
+                    bus.getTransitName(), route.getProvider(), bus.getStartStation(), bus.getEndStation(),
+                    exactMatches.size(), endpointMatches.size());
+            throw unsupported();
+        }
+        if (exactMatches.isEmpty()) {
+            log.info("Seoul bus stop binding used verified endpoints: line={}, provider={}, routeId={}",
+                    bus.getTransitName(), route.getProvider(), matches.get(0).routeId());
+        }
         Binding binding = matches.get(0);
         List<Element> times = request("/stationinfo/getBustimeByStation",
                 Map.of("arsId", binding.arsId(), "busRouteId", binding.routeId()), "stations").stream()
                 .filter(e -> binding.arsId().equals(text(e, "arsId"))
                         && binding.routeId().equals(text(e, "busRouteId"))).toList();
-        if (times.size() != 1) throw unsupported();
+        if (times.size() != 1) {
+            log.info("Seoul bus stop timetable unavailable: line={}, routeId={}, arsId={}, matches={}",
+                    bus.getTransitName(), binding.routeId(), binding.arsId(), times.size());
+            throw unsupported();
+        }
         LocalDateTime first = parseTime(text(times.get(0), "firstBusTm"), day);
         LocalDateTime last = parseTime(text(times.get(0), "lastBusTm"), day);
         if (last.isBefore(first) && last.toLocalDate().equals(first.toLocalDate())) {
@@ -576,16 +599,36 @@ public class SeoulBusScheduleService {
         }
     }
 
-    private List<Element> nearby(String name, Double x, Double y) {
+    private boolean sameStopSequence(TransitDto.RouteSegment bus, List<Element> stops, int first, int last) {
+        if (last - first + 1 != bus.getStations().size()) return false;
+        for (int i = first; i <= last; i++) {
+            var supplied = bus.getStations().get(i - first);
+            String trustedId = supplied.getStationId();
+            if (trustedId != null && !trustedId.isBlank()) {
+                if (!trustedId.equals(stationIdOf(stops.get(i)))) return false;
+            } else if (!normalize(supplied.getName()).equals(normalize(stationNameOf(stops.get(i))))) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private List<Element> nearby(String name, Double x, Double y, String trustedStationId) {
         if (x == null || y == null || !Double.isFinite(x) || !Double.isFinite(y)
                 || x < 126.7 || x > 127.3 || y < 37.4 || y > 37.75) throw unsupported();
+        boolean byId = trustedStationId != null && trustedStationId.matches("[0-9]{9}");
         var result = request("/stationinfo/getStationByPos",
                 Map.of("tmX", x.toString(), "tmY", y.toString(), "radius", "100"), "stations").stream()
-                .filter(e -> normalize(stationNameOf(e)).equals(normalize(name)))
+                .filter(e -> byId ? trustedStationId.equals(stationIdOf(e))
+                        : normalize(stationNameOf(e)).equals(normalize(name)))
                 .filter(e -> text(e, "arsId").matches("[0-9]{5}") && !"00000".equals(text(e, "arsId")))
                 .filter(e -> stationIdOf(e).matches("[0-9]{9}"))
                 .filter(e -> distance(x, y, stationXOf(e), stationYOf(e)) <= 100).toList();
-        if (result.isEmpty() || result.size() > 4) throw unsupported();
+        if (result.isEmpty() || result.size() > 4) {
+            log.info("Seoul bus station mapping unavailable: station={}, byId={}, matches={}",
+                    name, byId, result.size());
+            throw unsupported();
+        }
         return result;
     }
 
