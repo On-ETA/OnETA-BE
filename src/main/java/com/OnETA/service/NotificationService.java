@@ -30,7 +30,7 @@ public class NotificationService {
 
     @Transactional
     public Long createArrivalNotification(String email, NotificationDto.CreateArrivalRequest request) {
-        validateCreateRequest(request);
+        boolean conditionalNightBus = validateCreateRequest(request);
         User user = userRepository.findForNotificationByEmail(email)
                 .orElseThrow(() -> new com.OnETA.common.exception.GlobalException(com.OnETA.common.error.ErrorCode.USER_NOT_FOUND));
 
@@ -59,6 +59,7 @@ public class NotificationService {
                 request.getScheduleType() == null ? NotificationScheduleType.NORMAL : request.getScheduleType()
         );
 
+        notification.setConditionalNightBus(conditionalNightBus);
         ArrivalNotification saved = arrivalNotificationRepository.save(notification);
         if (transit) {
             // Unmodified FE sends the selected RouteOptionResponse via routeDetails.
@@ -137,7 +138,7 @@ public class NotificationService {
                 ? notification.getTargetArrivalTime() : request.getTargetArrivalTime());
         validateRouteSchedule(effectiveType, request.getRouteDetails() == null
                 ? notification.getRouteDetails() : request.getRouteDetails());
-        validateNormalOperatingHours(effectiveType,
+        boolean conditionalNightBus = validateNormalOperatingHours(effectiveType,
                 request.getRouteDetails() == null ? notification.getRouteDetails() : request.getRouteDetails(),
                 request.getTargetArrivalTime() == null
                         ? notification.getTargetArrivalTime() : request.getTargetArrivalTime(),
@@ -151,6 +152,7 @@ public class NotificationService {
         if (requestedRepeatDays != null) notification.updateRepeatDays(requestedRepeatDays);
         notification.updateArrivalInfo(request.getTargetArrivalTime(), request.getRouteDetails());
         notification.updateScheduleType(request.getScheduleType());
+        notification.setConditionalNightBus(conditionalNightBus);
 
         // Changing the route/type or offsets invalidates its previous timetable snapshot.
         // When the user chose a specific search result, pin the new result atomically.
@@ -305,7 +307,7 @@ public class NotificationService {
         }
     }
 
-    private void validateCreateRequest(NotificationDto.CreateArrivalRequest request) {
+    private boolean validateCreateRequest(NotificationDto.CreateArrivalRequest request) {
         if (request == null || request.getReminderOffsetMinutes() == null
                 || request.getRouteDetails() == null || request.getRouteDetails().isBlank()) {
             throw new com.OnETA.common.exception.GlobalException(
@@ -315,15 +317,16 @@ public class NotificationService {
         validateTargetArrivalTime(request.getScheduleType(), request.getTargetArrivalTime());
         validateRouteSchedule(request.getScheduleType(), request.getRouteDetails());
         validateReminderOffsets(request.getReminderOffsetMinutes(), true);
-        validateNormalOperatingHours(request.getScheduleType(), request.getRouteDetails(),
+        return validateNormalOperatingHours(request.getScheduleType(), request.getRouteDetails(),
                 request.getTargetArrivalTime(), repeatDaysService.toMask(request.getRepeatDays()));
     }
 
-    private void validateNormalOperatingHours(NotificationScheduleType type, String details,
+    private boolean validateNormalOperatingHours(NotificationScheduleType type, String details,
                                              java.time.LocalTime arrivalTime, Integer repeatDays) {
         if (type == null || type == NotificationScheduleType.NORMAL) {
-            transitScheduleService.validateNormalOperatingTime(details, arrivalTime, repeatDays);
+            return transitScheduleService.validateNormalOperatingTime(details, arrivalTime, repeatDays);
         }
+        return false;
     }
 
     private void validateRouteSchedule(NotificationScheduleType type, String details) {
