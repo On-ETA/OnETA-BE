@@ -295,7 +295,10 @@ public class SeoulBusScheduleService {
         // Keep the complete stop sequence when available. If the provider used
         // different intermediate stop labels/counts, accept ONLY one uniquely
         // verified forward trip on the same Seoul line between both real stops.
-        List<Binding> matches = exactMatches.isEmpty() ? endpointMatches : exactMatches;
+        // Nearby-stop responses can repeat the same physical stop. Do not
+        // mistake duplicate identical bindings for a route-direction ambiguity.
+        List<Binding> matches = (exactMatches.isEmpty() ? endpointMatches : exactMatches)
+                .stream().distinct().toList();
         if (matches.size() != 1) {
             log.info("Seoul bus stop binding unavailable: line={}, provider={}, start={}, end={}, exact={}, endpoints={}",
                     bus.getTransitName(), route.getProvider(), bus.getStartStation(), bus.getEndStation(),
@@ -311,13 +314,36 @@ public class SeoulBusScheduleService {
                 Map.of("arsId", binding.arsId(), "busRouteId", binding.routeId()), "stations").stream()
                 .filter(e -> binding.arsId().equals(text(e, "arsId"))
                         && binding.routeId().equals(text(e, "busRouteId"))).toList();
-        if (times.size() != 1) {
-            log.info("Seoul bus stop timetable unavailable: line={}, routeId={}, arsId={}, matches={}",
-                    bus.getTransitName(), binding.routeId(), binding.arsId(), times.size());
-            throw unsupported();
+
+        LocalDateTime first;
+        LocalDateTime last;
+        if (times.size() == 1) {
+            first = parseTime(text(times.get(0), "firstBusTm"), day);
+            last = parseTime(text(times.get(0), "lastBusTm"), day);
+        } else {
+            // getBustimeByStation sometimes has no matching row even though the
+            // route/station is valid. getStaionByRoute independently provides
+            // first/last times (beginTm/lastTm) for each exact route stop order.
+            // Never replace missing stop times with route-level depot times.
+            List<Element> stopTimes = routeStops(binding.routeId(), "route-stations").stream()
+                    .filter(e -> sequence(e) == binding.order()
+                            && binding.stationId().equals(stationIdOf(e))
+                            && (text(e, "busRouteId").isBlank()
+                                    || binding.routeId().equals(text(e, "busRouteId"))))
+                    .toList();
+            if (stopTimes.size() != 1
+                    || text(stopTimes.get(0), "beginTm").isBlank()
+                    || text(stopTimes.get(0), "lastTm").isBlank()) {
+                log.info("Seoul bus stop timetable unavailable: line={}, routeId={}, arsId={}, matches={}, stopMatches={}",
+                        bus.getTransitName(), binding.routeId(), binding.arsId(),
+                        times.size(), stopTimes.size());
+                throw unsupported();
+            }
+            first = parseTime(text(stopTimes.get(0), "beginTm"), day);
+            last = parseTime(text(stopTimes.get(0), "lastTm"), day);
+            log.info("Seoul bus stop timetable resolved from route stops: line={}, routeId={}, arsId={}, order={}",
+                    bus.getTransitName(), binding.routeId(), binding.arsId(), binding.order());
         }
-        LocalDateTime first = parseTime(text(times.get(0), "firstBusTm"), day);
-        LocalDateTime last = parseTime(text(times.get(0), "lastBusTm"), day);
         if (last.isBefore(first) && last.toLocalDate().equals(first.toLocalDate())) {
             last = last.plusDays(1);
         }
