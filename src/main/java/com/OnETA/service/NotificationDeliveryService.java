@@ -280,7 +280,19 @@ public class NotificationDeliveryService {
         String type = notification.getScheduleType() == com.OnETA.entity.NotificationScheduleType.FIRST_TRANSIT
                 || notification.getScheduleType() == com.OnETA.entity.NotificationScheduleType.LAST_TRANSIT
                 ? "firstandlast" : "normal";
-        return new PushPayload(delivery.getDeviceToken(), delivery.getTitle(), delivery.getBody(),
+        // Match depot pushes: resolve the user's current registered token at dispatch time.
+        // Scheduled outbox records may contain a token that has since been rotated.
+        String currentDeviceToken = userDeviceTokenRepository.findByUserId(notification.getUser().getId())
+                .map(token -> token.getDeviceToken())
+                .filter(token -> !token.isBlank())
+                .orElseThrow(() -> new FcmPushException(
+                        "NO_DEVICE_TOKEN", "현재 등록된 기기 토큰이 없습니다.", true, null));
+        if (!currentDeviceToken.equals(delivery.getDeviceToken())) {
+            // Also record which token was used so permanent-token error cleanup is correct.
+            delivery.updateDeviceToken(currentDeviceToken);
+            deliveryRepository.save(delivery);
+        }
+        return new PushPayload(currentDeviceToken, delivery.getTitle(), delivery.getBody(),
                 delivery.getHardDeadlineAt(), type, notification.isConditionalNightBus(),
                 notification.isConditionalNightBus() ? notification.getRouteDetails() : null);
     }
