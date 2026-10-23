@@ -5,9 +5,11 @@ import com.OnETA.entity.NotificationDelivery;
 import com.OnETA.entity.NotificationDeliveryStatus;
 import com.OnETA.entity.Role;
 import com.OnETA.entity.User;
+import com.OnETA.entity.UserDeviceToken;
 import com.OnETA.repository.ArrivalNotificationRepository;
 import com.OnETA.repository.NotificationDeliveryRepository;
 import com.OnETA.repository.UserRepository;
+import com.OnETA.repository.UserDeviceTokenRepository;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -44,14 +46,19 @@ class NotificationDeliveryConcurrencyTest {
     @Autowired
     private UserRepository userRepository;
 
+    @Autowired
+    private UserDeviceTokenRepository deviceTokenRepository;
+
     @Test
     void simultaneousProcessingAllowsOnlyOneClaim() throws Exception {
         User user = userRepository.save(new User(
                 "claim-race-" + System.nanoTime() + "@example.com", "password", "tester", Role.USER));
         ArrivalNotification notification = notificationRepository.saveAndFlush(
                 new ArrivalNotification(user, "race", 10, 21, LocalTime.of(18, 30), "route"));
+        String deviceToken = "race-token-" + System.nanoTime();
+        deviceTokenRepository.saveAndFlush(new UserDeviceToken(user, deviceToken));
         NotificationDelivery delivery = new NotificationDelivery(
-                notification, LocalDate.of(2026, 8, 10), "race-token-" + System.nanoTime(),
+                notification, LocalDate.of(2026, 8, 10), deviceToken,
                 "title", "body", LocalDateTime.now(ZoneOffset.UTC),
                 LocalDateTime.now(ZoneOffset.UTC).plusMinutes(10));
         ReflectionTestUtils.setField(delivery, "attempts", 3);
