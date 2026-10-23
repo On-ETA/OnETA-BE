@@ -98,6 +98,10 @@ class NotificationDeliveryServiceTest {
         ArrivalNotification notification = mock(ArrivalNotification.class);
         when(notification.getRepeatDays()).thenReturn(21);
         when(notification.getIsActive()).thenReturn(true);
+        User user = mock(User.class);
+        when(user.getId()).thenReturn(1L);
+        when(notification.getUser()).thenReturn(user);
+        when(tokens.findByUserId(1L)).thenReturn(Optional.of(new UserDeviceToken(user, "token")));
         NotificationDelivery delivery = new NotificationDelivery(
                 notification, LocalDate.of(2026, 8, 10), "token", "title", "body",
                 java.time.LocalDateTime.of(2026, 8, 10, 9, 0),
@@ -120,6 +124,54 @@ class NotificationDeliveryServiceTest {
         verify(fcm, times(1)).sendPushMessage("token", "title", "body",
                 java.time.LocalDateTime.of(2026, 8, 10, 9, 10), java.util.Map.of("type", "normal"));
         verify(deliveries, times(2)).save(delivery);
+    }
+
+    @Test
+    void dispatchUsesCurrentTokenInsteadOfStaleScheduledToken() {
+        TestFixture fixture = fixture();
+        when(fixture.tokens.findByUserId(1L))
+                .thenReturn(Optional.of(new UserDeviceToken(fixture.user, "current-token")));
+
+        fixture.service.processDelivery(1L);
+
+        verify(fixture.fcm).sendPushMessage("current-token", "title", "body",
+                LocalDateTime.of(2026, 8, 10, 9, 10), java.util.Map.of("type", "normal"));
+        assertThat(fixture.delivery.getDeviceToken()).isEqualTo("current-token");
+        assertThat(fixture.delivery.getStatus()).isEqualTo(NotificationDeliveryStatus.SENT);
+    }
+
+    @Test
+    void retriesResolveNewlyRotatedToken() {
+        TestFixture fixture = fixture();
+        doThrow(new FcmPushException("UNAVAILABLE", "temporary", false, null))
+                .doNothing().when(fixture.fcm).sendPushMessage(any(), any(), any(), any(), any());
+
+        fixture.service.processPending();
+        assertThat(fixture.delivery.getStatus()).isEqualTo(NotificationDeliveryStatus.PENDING);
+        when(fixture.tokens.findByUserId(1L))
+                .thenReturn(Optional.of(new UserDeviceToken(fixture.user, "rotated-token")));
+        ReflectionTestUtils.setField(fixture.service, "clock",
+                Clock.fixed(Instant.parse("2026-08-10T09:00:11Z"), ZoneOffset.UTC));
+        fixture.service.processPending();
+
+        verify(fixture.fcm).sendPushMessage("token", "title", "body",
+                LocalDateTime.of(2026, 8, 10, 9, 10), java.util.Map.of("type", "normal"));
+        verify(fixture.fcm).sendPushMessage("rotated-token", "title", "body",
+                LocalDateTime.of(2026, 8, 10, 9, 10), java.util.Map.of("type", "normal"));
+        assertThat(fixture.delivery.getDeviceToken()).isEqualTo("rotated-token");
+        assertThat(fixture.delivery.getStatus()).isEqualTo(NotificationDeliveryStatus.SENT);
+    }
+
+    @Test
+    void missingCurrentTokenFailsWithoutSendingToStaleToken() {
+        TestFixture fixture = fixture();
+        when(fixture.tokens.findByUserId(1L)).thenReturn(Optional.empty());
+
+        fixture.service.processDelivery(1L);
+
+        assertThat(fixture.delivery.getStatus()).isEqualTo(NotificationDeliveryStatus.FAILED);
+        assertThat(fixture.delivery.getLastErrorCode()).isEqualTo("NO_DEVICE_TOKEN");
+        verifyNoInteractions(fixture.fcm);
     }
 
     @Test
@@ -569,6 +621,7 @@ class NotificationDeliveryServiceTest {
         when(notification.getIsActive()).thenReturn(true);
         when(notification.getUser()).thenReturn(user);
         when(user.getId()).thenReturn(1L);
+        when(tokens.findByUserId(1L)).thenReturn(Optional.of(new UserDeviceToken(user, "token")));
         NotificationDelivery delivery = new NotificationDelivery(
                 notification, LocalDate.of(2026, 8, 10), "token", "title", "body",
                 java.time.LocalDateTime.of(2026, 8, 10, 9, 0),

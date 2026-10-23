@@ -105,6 +105,11 @@ public class NotificationDelivery {
         this.deliveryPhase = phase == null ? DeliveryPhase.BASE : phase;
     }
 
+    /** Keep the outbox token in sync with the device actually selected for dispatch. */
+    public void updateDeviceToken(String deviceToken) {
+        this.deviceToken = deviceToken;
+    }
+
     public void markSending(LocalDateTime attemptedAt) {
         this.status = NotificationDeliveryStatus.SENDING;
         this.attempts++;
