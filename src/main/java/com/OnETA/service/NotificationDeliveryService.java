@@ -75,8 +75,8 @@ public class NotificationDeliveryService {
     public void prepare(ArrivalNotification notification, int estimatedDuration,
                         LocalDate deliveryDate, LocalDateTime scheduledAt) {
         int reminderOffsetMinutes = notification.getReminderOffsetMinutes();
-        if (deliveryRepository.findByNotificationIdAndDeliveryDate(
-                notification.getId(), deliveryDate).isPresent()) return;
+        if (deliveryRepository.findByNotificationIdAndDeliveryDateAndScheduleRevision(
+                notification.getId(), deliveryDate, notification.getScheduleRevision()).isPresent()) return;
         prepareWithoutDuplicateCheck(notification, estimatedDuration, deliveryDate,
                 scheduledAt, reminderOffsetMinutes);
     }
@@ -87,8 +87,9 @@ public class NotificationDeliveryService {
                         int reminderOffsetMinutes, LocalDateTime hardDeadlineAt,
                         DeliveryPhase phase) {
         if (scheduledAt == null || hardDeadlineAt == null) throw new IllegalArgumentException("scheduledAt/deadline 필수");
-        if (deliveryRepository.findByNotificationIdAndDeliveryDateAndReminderOffsetMinutesAndDeliveryPhase(
-                notification.getId(), deliveryDate, reminderOffsetMinutes, phase).isPresent()) return false;
+        if (deliveryRepository.findByNotificationIdAndDeliveryDateAndReminderOffsetMinutesAndDeliveryPhaseAndScheduleRevision(
+                notification.getId(), deliveryDate, reminderOffsetMinutes, phase,
+                notification.getScheduleRevision()).isPresent()) return false;
         boolean[] created = {false};
         userDeviceTokenRepository.findByUserId(notification.getUser().getId()).ifPresent(token -> {
             LocalDateTime departureAt = phase == DeliveryPhase.RECOVERY
@@ -110,8 +111,9 @@ public class NotificationDeliveryService {
         if (scheduledAt == null) {
             throw new IllegalArgumentException("scheduledAt은 필수입니다.");
         }
-        if (deliveryRepository.findByNotificationIdAndDeliveryDateAndReminderOffsetMinutes(
-                notification.getId(), deliveryDate, reminderOffsetMinutes).isPresent()) return;
+        if (deliveryRepository.findByNotificationIdAndDeliveryDateAndReminderOffsetMinutesAndScheduleRevision(
+                notification.getId(), deliveryDate, reminderOffsetMinutes,
+                notification.getScheduleRevision()).isPresent()) return;
 
         prepareWithoutDuplicateCheck(notification, estimatedDuration, deliveryDate,
                 scheduledAt, reminderOffsetMinutes);
@@ -277,6 +279,11 @@ public class NotificationDeliveryService {
         if (delivery == null || delivery.getStatus() != NotificationDeliveryStatus.SENDING) return null;
         ArrivalNotification notification = (ArrivalNotification)
                 org.hibernate.Hibernate.unproxy(delivery.getNotification());
+        if (delivery.getScheduleRevision() != notification.getScheduleRevision()) {
+            delivery.markExpired("SCHEDULE_REVISED", "알림 설정이 수정되어 이전 예약을 발송하지 않습니다.");
+            deliveryRepository.save(delivery);
+            return null;
+        }
         String type = notification.getScheduleType() == com.OnETA.entity.NotificationScheduleType.FIRST_TRANSIT
                 || notification.getScheduleType() == com.OnETA.entity.NotificationScheduleType.LAST_TRANSIT
                 ? "firstandlast" : "normal";
@@ -318,6 +325,11 @@ public class NotificationDeliveryService {
                 || delivery.getStatus() == NotificationDeliveryStatus.FAILED
                 || delivery.getStatus() == NotificationDeliveryStatus.EXPIRED) return false;
         if (org.hibernate.Hibernate.unproxy(delivery.getNotification()) instanceof ArrivalNotification arrival) {
+            if (delivery.getScheduleRevision() != arrival.getScheduleRevision()) {
+                delivery.markExpired("SCHEDULE_REVISED", "알림 설정이 수정되어 이전 예약을 발송하지 않습니다.");
+                deliveryRepository.save(delivery);
+                return false;
+            }
             if (arrival.isTransitArchived()) {
                 delivery.markExpired("TRANSIT_REPLACED", "첫차·막차 알림이 교체 또는 삭제되었습니다.");
                 deliveryRepository.save(delivery);
@@ -354,6 +366,11 @@ public class NotificationDeliveryService {
     protected void markSent(Long deliveryId) {
         deliveryRepository.findById(deliveryId).ifPresent(delivery -> {
             if (delivery.getStatus() == NotificationDeliveryStatus.SENDING) {
+                if (delivery.getScheduleRevision() != delivery.getNotification().getScheduleRevision()) {
+                    delivery.markExpired("SCHEDULE_REVISED", "알림 설정 변경으로 이전 발송을 종료합니다.");
+                    deliveryRepository.save(delivery);
+                    return;
+                }
                 LocalDateTime sentAt = nowUtc();
                 if (delivery.getHardDeadlineAt() == null
                         || !sentAt.isBefore(delivery.getHardDeadlineAt())) {
@@ -380,6 +397,11 @@ public class NotificationDeliveryService {
         if (delivery == null || delivery.getStatus() == NotificationDeliveryStatus.SENT
                 || delivery.getStatus() == NotificationDeliveryStatus.FAILED
                 || delivery.getStatus() == NotificationDeliveryStatus.EXPIRED) return null;
+        if (delivery.getScheduleRevision() != delivery.getNotification().getScheduleRevision()) {
+            delivery.markExpired("SCHEDULE_REVISED", "설정 변경 전 발송 실패로 새 일정을 종료하지 않습니다.");
+            deliveryRepository.save(delivery);
+            return null;
+        }
 
         String code = exception instanceof FcmPushException fcm ? fcm.getErrorCode() : "DELIVERY_ERROR";
         String message = exception.getMessage();
