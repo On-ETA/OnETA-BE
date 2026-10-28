@@ -48,6 +48,16 @@ public abstract class Notification {
     @Column(name = "last_sent_date")
     private LocalDate lastSentDate;
 
+    @Column(name = "schedule_revision", nullable = false)
+    private long scheduleRevision;
+
+    @Column(name = "last_sent_revision", nullable = false)
+    private long lastSentRevision;
+
+    // Distinguishes a completed one-time reminder from a user-disabled notification.
+    @Column(name = "auto_completed", nullable = false)
+    private boolean autoCompleted;
+
     public Notification(User user, String name, Integer reminderOffsetMinutes, Integer repeatDays) {
         this.user = user;
         this.name = name;
@@ -94,14 +104,26 @@ public abstract class Notification {
 
     public void toggleActive(Boolean isActive) {
         this.isActive = isActive;
+        this.autoCompleted = false;
+    }
+
+    /** An actual settings change makes a completed schedule eligible again. */
+    public void advanceScheduleRevision() {
+        this.scheduleRevision++;
+        if (autoCompleted) {
+            this.isActive = true;
+            this.autoCompleted = false;
+        }
     }
 
     public void updateLastSentDate(LocalDate date) {
         this.lastSentDate = date;
+        this.lastSentRevision = scheduleRevision;
     }
 
     public void completeOneTimeNotification() {
         this.isActive = false;
+        this.autoCompleted = true;
     }
 
     private int normalizeRepeatDays(Integer repeatDays) {
