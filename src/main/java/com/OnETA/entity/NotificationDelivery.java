@@ -150,6 +150,11 @@ public class NotificationDelivery {
         this.sentAt = sentAt;
     }
 
+    /** Firebase already accepted this push, even if a settings edit expired its outbox row. */
+    public void recordAcceptedAt(LocalDateTime acceptedAt) {
+        this.sentAt = acceptedAt;
+    }
+
     public Duration getDeliveryLatency() {
         if (scheduledAt == null || sentAt == null) return null;
         return Duration.between(scheduledAt, sentAt);
