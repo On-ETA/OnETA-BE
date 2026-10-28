@@ -175,6 +175,63 @@ class NotificationDeliveryServiceTest {
     }
 
     @Test
+    void revisedScheduleCreatesNewOutboxRecordEvenWhenOldRevisionWasSent() {
+        var deliveries = mock(NotificationDeliveryRepository.class);
+        var tokens = mock(UserDeviceTokenRepository.class);
+        User user = mock(User.class);
+        when(user.getId()).thenReturn(1L);
+        when(tokens.findByUserId(1L)).thenReturn(Optional.of(new UserDeviceToken(user, "token")));
+        ArrivalNotification notification = new ArrivalNotification(user, "수정된 일정", List.of(3), 0,
+                java.time.LocalTime.of(16, 0), "{}", com.OnETA.entity.NotificationScheduleType.NORMAL);
+        ReflectionTestUtils.setField(notification, "id", 185L);
+        notification.updateLastSentDate(LocalDate.of(2026, 10, 28));
+        notification.advanceScheduleRevision();
+        NotificationDeliveryService service = new NotificationDeliveryService(deliveries,
+                mock(ArrivalNotificationRepository.class), tokens, mock(FcmPushService.class),
+                mock(AddressSearchService.class), mock(PlatformTransactionManager.class), retryProperties(),
+                mock(ScheduledExecutorService.class), new Semaphore(4));
+        LocalDate date = LocalDate.of(2026, 10, 28);
+        LocalDateTime scheduled = LocalDateTime.of(2026, 10, 28, 6, 57);
+
+        service.prepare(notification, 20, date, scheduled);
+
+        ArgumentCaptor<NotificationDelivery> captor = ArgumentCaptor.forClass(NotificationDelivery.class);
+        verify(deliveries).save(captor.capture());
+        assertThat(captor.getValue().getScheduleRevision()).isEqualTo(1L);
+        verify(deliveries).findByNotificationIdAndDeliveryDateAndScheduleRevision(185L, date, 1L);
+    }
+
+    @Test
+    void supersededPendingDeliveryIsExpiredBeforeFcmSend() {
+        TestFixture fixture = fixture();
+        when(fixture.notification.getScheduleRevision()).thenReturn(1L);
+
+        fixture.service.processDelivery(1L);
+
+        assertThat(fixture.delivery.getStatus()).isEqualTo(NotificationDeliveryStatus.EXPIRED);
+        assertThat(fixture.delivery.getLastErrorCode()).isEqualTo("SCHEDULE_REVISED");
+        verifyNoInteractions(fixture.fcm);
+    }
+
+    @Test
+    void revisionChangeDuringFcmSendDoesNotDeactivateNewSchedule() {
+        TestFixture fixture = fixture();
+        var revision = new java.util.concurrent.atomic.AtomicLong(0L);
+        when(fixture.notification.getScheduleRevision()).thenAnswer(i -> revision.get());
+        doAnswer(invocation -> {
+            revision.set(1L);
+            return null;
+        }).when(fixture.fcm).sendPushMessage(any(), any(), any(), any(), any());
+
+        fixture.service.processDelivery(1L);
+
+        assertThat(fixture.delivery.getStatus()).isEqualTo(NotificationDeliveryStatus.EXPIRED);
+        assertThat(fixture.delivery.getLastErrorCode()).isEqualTo("SCHEDULE_REVISED");
+        verify(fixture.notification, never()).updateLastSentDate(any());
+        verify(fixture.notification, never()).completeOneTimeNotification();
+    }
+
+    @Test
     void transientFailureSchedulesFirstRetryAfterTwoSeconds() {
         TestFixture fixture = fixture();
         doThrow(new FcmPushException("UNAVAILABLE", "temporarily unavailable", false, null))
@@ -313,7 +370,7 @@ class NotificationDeliveryServiceTest {
         when(token.getDeviceToken()).thenReturn("token");
 
         NotificationDeliveryRepository deliveries = mock(NotificationDeliveryRepository.class);
-        when(deliveries.findByNotificationIdAndDeliveryDate(2L, LocalDate.of(2026, 8, 10)))
+        when(deliveries.findByNotificationIdAndDeliveryDateAndScheduleRevision(2L, LocalDate.of(2026, 8, 10), 0L))
                 .thenReturn(Optional.empty());
         UserDeviceTokenRepository tokens = mock(UserDeviceTokenRepository.class);
         when(tokens.findByUserId(1L)).thenReturn(Optional.of(token));
