@@ -25,6 +25,12 @@ class NotificationRevisionMigrationTest {
         String password = System.getenv("MIGRATION_DB_PASSWORD");
         assertThat(url).startsWith("jdbc:mysql://127.0.0.1:");
         assertThat(url).contains("/oneta_revision_migration");
+        // The database does not exist until this isolated CI test creates it.
+        try (Connection server = DriverManager.getConnection(
+                url.replace("/oneta_revision_migration", "/mysql"), username, password);
+             Statement setup = server.createStatement()) {
+            setup.execute("CREATE DATABASE oneta_revision_migration CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci");
+        }
 
         Flyway oldVersion = Flyway.configure()
                 .dataSource(url, username, password)
