@@ -17,6 +17,11 @@ jobs:
           --health-interval=10s
           --health-timeout=5s
           --health-retries=15
+    env:
+      MIGRATION_DB_URL: jdbc:mysql://127.0.0.1:3306/oneta_revision_migration?useSSL=false&allowPublicKeyRetrieval=true
+      MIGRATION_DB_USERNAME: root
+      MIGRATION_DB_PASSWORD: ''
+      NOTIFICATION_MIGRATION_CI: 'true'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
