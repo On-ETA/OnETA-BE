@@ -227,8 +227,24 @@ class NotificationDeliveryServiceTest {
 
         assertThat(fixture.delivery.getStatus()).isEqualTo(NotificationDeliveryStatus.EXPIRED);
         assertThat(fixture.delivery.getLastErrorCode()).isEqualTo("SCHEDULE_REVISED");
+        assertThat(fixture.delivery.getSentAt()).isEqualTo(LocalDateTime.of(2026, 8, 10, 9, 0));
         verify(fixture.notification, never()).updateLastSentDate(any());
         verify(fixture.notification, never()).completeOneTimeNotification();
+    }
+
+    @Test
+    void acceptedPushRecordsTimestampWhenRevisionIsExpiredDuringFcmCall() {
+        TestFixture fixture = fixture();
+        doAnswer(invocation -> {
+            fixture.delivery.markExpired("SCHEDULE_REVISED", "settings changed");
+            return null;
+        }).when(fixture.fcm).sendPushMessage(any(), any(), any(), any(), any());
+
+        fixture.service.processDelivery(1L);
+
+        assertThat(fixture.delivery.getStatus()).isEqualTo(NotificationDeliveryStatus.EXPIRED);
+        assertThat(fixture.delivery.getSentAt()).isEqualTo(LocalDateTime.of(2026, 8, 10, 9, 0));
+        verify(fixture.notification, never()).updateLastSentDate(any());
     }
 
     @Test
