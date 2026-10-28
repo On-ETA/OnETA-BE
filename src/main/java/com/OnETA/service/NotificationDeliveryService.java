@@ -365,12 +365,18 @@ public class NotificationDeliveryService {
 
     protected void markSent(Long deliveryId) {
         deliveryRepository.findById(deliveryId).ifPresent(delivery -> {
-            if (delivery.getStatus() == NotificationDeliveryStatus.SENDING) {
-                if (delivery.getScheduleRevision() != delivery.getNotification().getScheduleRevision()) {
+            if (delivery.getStatus() != NotificationDeliveryStatus.SENDING
+                    || delivery.getScheduleRevision() != delivery.getNotification().getScheduleRevision()) {
+                // The FCM call succeeded but settings changed before acknowledgement was stored.
+                // Preserve the expired status while recording the actual FCM acceptance.
+                if (delivery.getStatus() == NotificationDeliveryStatus.SENDING) {
                     delivery.markExpired("SCHEDULE_REVISED", "알림 설정 변경으로 이전 발송을 종료합니다.");
-                    deliveryRepository.save(delivery);
-                    return;
                 }
+                delivery.recordAcceptedAt(nowUtc());
+                deliveryRepository.save(delivery);
+                return;
+            }
+            if (delivery.getStatus() == NotificationDeliveryStatus.SENDING) {
                 LocalDateTime sentAt = nowUtc();
                 if (delivery.getHardDeadlineAt() == null
                         || !sentAt.isBefore(delivery.getHardDeadlineAt())) {
