@@ -29,6 +29,7 @@ jobs:
       APP_FIREBASE_ENABLED: 'false'
       APP_SCHEDULER_NOTIFICATION_ENABLED: 'false'
       REDIS_HOST: 127.0.0.1
+      PUBLICDATA_API_KEY: isolated-ci-no-external-requests
       GOOGLE_CLIENT_ID: isolated-ci-client
       GOOGLE_CLIENT_SECRET: ${{ github.sha }}
       MAIL_HOST: localhost
