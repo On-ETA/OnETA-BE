@@ -4,19 +4,9 @@ ALTER TABLE notifications
     ADD COLUMN last_sent_revision BIGINT NOT NULL DEFAULT 0,
     ADD COLUMN auto_completed BOOLEAN NOT NULL DEFAULT FALSE;
 
--- Recover completed one-time reminders created before completion tracking existed.
--- Only records with a successful delivery can be classified as historically completed.
-UPDATE notifications n
-SET n.auto_completed = TRUE
-WHERE n.is_active = FALSE
-  AND n.repeat_days = 0
-  AND n.last_sent_date IS NOT NULL
-  AND EXISTS (
-      SELECT 1 FROM notification_deliveries d
-      WHERE d.notification_id = n.notification_id
-        AND d.delivery_date = n.last_sent_date
-        AND d.status = 'SENT'
-  );
+-- Existing disabled schedules may have been turned off manually. Their history cannot
+-- distinguish user intent from one-time auto-completion, so leave auto_completed FALSE.
+-- Only completions after this migration are eligible for automatic reactivation.
 
 ALTER TABLE notification_deliveries
     ADD COLUMN schedule_revision BIGINT NOT NULL DEFAULT 0,
