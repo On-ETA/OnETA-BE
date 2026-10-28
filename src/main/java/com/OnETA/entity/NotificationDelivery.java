@@ -11,7 +11,7 @@ import java.time.Duration;
 
 @Entity
 @Table(name = "notification_deliveries", uniqueConstraints = @UniqueConstraint(
-        name = "uk_notification_delivery_phase", columnNames = {"notification_id", "delivery_date", "reminder_offset_minutes", "delivery_phase"}))
+        name = "uk_notification_delivery_revision", columnNames = {"notification_id", "delivery_date", "reminder_offset_minutes", "delivery_phase", "schedule_revision"}))
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class NotificationDelivery {
@@ -33,6 +33,9 @@ public class NotificationDelivery {
     @Enumerated(EnumType.STRING)
     @Column(name = "delivery_phase", nullable = false, length = 16)
     private DeliveryPhase deliveryPhase = DeliveryPhase.BASE;
+
+    @Column(name = "schedule_revision", nullable = false)
+    private long scheduleRevision;
 
     @Column(name = "device_token", nullable = false)
     private String deviceToken;
@@ -79,6 +82,7 @@ public class NotificationDelivery {
             throw new IllegalArgumentException("scheduledAt과 hardDeadlineAt은 필수입니다.");
         }
         this.notification = notification;
+        this.scheduleRevision = notification.getScheduleRevision();
         this.deliveryDate = deliveryDate;
         this.reminderOffsetMinutes = notification.getReminderOffsetMinutes();
         this.deviceToken = deviceToken;
