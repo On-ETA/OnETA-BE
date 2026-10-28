@@ -82,6 +82,92 @@ class NotificationServiceTest {
     }
 
     @Test
+    void editingCompletedOneTimeScheduleCreatesNewRevisionAndReactivatesIt() {
+        when(user.getId()).thenReturn(36L);
+        when(users.findByEmail("test@example.com")).thenReturn(Optional.of(user));
+        var notification = new ArrivalNotification(user, "회사", List.of(3), 0,
+                LocalTime.of(15, 10), "{}", NotificationScheduleType.NORMAL);
+        org.springframework.test.util.ReflectionTestUtils.setField(notification, "id", 185L);
+        notification.updateLastSentDate(java.time.LocalDate.of(2026, 10, 28));
+        notification.completeOneTimeNotification();
+        when(arrivals.findById(185L)).thenReturn(Optional.of(notification));
+
+        var request = new NotificationDto.UpdateArrivalRequest();
+        request.setTargetArrivalTime(LocalTime.of(17, 10));
+        service.updateArrivalNotification("test@example.com", 185L, request);
+
+        assertThat(notification.getIsActive()).isTrue();
+        assertThat(notification.getScheduleRevision()).isEqualTo(1L);
+        assertThat(notification.getLastSentRevision()).isZero();
+        assertThat(notification.getLastSentDate()).isEqualTo(java.time.LocalDate.of(2026, 10, 28));
+        verify(deliveries).expireSupersededDeliveries(185L, 1L);
+        verify(deliveries, never()).delete(any());
+    }
+
+    @Test
+    void savingIdenticalSettingsDoesNotBumpRevisionOrResend() {
+        when(user.getId()).thenReturn(36L);
+        when(users.findByEmail("test@example.com")).thenReturn(Optional.of(user));
+        var notification = new ArrivalNotification(user, "회사", List.of(3), 0,
+                LocalTime.of(15, 10), "{}", NotificationScheduleType.NORMAL);
+        org.springframework.test.util.ReflectionTestUtils.setField(notification, "id", 185L);
+        notification.updateLastSentDate(java.time.LocalDate.of(2026, 10, 28));
+        notification.completeOneTimeNotification();
+        when(arrivals.findById(185L)).thenReturn(Optional.of(notification));
+
+        var request = new NotificationDto.UpdateArrivalRequest();
+        request.setRouteName("회사");
+        request.setTargetArrivalTime(LocalTime.of(15, 10));
+        request.setRouteDetails("{}");
+        request.setReminderOffsetMinutes(List.of(3, 3));
+        request.setRepeatDays(List.of());
+        service.updateArrivalNotification("test@example.com", 185L, request);
+
+        assertThat(notification.getScheduleRevision()).isZero();
+        assertThat(notification.getIsActive()).isFalse();
+        verify(deliveries, never()).expireSupersededDeliveries(any(), anyLong());
+    }
+
+    @Test
+    void editingManuallyDisabledScheduleDoesNotEnableIt() {
+        when(user.getId()).thenReturn(36L);
+        when(users.findByEmail("test@example.com")).thenReturn(Optional.of(user));
+        var notification = new ArrivalNotification(user, "회사", List.of(3), 0,
+                LocalTime.of(15, 10), "{}", NotificationScheduleType.NORMAL);
+        org.springframework.test.util.ReflectionTestUtils.setField(notification, "id", 185L);
+        notification.toggleActive(false);
+        when(arrivals.findById(185L)).thenReturn(Optional.of(notification));
+
+        var request = new NotificationDto.UpdateArrivalRequest();
+        request.setTargetArrivalTime(LocalTime.of(17, 10));
+        service.updateArrivalNotification("test@example.com", 185L, request);
+
+        assertThat(notification.getScheduleRevision()).isEqualTo(1L);
+        assertThat(notification.getIsActive()).isFalse();
+    }
+
+    @Test
+    void turningScheduleBackOnAllowsAnotherAttemptWithoutRepeatedToggleBumps() {
+        when(user.getId()).thenReturn(36L);
+        when(users.findByEmail("test@example.com")).thenReturn(Optional.of(user));
+        var notification = new ArrivalNotification(user, "회사", List.of(3), 0,
+                LocalTime.of(15, 10), "{}", NotificationScheduleType.NORMAL);
+        org.springframework.test.util.ReflectionTestUtils.setField(notification, "id", 185L);
+        notification.toggleActive(false);
+        notification.updateLastSentDate(java.time.LocalDate.of(2026, 10, 28));
+        when(arrivals.findById(185L)).thenReturn(Optional.of(notification));
+
+        var request = new NotificationDto.ToggleStatusRequest();
+        request.setIsActive(true);
+        service.toggleStatus("test@example.com", 185L, request);
+        service.toggleStatus("test@example.com", 185L, request);
+
+        assertThat(notification.getIsActive()).isTrue();
+        assertThat(notification.getScheduleRevision()).isEqualTo(1L);
+        verify(deliveries, times(1)).expireSupersededDeliveries(185L, 1L);
+    }
+
+    @Test
     void arrivalTimeOnlyUpdateChecksSavedNightRouteAndLeavesOldTimeOnRejection() {
         when(user.getId()).thenReturn(1L);
         when(users.findByEmail("test@example.com")).thenReturn(Optional.of(user));
