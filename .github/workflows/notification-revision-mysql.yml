@@ -1,0 +1,61 @@
+name: Notification revision MySQL regression
+on:
+  pull_request:
+    branches: [main]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ALLOW_EMPTY_PASSWORD: 'yes'
+          MYSQL_DATABASE: oneta_test
+        ports: ['3306:3306']
+        options: >-
+          --health-cmd="mysqladmin ping --silent"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=15
+    env:
+      MIGRATION_DB_URL: jdbc:mysql://127.0.0.1:3306/oneta_revision_migration?useSSL=false&allowPublicKeyRetrieval=true
+      MIGRATION_DB_USERNAME: root
+      MIGRATION_DB_PASSWORD: ''
+      NOTIFICATION_MIGRATION_CI: 'true'
+      DB_URL: jdbc:mysql://127.0.0.1:3306/oneta_test?useSSL=false&allowPublicKeyRetrieval=true
+      DB_USERNAME: root
+      DB_PASSWORD: ''
+      SPRING_PROFILES_ACTIVE: prod
+      APP_FIREBASE_ENABLED: 'false'
+      APP_SCHEDULER_NOTIFICATION_ENABLED: 'false'
+      REDIS_HOST: 127.0.0.1
+      PUBLICDATA_API_KEY: isolated-ci-no-external-requests
+      GOOGLE_CLIENT_ID: isolated-ci-client
+      GOOGLE_CLIENT_SECRET: ${{ github.sha }}
+      MAIL_HOST: localhost
+      MAIL_PORT: '2525'
+      MAIL_USERNAME: ci
+      MAIL_PASSWORD: ''
+      JWT_SECRET: ${{ github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+      - run: chmod +x gradlew
+      - name: Run isolated MySQL regression
+        run: |
+          ./gradlew test \
+            --tests 'com.OnETA.migration.NotificationRevisionMigrationTest' \
+            --tests 'com.OnETA.repository.NotificationDeliveryRepositoryTest' \
+            --tests 'com.OnETA.repository.ArrivalNotificationRepositoryTest' \
+            --tests 'com.OnETA.service.NotificationDeliveryConcurrencyTest'
+      - name: Show sanitized test failure details
+        if: failure()
+        run: |
+          echo 'Failure causes from Gradle test XML:'
+          grep -Rh -m 2 -A 14 'PlaceholderResolutionException' build/test-results/test/ | head -n 100 || true
+          echo 'Additional failure summary:'
+          grep -Rh -m 1 '<failure' build/test-results/test/ | cut -c1-250 | head -n 30 || true

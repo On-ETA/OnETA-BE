@@ -91,6 +91,34 @@ verify(dependencies.delivery, times(1)).prepare(eq(notification), eq(30), eq(Loc
     }
 
     @Test
+    void editedNotificationCanBeScheduledAgainOnSameDay() {
+        ArrivalNotification notification = notification(21);
+        LocalDate today = LocalDate.of(2026, 8, 10);
+        when(notification.getLastSentDate()).thenReturn(today);
+        when(notification.getLastSentRevision()).thenReturn(0L);
+        when(notification.getScheduleRevision()).thenReturn(1L);
+        SchedulerDependencies dependencies = dependencies(notification, at("2026-08-10T18:00"));
+
+        dependencies.scheduler.scheduleArrivalNotifications();
+
+        verify(dependencies.delivery).prepare(eq(notification), eq(30), eq(today), any(LocalDateTime.class));
+    }
+
+    @Test
+    void alreadySentRevisionStillSkipsDuplicateSameDay() {
+        ArrivalNotification notification = notification(21);
+        LocalDate today = LocalDate.of(2026, 8, 10);
+        when(notification.getLastSentDate()).thenReturn(today);
+        when(notification.getLastSentRevision()).thenReturn(1L);
+        when(notification.getScheduleRevision()).thenReturn(1L);
+        SchedulerDependencies dependencies = dependencies(notification, at("2026-08-10T18:00"));
+
+        dependencies.scheduler.scheduleArrivalNotifications();
+
+        verify(dependencies.delivery, never()).prepare(any(), anyInt(), any(), any());
+    }
+
+    @Test
     void oneTimeNotificationAfterTodaysTimeWaitsUntilTomorrow() {
         ArrivalNotification notification = notification(0);
         SchedulerDependencies dependencies = dependencies(notification, at("2026-08-10T18:20"));

@@ -92,7 +92,7 @@ public class NotificationScheduler {
                     processScheduledTransit(notification, today, now, zoneId);
                     continue;
                 }
-                if (today.equals(notification.getLastSentDate())) continue;
+                if (alreadySentThisRevision(notification, today)) continue;
                 if (!isTodayCandidate(notification, now, oneTime)) continue;
                 int estimatedDuration =
                         transitApiService.getRealTimeDuration(notification.getRouteDetails());
@@ -155,7 +155,7 @@ public class NotificationScheduler {
 
     private void processScheduledServiceDay(ArrivalNotification notification, LocalDate today,
                                             LocalDateTime now, ZoneId zoneId) {
-        if (today.equals(notification.getLastSentDate())) return;
+        if (alreadySentThisRevision(notification, today)) return;
         if (!repeatDaysService.includes(notification.getRepeatDays(), today.getDayOfWeek())
                 && notification.getRepeatDays() != 0) return;
         TransitScheduleService.Decision decision = transitScheduleService.evaluate(notification, today, now, zoneId);
@@ -193,6 +193,11 @@ public class NotificationScheduler {
                     toUtc(scheduledAt, zoneId), offset,
                     toUtc(reminderDeadline, zoneId), decision.phase());
         }
+    }
+
+    private boolean alreadySentThisRevision(ArrivalNotification notification, LocalDate date) {
+        return date.equals(notification.getLastSentDate())
+                && notification.getLastSentRevision() == notification.getScheduleRevision();
     }
 
     private LocalDateTime toUtc(LocalDateTime value, ZoneId zoneId) {
