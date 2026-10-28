@@ -51,3 +51,10 @@ jobs:
             --tests 'com.OnETA.repository.NotificationDeliveryRepositoryTest' \
             --tests 'com.OnETA.repository.ArrivalNotificationRepositoryTest' \
             --tests 'com.OnETA.service.NotificationDeliveryConcurrencyTest'
+      - name: Show sanitized test failure details
+        if: failure()
+        run: |
+          echo 'Failure causes from Gradle test XML:'
+          grep -Rh -m 2 -A 14 'PlaceholderResolutionException' build/test-results/test/ | head -n 100 || true
+          echo 'Additional failure summary:'
+          grep -Rh -m 1 '<failure' build/test-results/test/ | cut -c1-250 | head -n 30 || true
