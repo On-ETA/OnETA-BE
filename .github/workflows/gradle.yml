@@ -32,6 +32,9 @@ jobs:
       - name: Build
         run: ./gradlew clean build -x test
 
+      - name: Verify address lookup fallback and legacy search compatibility
+        run: ./gradlew test --tests 'com.OnETA.service.AddressSearchServiceTest'
+
       - name: Verify required transit query parameters
         run: ./gradlew test --tests 'com.OnETA.common.exception.GlobalExceptionHandlerTest'
 
