@@ -39,10 +39,19 @@ public class AddressSearchService {
 
     }
 
+    // [1] Search only complete street/lot-number inputs with the address provider.
+    // Regular place names keep the existing keyword search path and cost.
+    private static final java.util.regex.Pattern ADDRESS_NUMBER =
+            java.util.regex.Pattern.compile("[가-힣0-9·]+(?:대로|로|길|동|읍|면|리)\\s*\\d+(?:-\\d+)?(?=\\s|$)");
+    private static final java.util.regex.Pattern ATTACHED_NUMBER =
+            java.util.regex.Pattern.compile("(?<=[로길동읍면리])(?=\\d+(?:-\\d+)?(?:\\s|$))");
+
     private static RestTemplate createClient() {
         SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
-        factory.setConnectTimeout(3000);
-        factory.setReadTimeout(5000);
+        // [2] Each external call is bounded: 1s connect + 2s read.
+        // A fallback adds one more bounded request; no automatic retries.
+        factory.setConnectTimeout(1000);
+        factory.setReadTimeout(2000);
         return new RestTemplate(factory);
     }
 
@@ -53,40 +62,87 @@ public class AddressSearchService {
         if (restApiKey.isBlank()) {
             throw new GlobalException(ErrorCode.ADDRESS_SEARCH_UNAVAILABLE);
         }
-        URI uri = UriComponentsBuilder.fromUriString("https://dapi.kakao.com/v2/local/search/keyword.json")
-                .queryParam("query", "{keyword}").queryParam("size", 5).queryParam("sort", "accuracy")
-                .queryParam("rect", "124,33,132,39")
-                .encode().buildAndExpand(keyword.strip()).toUri();
+
+        String query = keyword.strip();
         HttpHeaders headers = new HttpHeaders();
         headers.set(HttpHeaders.AUTHORIZATION, "KakaoAK " + restApiKey.trim());
 
-        try {
-            com.OnETA.common.ExternalApiCallCounter.record("KAKAO", "keyword-search");
-            String body = restTemplate.exchange(uri, HttpMethod.GET,
-                    new HttpEntity<>(headers), String.class).getBody();
-            JsonNode root = objectMapper.readTree(body);
-            if (root == null || !root.path("documents").isArray()) {
-                throw new IllegalArgumentException("Invalid search response");
+        if (ADDRESS_NUMBER.matcher(query).find()) {
+            // [3] Normalize only a number attached to a street/lot suffix.
+            // If address lookup fails, is malformed, or yields no usable entries,
+            // retain the old place-keyword lookup as a recovery path.
+            String addressQuery = ATTACHED_NUMBER.matcher(query).replaceAll(" ");
+            try {
+                List<SearchResponse> matches = lookup(addressQuery, headers, true);
+                if (!matches.isEmpty()) return matches;
+            } catch (Exception ignored) {
+                // Never leak provider errors or credentials. Keyword search is next.
             }
-            List<SearchResponse> results = new ArrayList<>();
-            for (JsonNode item : root.path("documents")) {
-                String name = item.path("place_name").asText("").strip();
-                String address = item.path("road_address_name").asText("").strip();
+        }
+
+        try {
+            return lookup(query, headers, false);
+        } catch (Exception ignored) {
+            throw new GlobalException(ErrorCode.ADDRESS_SEARCH_UNAVAILABLE);
+        }
+    }
+
+    private List<SearchResponse> lookup(String keyword, HttpHeaders headers, boolean addressSearch)
+            throws Exception {
+        String endpoint = addressSearch
+                ? "https://dapi.kakao.com/v2/local/search/address.json"
+                : "https://dapi.kakao.com/v2/local/search/keyword.json";
+        UriComponentsBuilder builder = UriComponentsBuilder.fromUriString(endpoint)
+                .queryParam("query", "{keyword}").queryParam("size", 5);
+        if (!addressSearch) {
+            builder.queryParam("sort", "accuracy").queryParam("rect", "124,33,132,39");
+        }
+        URI uri = builder.encode().buildAndExpand(keyword).toUri();
+        com.OnETA.common.ExternalApiCallCounter.record("KAKAO",
+                addressSearch ? "address-search" : "keyword-search");
+        String body = restTemplate.exchange(uri, HttpMethod.GET,
+                new HttpEntity<>(headers), String.class).getBody();
+        JsonNode root = objectMapper.readTree(body);
+        if (root == null || !root.path("documents").isArray()) {
+            throw new IllegalArgumentException("Invalid search response");
+        }
+
+        List<SearchResponse> results = new ArrayList<>();
+        for (JsonNode item : root.path("documents")) {
+            String address;
+            String name;
+            if (addressSearch) {
+                // [4] Address documents have no place_name. Reuse the same
+                // {name, address, x, y} contract required by all frontends.
+                address = item.path("road_address").path("address_name").asText("").strip();
                 if (address.isBlank()) address = item.path("address_name").asText("").strip();
+                if (address.isBlank()) address = item.path("address").path("address_name").asText("").strip();
+                name = item.path("road_address").path("building_name").asText("").strip();
+                if (name.isBlank()) name = address;
+            } else {
+                name = item.path("place_name").asText("").strip();
+                address = item.path("road_address_name").asText("").strip();
+                if (address.isBlank()) address = item.path("address_name").asText("").strip();
+            }
+            if (name.isBlank() || name.length() > 50 || address.isBlank() || address.length() > 255) {
+                // Long full addresses can still be returned with a short safe display label.
+                if (addressSearch && address.length() <= 255 && !address.isBlank()) {
+                    name = address.length() > 50 ? address.substring(0, 50) : address;
+                } else continue;
+            }
+            try {
                 double x = Double.parseDouble(item.path("x").asText());
                 double y = Double.parseDouble(item.path("y").asText());
-                if (name.isBlank() || name.length() > 50 || address.isBlank() || address.length() > 255
-                        || !Double.isFinite(x) || !Double.isFinite(y)
+                if (!Double.isFinite(x) || !Double.isFinite(y)
                         || x < 124 || x > 132 || y < 33 || y > 39) continue;
                 SearchResponse result = new SearchResponse(name, address, x, y);
                 if (!results.contains(result)) results.add(result);
                 if (results.size() == 5) break;
+            } catch (NumberFormatException ignored) {
+                // [5] Skip invalid provider coordinates rather than losing valid matches.
             }
-            return List.copyOf(results);
-        } catch (Exception e) {
-            // Do not expose provider errors, request headers or credentials to clients.
-            throw new GlobalException(ErrorCode.ADDRESS_SEARCH_UNAVAILABLE);
         }
+        return List.copyOf(results);
     }
 
     /** Best-effort lookup for push labels; a provider failure must not block delivery. */
