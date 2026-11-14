@@ -98,6 +98,113 @@ class AddressSearchServiceTest {
         verifyNoInteractions(client);
     }
     @Test
+    void compactStreetNumberSearchesNormalizedAddressFirstWithoutKeywordCall() {
+        when(client.exchange(any(URI.class), eq(HttpMethod.GET), any(HttpEntity.class), eq(String.class)))
+                .thenAnswer(invocation -> {
+                    URI uri = invocation.getArgument(0);
+                    assertThat(uri.getPath()).isEqualTo("/v2/local/search/address.json");
+                    assertThat(java.net.URLDecoder.decode(uri.getRawQuery(), java.nio.charset.StandardCharsets.UTF_8))
+                            .contains("query=샘플4라길 33", "size=5");
+                    assertThat(((HttpEntity<?>) invocation.getArgument(2)).getHeaders().getFirst("Authorization"))
+                            .isEqualTo("KakaoAK secret");
+                    return ResponseEntity.ok("""
+                            {"documents":[{"address_type":"ROAD_ADDR","address_name":"서울 가상구 샘플4라길 33",
+                              "road_address":{"address_name":"서울 가상구 샘플4라길 33","building_name":"샘플건물"},
+                              "x":"127.1","y":"37.5"}]}
+                            """);
+                });
+
+        var results = service.search("샘플4라길33");
+        assertThat(results).hasSize(1);
+        assertThat(results.get(0).name()).isEqualTo("샘플건물");
+        assertThat(results.get(0).address()).isEqualTo("서울 가상구 샘플4라길 33");
+        assertThat(results.get(0).x()).isEqualTo(127.1);
+        verify(client, times(1)).exchange(any(URI.class), eq(HttpMethod.GET),
+                any(HttpEntity.class), eq(String.class));
+    }
+
+    @Test
+    void addressProviderFailureRecoversThroughOriginalKeywordSearch() {
+        java.util.List<String> paths = new java.util.ArrayList<>();
+        when(client.exchange(any(URI.class), eq(HttpMethod.GET), any(HttpEntity.class), eq(String.class)))
+                .thenAnswer(invocation -> {
+                    URI uri = invocation.getArgument(0);
+                    paths.add(uri.getPath());
+                    if (uri.getPath().endsWith("/address.json")) {
+                        throw new org.springframework.web.client.ResourceAccessException("address timeout");
+                    }
+                    assertThat(java.net.URLDecoder.decode(uri.getRawQuery(), java.nio.charset.StandardCharsets.UTF_8))
+                            .contains("query=샘플4라길33");
+                    return ResponseEntity.ok("""
+                            {"documents":[{"place_name":"기존 장소","road_address_name":"주소",
+                              "x":"127.0","y":"37.0"}]}
+                            """);
+                });
+        assertThat(service.search("샘플4라길33")).extracting(com.OnETA.dto.UserAddressDto.SearchResponse::name)
+                .containsExactly("기존 장소");
+        assertThat(paths).containsExactly("/v2/local/search/address.json", "/v2/local/search/keyword.json");
+    }
+
+    @Test
+    void emptyOrMalformedAddressResponseFallsBackToKeywordSearch() {
+        for (String addressBody : new String[]{"{\"documents\":[]}", "{\"invalid\":true}"}) {
+            reset(client);
+            java.util.List<String> paths = new java.util.ArrayList<>();
+            when(client.exchange(any(URI.class), eq(HttpMethod.GET), any(HttpEntity.class), eq(String.class)))
+                    .thenAnswer(invocation -> {
+                        URI uri = invocation.getArgument(0);
+                        paths.add(uri.getPath());
+                        return ResponseEntity.ok(uri.getPath().endsWith("/address.json")
+                                ? addressBody : "{\"documents\":[]}");
+                    });
+            assertThat(service.search("샘플4라길 33")).isEmpty();
+            assertThat(paths).containsExactly("/v2/local/search/address.json", "/v2/local/search/keyword.json");
+        }
+    }
+
+    @Test
+    void bothProvidersFailWithExistingSafeErrorCode() {
+        when(client.exchange(any(URI.class), eq(HttpMethod.GET), any(HttpEntity.class), eq(String.class)))
+                .thenThrow(new RuntimeException("provider secret"));
+        assertThatThrownBy(() -> service.search("샘플4라길33"))
+                .isInstanceOfSatisfying(GlobalException.class, e -> {
+                    assertThat(e.getErrorCode()).isEqualTo(ErrorCode.ADDRESS_SEARCH_UNAVAILABLE);
+                    assertThat(e.getMessage()).doesNotContain("secret");
+                });
+        verify(client, times(2)).exchange(any(URI.class), eq(HttpMethod.GET),
+                any(HttpEntity.class), eq(String.class));
+    }
+
+    @Test
+    void invalidAddressCandidatesAreSkippedRatherThanReturned() {
+        when(client.exchange(any(URI.class), eq(HttpMethod.GET), any(HttpEntity.class), eq(String.class)))
+                .thenReturn(ResponseEntity.ok("""
+                        {"documents":[
+                          {"address_name":"주소A","x":"NaN","y":"37.0"},
+                          {"address_name":"주소B","x":"127.0","y":"37.0"},
+                          {"address_name":"주소C","x":"139","y":"37.0"}]}
+                        """));
+        assertThat(service.search("샘플4라길33"))
+                .extracting(com.OnETA.dto.UserAddressDto.SearchResponse::address)
+                .containsExactly("주소B");
+        verify(client, times(1)).exchange(any(URI.class), eq(HttpMethod.GET),
+                any(HttpEntity.class), eq(String.class));
+    }
+
+    @Test
+    void ordinaryPlaceNameDoesNotCallAddressProvider() {
+        when(client.exchange(any(URI.class), eq(HttpMethod.GET), any(HttpEntity.class), eq(String.class)))
+                .thenAnswer(invocation -> {
+                    URI uri = invocation.getArgument(0);
+                    assertThat(uri.getPath()).isEqualTo("/v2/local/search/keyword.json");
+                    return ResponseEntity.ok("{\"documents\":[]}");
+                });
+        assertThat(service.search("대학교")).isEmpty();
+        verify(client, times(1)).exchange(any(URI.class), eq(HttpMethod.GET),
+                any(HttpEntity.class), eq(String.class));
+    }
+
+    @Test
     void reverseGeocodePrefersRoadAddressAndFallsBackToJibun() {
         when(client.exchange(any(URI.class), eq(HttpMethod.GET), any(HttpEntity.class), eq(String.class)))
                 .thenAnswer(invocation -> {
