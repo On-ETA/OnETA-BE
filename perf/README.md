@@ -73,6 +73,8 @@ intentionally want to permanently delete the lab's local MySQL data.
 - The Actuator endpoint is on app port 9091 inside `lab_internal` ONLY.
   `http://127.0.0.1:18080/actuator/prometheus` must NOT expose metrics.
 - Prometheus has no host-mapped port; Grafana reads it inside Docker.
+- Nginx explicitly returns HTTP 404 for `/actuator/**` on the local API port.
+- Run `powershell -NoProfile -ExecutionPolicy Bypass -File perf/verify-stage2.ps1` to verify health, Grafana provisioning and the Prometheus target.
 - Prometheus retains three days of monitoring samples.
 - Grafana and Prometheus have separate named volumes; `down` preserves them.
 
