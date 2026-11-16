@@ -6,8 +6,8 @@ Do not merge this branch to main without separately reviewing the changes.
 
 ## Safety model
 
-- Compose uses a Docker `internal: true` network, with no outbound network route.
-- Application HTTP port is bound to the local host only (`127.0.0.1:18080`).
+- Only OnETA, MySQL and Redis are on a Docker `internal: true` network (no outbound route).
+- A dedicated Nginx proxy bridges local ingress to the isolated app. Only the proxy\n  joins the host-facing bridge, binding `127.0.0.1:18080`; the app has **no** public network.
 - MySQL and Redis have no published ports. Never use an RDS URL or real data.
 - Only the `apm` profile is supported. A BeanFactoryPostProcessor rejects
   unexpected DB addresses / Redis hosts / Firebase activation before database initialization.
@@ -49,7 +49,7 @@ docker compose --env-file perf/.env.apm -f perf/compose.yaml exec mysql mysql -u
 # SELECT installed_rank, version, success FROM flyway_schema_history ORDER BY installed_rank;
 ```
 
-The app is reachable only from the same PC at http://127.0.0.1:18080.
+The isolated app is reachable through the localhost-only Nginx gateway at http://127.0.0.1:18080.
 An authenticated API test user and mock API responses are not configured yet.
 
 ## Stop safely
