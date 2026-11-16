@@ -1,0 +1,56 @@
+name: oneta-apm-lab
+
+services:
+  mysql:
+    image: mysql:8.0.44
+    environment:
+      MYSQL_DATABASE: oneta_apm
+      MYSQL_USER: oneta_lab
+      MYSQL_PASSWORD: ${LAB_DB_PASSWORD:?run-perf-prepare-script}
+      MYSQL_ROOT_PASSWORD: ${LAB_DB_ROOT_PASSWORD:?run-perf-prepare-script}
+    volumes:
+      - mysql_data:/var/lib/mysql
+    networks:
+      - lab_internal
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 --silent"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 20s
+
+  redis:
+    image: redis:7.4-alpine
+    networks:
+      - lab_internal
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  app:
+    build:
+      context: ..
+      dockerfile: perf/Dockerfile.apm
+    environment:
+      SPRING_PROFILES_ACTIVE: apm
+      LAB_DB_PASSWORD: ${LAB_DB_PASSWORD:?run-perf-prepare-script}
+      LAB_JWT_SECRET: ${LAB_JWT_SECRET:?run-perf-prepare-script}
+      APP_FIREBASE_ENABLED: "false"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:18080:8080"
+    networks:
+      - lab_internal
+
+networks:
+  lab_internal:
+    internal: true
+
+volumes:
+  mysql_data:

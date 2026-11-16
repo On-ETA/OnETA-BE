@@ -1,0 +1,95 @@
+# Local Docker-only performance lab. Never combine with prod/dev/local profiles.
+spring:
+  config:
+    activate:
+      on-profile: apm
+  application:
+    name: OnETA-APM-LAB
+  datasource:
+    url: "jdbc:mysql://mysql:3306/oneta_apm?useSSL=false&allowPublicKeyRetrieval=true"
+    username: oneta_lab
+    password: ${LAB_DB_PASSWORD}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 5
+      connection-timeout: 30000
+  jpa:
+    database-platform: org.hibernate.dialect.MySQLDialect
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        show_sql: false
+        format_sql: false
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: false
+  data:
+    redis:
+      host: redis
+      port: 6379
+  security:
+    oauth2:
+      client:
+        registration:
+          google:
+            client-id: offline-lab-not-a-real-oauth-client
+            client-secret: offline-lab-not-a-real-oauth-secret
+            scope:
+              - profile
+              - email
+  mail:
+    host: 127.0.0.1
+    port: 2525
+
+server:
+  port: 8080
+
+jwt:
+  secret: ${LAB_JWT_SECRET}
+  access-expiration: 3600000
+  refresh-expiration: 1209600000
+
+api:
+  seoul-bus:
+    service-key: DISABLED_IN_LOCAL_LAB
+odsay:
+  api:
+    key: DISABLED_IN_LOCAL_LAB
+    url: http://unconfigured-mock:8080/v1/api/searchPubTransPathR
+    referer: http://localhost:18080/
+  schedule:
+    url: http://unconfigured-mock:8080/v1/api
+publicdata:
+  api:
+    key: DISABLED_IN_LOCAL_LAB
+  seoul:
+    schedule-key: DISABLED_IN_LOCAL_LAB
+    url: http://unconfigured-mock:8080
+  tago:
+    url: http://unconfigured-mock:8080
+  subway:
+    url: http://unconfigured-mock:8080
+
+app:
+  firebase:
+    enabled: false
+  scheduler:
+    notification:
+      enabled: false
+
+dev-user:
+  enabled: false
+
+springdoc:
+  api-docs:
+    enabled: false
+  swagger-ui:
+    enabled: false
+
+logging:
+  level:
+    org.springframework.security: WARN
+    org.hibernate.SQL: WARN
