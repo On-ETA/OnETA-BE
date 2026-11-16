@@ -51,3 +51,8 @@ application-*.yml
 
 # Firebase 프라이빗 키 파일 무시
 firebase-service-account.json
+
+# Local APM lab: allow safe profile, never commit machine secrets.
+!src/main/resources/application-apm.yml
+perf/.env.apm
+perf/.env.apm.local

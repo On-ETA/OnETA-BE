@@ -1,0 +1,25 @@
+FROM eclipse-temurin:17-jdk-alpine AS build
+WORKDIR /work
+
+# Copy only lab-safe resources: local/prod secrets are not in the build context.
+COPY gradlew build.gradle settings.gradle ./
+COPY gradle ./gradle
+COPY src/main/java ./src/main/java
+COPY src/main/resources/application.yml ./src/main/resources/application.yml
+COPY src/main/resources/application-apm.yml ./src/main/resources/application-apm.yml
+COPY src/main/resources/db ./src/main/resources/db
+
+RUN chmod +x gradlew \
+    && ./gradlew --no-daemon bootJar -x test \
+    && JAR="$(find build/libs -maxdepth 1 -name '*.jar' ! -name '*-plain.jar' -print -quit)" \
+    && test -n "$JAR" \
+    && cp "$JAR" /tmp/oneta-apm.jar
+
+FROM eclipse-temurin:17-jre-alpine
+RUN addgroup -S oneta && adduser -S oneta -G oneta
+WORKDIR /opt/oneta
+COPY --from=build --chown=oneta:oneta /tmp/oneta-apm.jar ./app.jar
+USER oneta
+EXPOSE 8080
+ENV SPRING_PROFILES_ACTIVE=apm
+ENTRYPOINT ["java", "-jar", "/opt/oneta/app.jar"]
