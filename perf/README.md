@@ -1,7 +1,7 @@
-# OnETA isolated APM lab — Stage 1
+# OnETA isolated APM lab — Stages 1 and 2
 
-This branch only prepares an **isolated local Docker lab** (OnETA + MySQL + Redis).
-JMeter, Prometheus, Grafana and SQL test scenarios belong to later stages.
+This branch prepares an **isolated local Docker APM lab** (OnETA + MySQL + Redis + Prometheus + Grafana).
+JMeter and SQL performance test scenarios belong to the next stage.
 Do not merge this branch to main without separately reviewing the changes.
 
 ## Safety model
@@ -61,12 +61,34 @@ docker compose --env-file perf/.env.apm -f perf/compose.yaml down
 This retains the local MySQL volume. Use `down -v` **only** if you
 intentionally want to permanently delete the lab's local MySQL data.
 
+## Stage 2: monitoring
+
+- Grafana: http://127.0.0.1:13000 (ONLY local loopback).
+- Username: `admin`.
+- Password: generated only on the machine in `perf/.env.apm` (do not commit or share).
+- To copy just the password to the Windows clipboard:
+  `((Get-Content perf/.env.apm | Where-Object { $_ -like "LAB_GRAFANA_PASSWORD=*" }) -split "=",2)[1] | Set-Clipboard`
+  Run this from PowerShell in the repo root. Paste only in your Grafana login.
+- Open **Dashboards → OnETA Lab → OnETA | Local APM**.
+- The Actuator endpoint is on app port 9091 inside `lab_internal` ONLY.
+  `http://127.0.0.1:18080/actuator/prometheus` must NOT expose metrics.
+- Prometheus has no host-mapped port; Grafana reads it inside Docker.
+- Prometheus retains three days of monitoring samples.
+- Grafana and Prometheus have separate named volumes; `down` preserves them.
+
+Check the Prometheus scrape target from within its container:
+```powershell
+docker compose --env-file perf/.env.apm -f perf/compose.yaml exec prometheus wget -qO- "http://localhost:9090/api/v1/targets"
+```
+The `oneta-apm` target must report `health: up`. If the app has not
+received any HTTP requests yet, some request metrics will be absent.
+The provisioned dashboard reflects only real data, not sample numbers.
+
 ## Validation status
 
-Code and configuration are prepared in this branch; Docker has **not** been
-run on the user's PC. Validate `docker compose config`, container startup,
-Flyway migrations, external-egress isolation and all scheduler disabling on
-the actual PC before using JMeter or claiming measurements.
+Stage 1 previously passed local Docker startup and Flyway v22 checks on the user's PC.
+For Stage 2, verify management scraping, Prometheus target health, Grafana
+provisioning and port/network isolation before using JMeter or claiming measurements.
 
 ## Key source edits
 
@@ -74,3 +96,6 @@ the actual PC before using JMeter or claiming measurements.
 - `SchedulingConfiguration.java`: keep scheduling in non-`apm` profiles.
 - `ApmLabSafetyConfiguration.java`: fail-fast checks for isolated settings.
 - `application-apm.yml`: local DB/Redis and non-production fake credentials.
+
+- `ApmLabMonitoringSecurityConfiguration.java`: allow read-only scraping on isolated management port.
+- `perf/prometheus/`, `perf/grafana/`: service provisioning, baseline metrics dashboard.

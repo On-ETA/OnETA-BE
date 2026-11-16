@@ -43,6 +43,9 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    # Management port 9091 is only reachable on the internal Docker network.
+    expose:
+      - "9091"
     networks:
       - lab_internal
 
@@ -58,6 +61,42 @@ services:
       - lab_internal
       - lab_access
 
+  prometheus:
+    image: prom/prometheus:v3.2.1
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=3d
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    networks:
+      - lab_internal
+    depends_on:
+      - app
+
+  grafana:
+    image: grafana/grafana:12.2.1
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${LAB_GRAFANA_PASSWORD:?run-perf-prepare-script}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      GF_SECURITY_DISABLE_GRAVATAR: "true"
+    ports:
+      - "127.0.0.1:13000:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    networks:
+      - lab_internal
+      - lab_access
+    depends_on:
+      - prometheus
+
 networks:
   lab_internal:
     internal: true
@@ -66,3 +105,5 @@ networks:
 
 volumes:
   mysql_data:
+  prometheus_data:
+  grafana_data:

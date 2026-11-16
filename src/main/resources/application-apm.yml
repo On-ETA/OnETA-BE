@@ -15,7 +15,7 @@ spring:
       minimum-idle: 5
       connection-timeout: 30000
   jpa:
-    database-platform: org.hibernate.dialect.MySQLDialect
+    open-in-view: false
     hibernate:
       ddl-auto: validate
     properties:
@@ -88,6 +88,24 @@ springdoc:
     enabled: false
   swagger-ui:
     enabled: false
+
+# Never publish the management HTTP port on Docker host or via Nginx.
+management:
+  server:
+    port: 9091
+  endpoints:
+    access:
+      max-permitted: read-only
+    web:
+      exposure:
+        include: health,metrics,prometheus
+  endpoint:
+    health:
+      show-details: never
+  metrics:
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true
 
 logging:
   level:

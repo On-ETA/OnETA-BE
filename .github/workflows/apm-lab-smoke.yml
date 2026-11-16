@@ -6,6 +6,8 @@ on:
     paths:
       - 'perf/**'
       - 'src/main/resources/application-apm.yml'
+      - 'src/main/java/com/OnETA/config/ApmLabMonitoringSecurityConfiguration.java'
+      - 'build.gradle'
       - 'src/main/java/com/OnETA/config/ApmLabSafetyConfiguration.java'
       - 'src/main/java/com/OnETA/config/SchedulingConfiguration.java'
       - 'src/main/java/com/OnETA/OnETAApplication.java'
@@ -27,6 +29,7 @@ jobs:
             echo "LAB_DB_PASSWORD=$(openssl rand -hex 24)"
             echo "LAB_DB_ROOT_PASSWORD=$(openssl rand -hex 24)"
             echo "LAB_JWT_SECRET=$(openssl rand -hex 32)"
+            echo "LAB_GRAFANA_PASSWORD=$(openssl rand -hex 32)"
           } > perf/.env.apm
 
       - name: Check Compose configuration
@@ -53,11 +56,27 @@ jobs:
           test "$(docker network inspect oneta-apm-lab_lab_internal --format '{{.Internal}}')" = true
           code=$(curl --silent --output /dev/null --write-out '%{http_code}' http://127.0.0.1:18080/api/bus-routes/search?keyword=test)
           test "$code" != 000
+          # Host gateway must never expose management metrics.
+          mcode=$(curl --silent --output /dev/null --write-out '%{http_code}' http://127.0.0.1:18080/actuator/prometheus)
+          test "$mcode" != 200
+          # Prometheus discovers Actuator only on the Docker private network.
+          up=0
+          for i in $(seq 1 30); do
+            if docker compose --env-file perf/.env.apm -f perf/compose.yaml exec -T prometheus wget -qO- 'http://localhost:9090/api/v1/query?query=up%7Bjob%3D%22oneta-apm%22%7D' | grep -q '"value":\[[^]]*,"1"\]'; then
+              up=1
+              break
+            fi
+            sleep 3
+          done
+          test "$up" -eq 1
+          # Grafana is locally reachable without exposing its administrative API to the internet.
+          gcode=$(curl --silent --output /dev/null --write-out '%{http_code}' http://127.0.0.1:13000/api/health)
+          test "$gcode" = 200
           docker compose --env-file perf/.env.apm -f perf/compose.yaml exec -T mysql sh -c 'MYSQL_PWD="$MYSQL_PASSWORD" mysql -u "$MYSQL_USER" "$MYSQL_DATABASE" -e "SELECT version, success FROM flyway_schema_history ORDER BY installed_rank DESC LIMIT 3;"'
 
       - name: Print safe diagnostics if startup fails
         if: failure()
-        run: docker compose --env-file perf/.env.apm -f perf/compose.yaml logs --tail=100 app mysql
+        run: docker compose --env-file perf/.env.apm -f perf/compose.yaml logs --tail=100 app mysql prometheus grafana
 
       - name: Remove ephemeral resources
         if: always()
