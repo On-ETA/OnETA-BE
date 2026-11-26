@@ -24,6 +24,8 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import org.springframework.transaction.support.TransactionTemplate;
+import java.util.concurrent.Future;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.*;
@@ -48,6 +50,9 @@ class NotificationDeliveryConcurrencyTest {
 
     @Autowired
     private UserDeviceTokenRepository deviceTokenRepository;
+
+    @Autowired
+    private TransactionTemplate transactionTemplate;
 
     @Test
     void simultaneousProcessingAllowsOnlyOneClaim() throws Exception {
@@ -79,6 +84,72 @@ class NotificationDeliveryConcurrencyTest {
         assertThat(result.getAttempts()).isEqualTo(4);
         assertThat(result.getStatus()).isEqualTo(NotificationDeliveryStatus.SENT);
         verify(fcmPushService, times(1)).sendPushMessage(any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void editWhileFcmIsSendingPreservesNewRevisionAndAcceptedTimestamp() throws Exception {
+        User user = userRepository.save(new User(
+                "revision-send-race-" + System.nanoTime() + "@example.com",
+                "password", "tester", Role.USER));
+        ArrivalNotification notification = notificationRepository.saveAndFlush(
+                new ArrivalNotification(user, "original", 10, 21, LocalTime.of(18, 30), "route"));
+        String token = "revision-send-token-" + System.nanoTime();
+        deviceTokenRepository.saveAndFlush(new UserDeviceToken(user, token));
+        LocalDate date = LocalDate.of(2026, 10, 28);
+        LocalDateTime scheduled = LocalDateTime.now(ZoneOffset.UTC);
+        NotificationDelivery oldDelivery = deliveryRepository.saveAndFlush(
+                new NotificationDelivery(notification, date, 10, token, "original", "original",
+                        scheduled, scheduled.plusMinutes(10)));
+        Long oldId = oldDelivery.getId();
+        Long notificationId = notification.getId();
+
+        CountDownLatch enteredFcm = new CountDownLatch(1);
+        CountDownLatch releaseFcm = new CountDownLatch(1);
+        doAnswer(invocation -> {
+            enteredFcm.countDown();
+            if (!releaseFcm.await(20, TimeUnit.SECONDS)) {
+                throw new IllegalStateException("FCM test hold timed out");
+            }
+            return null;
+        }).when(fcmPushService).sendPushMessage(any(), any(), any(), any(), any());
+
+        ExecutorService caller = Executors.newSingleThreadExecutor();
+        try {
+            Future<?> sending = caller.submit(() -> deliveryService.processDelivery(oldId));
+            assertThat(enteredFcm.await(10, TimeUnit.SECONDS)).isTrue();
+
+            Long revisedId = transactionTemplate.execute(status -> {
+                ArrivalNotification current = notificationRepository.findById(notificationId).orElseThrow();
+                current.updateArrivalInfo(LocalTime.of(19, 30), null);
+                current.advanceScheduleRevision();
+                deliveryRepository.expireSupersededDeliveries(notificationId, current.getScheduleRevision());
+                NotificationDelivery revised = deliveryRepository.saveAndFlush(
+                        new NotificationDelivery(current, date, 10, token, "revised", "revised",
+                                scheduled.plusMinutes(20), scheduled.plusMinutes(30)));
+                return revised.getId();
+            });
+
+            assertThat(deliveryRepository.findById(oldId).orElseThrow().getStatus())
+                    .isEqualTo(NotificationDeliveryStatus.EXPIRED);
+            releaseFcm.countDown();
+            sending.get(20, TimeUnit.SECONDS);
+
+            NotificationDelivery oldResult = deliveryRepository.findById(oldId).orElseThrow();
+            NotificationDelivery newResult = deliveryRepository.findById(revisedId).orElseThrow();
+            ArrivalNotification current = notificationRepository.findById(notificationId).orElseThrow();
+            assertThat(oldResult.getStatus()).isEqualTo(NotificationDeliveryStatus.EXPIRED);
+            assertThat(oldResult.getLastErrorCode()).isEqualTo("SCHEDULE_REVISED");
+            assertThat(oldResult.getSentAt()).isNotNull();
+            assertThat(newResult.getStatus()).isEqualTo(NotificationDeliveryStatus.PENDING);
+            assertThat(newResult.getScheduleRevision()).isEqualTo(1L);
+            assertThat(current.getScheduleRevision()).isEqualTo(1L);
+            assertThat(current.getLastSentDate()).isNull();
+            assertThat(current.getTargetArrivalTime()).isEqualTo(LocalTime.of(19, 30));
+            verify(fcmPushService, times(1)).sendPushMessage(any(), any(), any(), any(), any());
+        } finally {
+            releaseFcm.countDown();
+            caller.shutdownNow();
+        }
     }
 
     private void processWhenReleased(CountDownLatch start, Long deliveryId) {

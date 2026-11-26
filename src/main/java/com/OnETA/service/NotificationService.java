@@ -12,6 +12,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
+import java.util.Objects;
+import java.util.TreeSet;
+import tools.jackson.databind.json.JsonMapper;
 import java.util.stream.Collectors;
 
 @Service
@@ -19,6 +22,8 @@ import java.util.stream.Collectors;
 @lombok.extern.slf4j.Slf4j
 @Transactional(readOnly = true)
 public class NotificationService {
+
+    private static final JsonMapper ROUTE_MAPPER = JsonMapper.builder().build();
 
     private final ArrivalNotificationRepository arrivalNotificationRepository;
     private final NotificationRepository notificationRepository;
@@ -147,8 +152,20 @@ public class NotificationService {
 
         Integer requestedRepeatDays = isTransit(effectiveType) ? Integer.valueOf(0)
                 : request.getRepeatDays() == null ? null : repeatDaysService.toMask(request.getRepeatDays());
-        notification.updateCommonInfo(isTransit(effectiveType) ? transitName(effectiveType) : request.getRouteName(),
-                request.getReminderOffsetMinutes());
+        String updatedName = isTransit(effectiveType) ? transitName(effectiveType) : request.getRouteName();
+        boolean scheduleChanged = (updatedName != null && !Objects.equals(updatedName, notification.getName()))
+                || (request.getTargetArrivalTime() != null
+                    && !Objects.equals(request.getTargetArrivalTime(), notification.getTargetArrivalTime()))
+                || (request.getRouteDetails() != null
+                    && !sameRouteContent(request.getRouteDetails(), notification.getRouteDetails()))
+                || (request.getReminderOffsetMinutes() != null
+                    && !new TreeSet<>(request.getReminderOffsetMinutes())
+                            .equals(new TreeSet<>(notification.getReminderOffsetMinutesList())))
+                || (requestedRepeatDays != null && !requestedRepeatDays.equals(notification.getRepeatDays()))
+                || (request.getScheduleType() != null && request.getScheduleType() != notification.getScheduleType());
+        boolean reviseNormal = scheduleChanged && (effectiveType == NotificationScheduleType.NORMAL
+                || notification.getScheduleType() == NotificationScheduleType.NORMAL);
+        notification.updateCommonInfo(updatedName, request.getReminderOffsetMinutes());
         if (requestedRepeatDays != null) notification.updateRepeatDays(requestedRepeatDays);
         notification.updateArrivalInfo(request.getTargetArrivalTime(), request.getRouteDetails());
         notification.updateScheduleType(request.getScheduleType());
@@ -167,6 +184,11 @@ public class NotificationService {
                             java.time.ZoneId.of("Asia/Seoul"));
                 }
             }
+        }
+        if (reviseNormal) {
+            notification.advanceScheduleRevision();
+            // Keep SENT history, but prevent old pending/retrying reminders from using stale settings.
+            deliveryRepository.expireSupersededDeliveries(notification.getId(), notification.getScheduleRevision());
         }
     }
 
@@ -262,7 +284,23 @@ public class NotificationService {
         // The route and arrival time are validated when created or updated.
         // A status-only change must not fail just because an external timetable
         // API is temporarily unavailable (e.g. ODsay quota exhaustion).
+        boolean reactivated = Boolean.FALSE.equals(notification.getIsActive())
+                && Boolean.TRUE.equals(request.getIsActive());
         notification.toggleActive(request.getIsActive());
+        if (reactivated && notification.getScheduleType() == NotificationScheduleType.NORMAL) {
+            notification.advanceScheduleRevision();
+            deliveryRepository.expireSupersededDeliveries(notification.getId(), notification.getScheduleRevision());
+        }
+    }
+
+    private boolean sameRouteContent(String left, String right) {
+        if (Objects.equals(left, right)) return true;
+        if (left == null || right == null) return false;
+        try {
+            return Objects.equals(ROUTE_MAPPER.readTree(left), ROUTE_MAPPER.readTree(right));
+        } catch (RuntimeException invalidJson) {
+            return false;
+        }
     }
 
     private void validateCategoryLimit(Long userId, NotificationScheduleType type) {

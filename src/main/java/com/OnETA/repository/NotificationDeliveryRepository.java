@@ -27,11 +27,25 @@ public interface NotificationDeliveryRepository extends JpaRepository<Notificati
             """)
     int expireReplacedTransitDeliveries(@Param("ids") List<Long> notificationIds);
 
-    Optional<NotificationDelivery> findByNotificationIdAndDeliveryDate(Long notificationId, LocalDate deliveryDate);
-    Optional<NotificationDelivery> findByNotificationIdAndDeliveryDateAndReminderOffsetMinutes(
-            Long notificationId, LocalDate deliveryDate, int reminderOffsetMinutes);
-    Optional<NotificationDelivery> findByNotificationIdAndDeliveryDateAndReminderOffsetMinutesAndDeliveryPhase(
-            Long notificationId, LocalDate deliveryDate, int reminderOffsetMinutes, DeliveryPhase deliveryPhase);
+    Optional<NotificationDelivery> findByNotificationIdAndDeliveryDateAndScheduleRevision(
+            Long notificationId, LocalDate deliveryDate, long scheduleRevision);
+    Optional<NotificationDelivery> findByNotificationIdAndDeliveryDateAndReminderOffsetMinutesAndScheduleRevision(
+            Long notificationId, LocalDate deliveryDate, int reminderOffsetMinutes, long scheduleRevision);
+    Optional<NotificationDelivery> findByNotificationIdAndDeliveryDateAndReminderOffsetMinutesAndDeliveryPhaseAndScheduleRevision(
+            Long notificationId, LocalDate deliveryDate, int reminderOffsetMinutes,
+            DeliveryPhase deliveryPhase, long scheduleRevision);
+
+    @org.springframework.data.jpa.repository.Modifying(flushAutomatically = true)
+    @Query("""
+            update NotificationDelivery d set d.status = com.OnETA.entity.NotificationDeliveryStatus.EXPIRED,
+                d.nextAttemptAt = null, d.lastErrorCode = 'SCHEDULE_REVISED',
+                d.lastErrorMessage = '알림 설정 변경으로 이전 예약을 취소했습니다.'
+            where d.notification.id = :notificationId and d.scheduleRevision < :currentRevision
+              and d.status in (com.OnETA.entity.NotificationDeliveryStatus.PENDING,
+                               com.OnETA.entity.NotificationDeliveryStatus.SENDING)
+            """)
+    int expireSupersededDeliveries(@Param("notificationId") Long notificationId,
+                                  @Param("currentRevision") long currentRevision);
     boolean existsByNotificationIdAndDeliveryDateAndDeliveryPhase(
             Long notificationId, LocalDate deliveryDate, DeliveryPhase deliveryPhase);
 

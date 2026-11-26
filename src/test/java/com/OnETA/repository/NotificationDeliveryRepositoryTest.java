@@ -32,6 +32,9 @@ class NotificationDeliveryRepositoryTest {
     @Autowired
     private UserRepository userRepository;
 
+    @Autowired
+    private jakarta.persistence.EntityManager entityManager;
+
     @Test
     void queryReturnsOnlyProcessableDeliveriesAndExcludesFreshSending() {
         LocalDateTime now = LocalDateTime.of(2026, 8, 10, 9, 0);
@@ -64,6 +67,44 @@ class NotificationDeliveryRepositoryTest {
                         duePending.getId(), newPending.getId());
         assertThat(result).extracting(NotificationDelivery::getId)
                 .doesNotContain(freshSending.getId(), futurePending.getId(), sent.getId(), failed.getId());
+    }
+
+    @Test
+    void revisedDeliveryPreservesSentHistoryAndExpiresOnlyOldPendingRows() {
+        User user = userRepository.save(new User(
+                "revision-" + System.nanoTime() + "@example.com", "password", "tester", Role.USER));
+        ArrivalNotification notification = notificationRepository.saveAndFlush(
+                new ArrivalNotification(user, "edited", java.util.List.of(3, 10), 21,
+                        LocalTime.of(18, 30), "route"));
+        LocalDate date = LocalDate.of(2026, 10, 28);
+        LocalDateTime scheduled = LocalDateTime.of(2026, 10, 28, 9, 0);
+        LocalDateTime deadline = scheduled.plusMinutes(10);
+        NotificationDelivery sent = new NotificationDelivery(notification, date, 3,
+                "old-token", "old", "old", scheduled, deadline);
+        sent.markSentAt(scheduled);
+        sent = deliveryRepository.saveAndFlush(sent);
+        NotificationDelivery oldPending = new NotificationDelivery(notification, date, 10,
+                "old-token", "old", "old", scheduled, deadline);
+        oldPending = deliveryRepository.saveAndFlush(oldPending);
+        Long sentId = sent.getId(), pendingId = oldPending.getId();
+
+        notification.advanceScheduleRevision();
+        notificationRepository.saveAndFlush(notification);
+        assertThat(deliveryRepository.expireSupersededDeliveries(notification.getId(), 1L)).isEqualTo(1);
+        NotificationDelivery revised = new NotificationDelivery(notification, date, 3,
+                "current-token", "new", "new", scheduled.plusMinutes(20), deadline.plusMinutes(20));
+        revised = deliveryRepository.saveAndFlush(revised);
+
+        assertThat(revised.getScheduleRevision()).isEqualTo(1L);
+        assertThat(revised.getStatus()).isEqualTo(NotificationDeliveryStatus.PENDING);
+        assertThat(deliveryRepository.findByNotificationIdAndDeliveryDateAndReminderOffsetMinutesAndScheduleRevision(
+                notification.getId(), date, 3, 1L)).isPresent();
+        entityManager.flush();
+        entityManager.clear();
+        assertThat(deliveryRepository.findById(sentId).orElseThrow().getStatus())
+                .isEqualTo(NotificationDeliveryStatus.SENT);
+        assertThat(deliveryRepository.findById(pendingId).orElseThrow().getStatus())
+                .isEqualTo(NotificationDeliveryStatus.EXPIRED);
     }
 
     @Test
